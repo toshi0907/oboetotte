@@ -10,8 +10,19 @@ import com.toshi0907.oboetotte.data.Task
 object ReminderScheduler {
     const val EXTRA_TASK_ID = "task_id"
     const val EXTRA_IS_TEST = "is_test"
+    const val EXTRA_SNOOZE_MINUTES = "snooze_minutes"
     private const val TEST_REQUEST_CODE = -1
     const val TEST_DELAY_SECONDS = 5L
+
+    data class SnoozeOption(val label: String, val minutes: Long)
+
+    val SNOOZE_OPTIONS = listOf(
+        SnoozeOption("15分後", 15),
+        SnoozeOption("30分後", 30),
+        SnoozeOption("1時間後", 60),
+        SnoozeOption("3時間後", 180),
+        SnoozeOption("1日後", 24 * 60)
+    )
 
     fun canScheduleExactAlarms(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
@@ -69,6 +80,25 @@ object ReminderScheduler {
         return PendingIntent.getBroadcast(
             context,
             taskId.toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /** 通知のスヌーズボタン用。[optionIndex]は[SNOOZE_OPTIONS]内のインデックス(リクエストコードの重複回避用)。 */
+    fun snoozePendingIntent(
+        context: Context,
+        taskId: Long,
+        option: SnoozeOption,
+        optionIndex: Int
+    ): PendingIntent {
+        val intent = Intent(context, SnoozeReceiver::class.java).apply {
+            putExtra(EXTRA_TASK_ID, taskId)
+            putExtra(EXTRA_SNOOZE_MINUTES, option.minutes)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            taskId.toInt() * 10 + optionIndex,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
