@@ -128,6 +128,7 @@ class MainActivity : ComponentActivity() {
                     val allTasks by taskViewModel.allTasks.collectAsState()
                     val lists by taskViewModel.lists.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
+                    val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
                     val lifecycleOwner = LocalLifecycleOwner.current
                     var exactAlarmPermissionGranted by remember {
@@ -149,6 +150,8 @@ class MainActivity : ComponentActivity() {
                         lists = lists,
                         selectedListId = selectedListId,
                         onSelectList = taskViewModel::selectList,
+                        showCompleted = showCompleted,
+                        onSetShowCompleted = taskViewModel::setShowCompleted,
                         onAddList = taskViewModel::addList,
                         onRenameList = taskViewModel::renameList,
                         onDeleteList = taskViewModel::deleteList,
@@ -226,6 +229,8 @@ fun TaskScreen(
     lists: List<TaskList>,
     selectedListId: Long?,
     onSelectList: (Long?) -> Unit,
+    showCompleted: Boolean,
+    onSetShowCompleted: (Boolean) -> Unit,
     onAddList: (String) -> Unit,
     onRenameList: (TaskList, String) -> Unit,
     onDeleteList: (TaskList) -> Unit,
@@ -294,6 +299,13 @@ fun TaskScreen(
                         selected = selectedListId == list.id,
                         onClick = { onSelectList(list.id) },
                         label = { Text(list.name) }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = showCompleted,
+                        onClick = { onSetShowCompleted(!showCompleted) },
+                        label = { Text("完了済みを表示") }
                     )
                 }
                 item {
@@ -847,6 +859,8 @@ fun TaskScreenPreview() {
             lists = listOf(TaskList(id = 1, name = "買い物")),
             selectedListId = null,
             onSelectList = {},
+            showCompleted = true,
+            onSetShowCompleted = {},
             onAddList = {},
             onRenameList = { _, _ -> },
             onDeleteList = {},
