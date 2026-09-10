@@ -68,6 +68,7 @@ import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -199,6 +200,15 @@ private fun combineDateAndTime(dateMillisUtc: Long, hour: Int, minute: Int): Lon
     val localDate = Instant.ofEpochMilli(dateMillisUtc).atZone(ZoneId.of("UTC")).toLocalDate()
     return localDate.atTime(LocalTime.of(hour, minute))
         .atZone(ZoneId.systemDefault())
+        .toInstant()
+        .toEpochMilli()
+}
+
+// DatePickerの`initialSelectedDateMillis`はUTC 0時基準の値を期待するため、
+// 端末のローカルタイムゾーンでの「今日」をそのままepoch millisにするとズレる。
+private fun todayAsDatePickerMillis(): Long {
+    return LocalDate.now(ZoneId.systemDefault())
+        .atStartOfDay(ZoneId.of("UTC"))
         .toInstant()
         .toEpochMilli()
 }
@@ -764,7 +774,9 @@ fun EditTaskDialog(
     )
 
     if (showDatePicker) {
-        val dateState = rememberDatePickerState(initialSelectedDateMillis = dueAt)
+        val dateState = rememberDatePickerState(
+            initialSelectedDateMillis = dueAt ?: todayAsDatePickerMillis()
+        )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
@@ -786,7 +798,13 @@ fun EditTaskDialog(
     }
 
     pendingDateMillis?.let { dateMillis ->
-        val timeState = rememberTimePickerState(is24Hour = true)
+        val defaultTime = dueAt?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalTime() }
+            ?: LocalTime.now()
+        val timeState = rememberTimePickerState(
+            initialHour = defaultTime.hour,
+            initialMinute = defaultTime.minute,
+            is24Hour = true
+        )
         AlertDialog(
             onDismissRequest = { pendingDateMillis = null },
             title = { Text("時刻を選択") },
