@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,13 +15,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -42,6 +46,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import java.time.Instant
 import java.time.LocalTime
@@ -57,8 +62,16 @@ class MainActivity : ComponentActivity() {
             OboetotteTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     val tasks by taskViewModel.tasks.collectAsState()
+                    val lists by taskViewModel.lists.collectAsState()
+                    val selectedListId by taskViewModel.selectedListId.collectAsState()
                     TaskScreen(
                         tasks = tasks,
+                        lists = lists,
+                        selectedListId = selectedListId,
+                        onSelectList = taskViewModel::selectList,
+                        onAddList = taskViewModel::addList,
+                        onRenameList = taskViewModel::renameList,
+                        onDeleteList = taskViewModel::deleteList,
                         onAddTask = taskViewModel::addTask,
                         onToggleDone = taskViewModel::toggleDone,
                         onUpdateTask = taskViewModel::updateTask,
@@ -94,6 +107,12 @@ private fun formatDueAt(millis: Long): String {
 @Composable
 fun TaskScreen(
     tasks: List<Task>,
+    lists: List<TaskList>,
+    selectedListId: Long?,
+    onSelectList: (Long?) -> Unit,
+    onAddList: (String) -> Unit,
+    onRenameList: (TaskList, String) -> Unit,
+    onDeleteList: (TaskList) -> Unit,
     onAddTask: (String) -> Unit,
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, String, Long?) -> Unit,
@@ -103,6 +122,7 @@ fun TaskScreen(
     var input by remember { mutableStateOf("") }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
+    var showManageLists by remember { mutableStateOf(false) }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -111,6 +131,34 @@ fun TaskScreen(
                 .padding(16.dp)
         ) {
             Text(text = "Oboetotte", style = MaterialTheme.typography.headlineMedium)
+
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    FilterChip(
+                        selected = selectedListId == null,
+                        onClick = { onSelectList(null) },
+                        label = { Text("すべて") }
+                    )
+                }
+                items(lists, key = { it.id }) { list ->
+                    FilterChip(
+                        selected = selectedListId == list.id,
+                        onClick = { onSelectList(list.id) },
+                        label = { Text(list.name) }
+                    )
+                }
+                item {
+                    AssistChip(
+                        onClick = { showManageLists = true },
+                        label = { Text("リストを編集") }
+                    )
+                }
+            }
 
             Row(
                 modifier = Modifier
@@ -204,6 +252,97 @@ fun TaskScreen(
             onDismiss = { deletingTask = null }
         )
     }
+
+    if (showManageLists) {
+        ManageListsDialog(
+            lists = lists,
+            onAddList = onAddList,
+            onRenameList = onRenameList,
+            onDeleteList = onDeleteList,
+            onDismiss = { showManageLists = false }
+        )
+    }
+}
+
+@Composable
+fun ManageListsDialog(
+    lists: List<TaskList>,
+    onAddList: (String) -> Unit,
+    onRenameList: (TaskList, String) -> Unit,
+    onDeleteList: (TaskList) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var newListName by remember { mutableStateOf("") }
+    var renamingListId by remember { mutableStateOf<Long?>(null) }
+    var renameText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("リストを編集") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                lists.forEach { list ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (renamingListId == list.id) {
+                            OutlinedTextField(
+                                value = renameText,
+                                onValueChange = { renameText = it },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            TextButton(onClick = {
+                                onRenameList(list, renameText)
+                                renamingListId = null
+                            }) {
+                                Text("保存")
+                            }
+                        } else {
+                            Text(
+                                text = list.name,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        renamingListId = list.id
+                                        renameText = list.name
+                                    }
+                            )
+                            TextButton(onClick = { onDeleteList(list) }) {
+                                Text("削除")
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    OutlinedTextField(
+                        value = newListName,
+                        onValueChange = { newListName = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("新しいリスト名") },
+                        singleLine = true
+                    )
+                    TextButton(onClick = {
+                        onAddList(newListName)
+                        newListName = ""
+                    }) {
+                        Text("追加")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("閉じる")
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -336,6 +475,12 @@ fun TaskScreenPreview() {
                 Task(id = 1, title = "牛乳を買う", dueAt = System.currentTimeMillis() + 86_400_000),
                 Task(id = 2, title = "掃除機をかける", isDone = true)
             ),
+            lists = listOf(TaskList(id = 1, name = "買い物")),
+            selectedListId = null,
+            onSelectList = {},
+            onAddList = {},
+            onRenameList = { _, _ -> },
+            onDeleteList = {},
             onAddTask = {},
             onToggleDone = {},
             onUpdateTask = { _, _, _ -> },
