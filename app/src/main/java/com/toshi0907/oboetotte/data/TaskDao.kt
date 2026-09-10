@@ -32,4 +32,10 @@ interface TaskDao {
 
     @Delete
     suspend fun delete(task: Task)
+
+    @Insert
+    suspend fun insertAll(tasks: List<Task>)
+
+    @Query("DELETE FROM tasks")
+    suspend fun deleteAll()
 }
