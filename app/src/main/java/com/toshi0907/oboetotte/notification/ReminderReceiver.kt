@@ -22,6 +22,11 @@ import kotlinx.coroutines.launch
 class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_TEST, false)) {
+            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。")
+            return
+        }
+
         val taskId = intent.getLongExtra(ReminderScheduler.EXTRA_TASK_ID, -1L)
         if (taskId == -1L) return
 
@@ -38,7 +43,7 @@ class ReminderReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun showNotification(context: Context, taskId: Long, title: String) {
+    private fun showNotification(context: Context, notificationId: Long, title: String) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -57,7 +62,7 @@ class ReminderReceiver : BroadcastReceiver() {
         }
         val contentIntent = PendingIntent.getActivity(
             context,
-            taskId.toInt(),
+            notificationId.toInt(),
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -79,10 +84,11 @@ class ReminderReceiver : BroadcastReceiver() {
         ) {
             return
         }
-        NotificationManagerCompat.from(context).notify(taskId.toInt(), notification)
+        NotificationManagerCompat.from(context).notify(notificationId.toInt(), notification)
     }
 
     companion object {
         const val CHANNEL_ID = "task_reminders"
+        private const val TEST_NOTIFICATION_ID = -1L
     }
 }
