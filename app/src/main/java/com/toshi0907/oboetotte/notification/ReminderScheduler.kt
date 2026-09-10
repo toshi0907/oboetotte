@@ -120,4 +120,17 @@ object ReminderScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
+
+    /** 通知の「完了」ボタン用。[CompleteReceiver]宛で、[SnoozeReceiver]とは別コンポーネントのため衝突しない。 */
+    fun completePendingIntent(context: Context, taskId: Long): PendingIntent {
+        val intent = Intent(context, CompleteReceiver::class.java).apply {
+            putExtra(EXTRA_TASK_ID, taskId)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            taskId.toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
 }
