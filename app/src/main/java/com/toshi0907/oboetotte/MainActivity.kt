@@ -62,10 +62,12 @@ class MainActivity : ComponentActivity() {
             OboetotteTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     val tasks by taskViewModel.tasks.collectAsState()
+                    val allTasks by taskViewModel.allTasks.collectAsState()
                     val lists by taskViewModel.lists.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     TaskScreen(
                         tasks = tasks,
+                        allTasks = allTasks,
                         lists = lists,
                         selectedListId = selectedListId,
                         onSelectList = taskViewModel::selectList,
@@ -76,6 +78,7 @@ class MainActivity : ComponentActivity() {
                         onToggleDone = taskViewModel::toggleDone,
                         onUpdateTask = taskViewModel::updateTask,
                         onDeleteTask = taskViewModel::deleteTask,
+                        onAddSubtask = taskViewModel::addSubtask,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -107,6 +110,7 @@ private fun formatDueAt(millis: Long): String {
 @Composable
 fun TaskScreen(
     tasks: List<Task>,
+    allTasks: List<Task>,
     lists: List<TaskList>,
     selectedListId: Long?,
     onSelectList: (Long?) -> Unit,
@@ -117,6 +121,7 @@ fun TaskScreen(
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, String, Long?) -> Unit,
     onDeleteTask: (Task) -> Unit,
+    onAddSubtask: (Task, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
@@ -187,6 +192,7 @@ fun TaskScreen(
                     val isOverdue = task.dueAt != null &&
                         !task.isDone &&
                         task.dueAt < System.currentTimeMillis()
+                    val subtasks = allTasks.filter { it.parentTaskId == task.id }
 
                     Row(
                         modifier = Modifier
@@ -224,6 +230,13 @@ fun TaskScreen(
                                     }
                                 )
                             }
+                            if (subtasks.isNotEmpty()) {
+                                Text(
+                                    text = "${subtasks.count { it.isDone }}/${subtasks.size}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
@@ -234,10 +247,13 @@ fun TaskScreen(
     editingTask?.let { task ->
         EditTaskDialog(
             task = task,
-            onConfirm = { newTitle, dueAt ->
-                onUpdateTask(task, newTitle, dueAt)
+            allTasks = allTasks,
+            onConfirm = { t, newTitle, dueAt ->
+                onUpdateTask(t, newTitle, dueAt)
                 editingTask = null
             },
+            onAddSubtask = onAddSubtask,
+            onToggleDone = onToggleDone,
             onDismiss = { editingTask = null }
         )
     }
@@ -349,13 +365,19 @@ fun ManageListsDialog(
 @Composable
 fun EditTaskDialog(
     task: Task,
-    onConfirm: (title: String, dueAt: Long?) -> Unit,
+    allTasks: List<Task>,
+    onConfirm: (task: Task, title: String, dueAt: Long?) -> Unit,
+    onAddSubtask: (Task, String) -> Unit,
+    onToggleDone: (Task) -> Unit,
     onDismiss: () -> Unit
 ) {
     var title by remember(task.id) { mutableStateOf(task.title) }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
+    var subtaskInput by remember(task.id) { mutableStateOf("") }
+    var nestedTask by remember { mutableStateOf<Task?>(null) }
+    val subtasks = allTasks.filter { it.parentTaskId == task.id }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -384,10 +406,55 @@ fun EditTaskDialog(
                         }
                     }
                 }
+
+                Text(text = "サブタスク", style = MaterialTheme.typography.titleSmall)
+                subtasks.forEach { subtask ->
+                    val grandchildren = allTasks.filter { it.parentTaskId == subtask.id }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Checkbox(
+                            checked = subtask.isDone,
+                            onCheckedChange = { onToggleDone(subtask) }
+                        )
+                        Column(modifier = Modifier.clickable { nestedTask = subtask }) {
+                            Text(
+                                text = subtask.title,
+                                textDecoration = if (subtask.isDone) TextDecoration.LineThrough else null
+                            )
+                            if (grandchildren.isNotEmpty()) {
+                                Text(
+                                    text = "${grandchildren.count { it.isDone }}/${grandchildren.size}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    OutlinedTextField(
+                        value = subtaskInput,
+                        onValueChange = { subtaskInput = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("サブタスクを追加") },
+                        singleLine = true
+                    )
+                    TextButton(onClick = {
+                        onAddSubtask(task, subtaskInput)
+                        subtaskInput = ""
+                    }) {
+                        Text("追加")
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(title, dueAt) }) {
+            TextButton(onClick = { onConfirm(task, title, dueAt) }) {
                 Text("保存")
             }
         },
@@ -441,6 +508,20 @@ fun EditTaskDialog(
             }
         )
     }
+
+    nestedTask?.let { nested ->
+        EditTaskDialog(
+            task = nested,
+            allTasks = allTasks,
+            onConfirm = { t, newTitle, dueAt2 ->
+                onConfirm(t, newTitle, dueAt2)
+                nestedTask = null
+            },
+            onAddSubtask = onAddSubtask,
+            onToggleDone = onToggleDone,
+            onDismiss = { nestedTask = null }
+        )
+    }
 }
 
 @Composable
@@ -470,11 +551,13 @@ fun DeleteTaskDialog(
 @Composable
 fun TaskScreenPreview() {
     OboetotteTheme {
+        val previewTasks = listOf(
+            Task(id = 1, title = "牛乳を買う", dueAt = System.currentTimeMillis() + 86_400_000),
+            Task(id = 2, title = "掃除機をかける", isDone = true)
+        )
         TaskScreen(
-            tasks = listOf(
-                Task(id = 1, title = "牛乳を買う", dueAt = System.currentTimeMillis() + 86_400_000),
-                Task(id = 2, title = "掃除機をかける", isDone = true)
-            ),
+            tasks = previewTasks,
+            allTasks = previewTasks,
             lists = listOf(TaskList(id = 1, name = "買い物")),
             selectedListId = null,
             onSelectList = {},
@@ -484,7 +567,8 @@ fun TaskScreenPreview() {
             onAddTask = {},
             onToggleDone = {},
             onUpdateTask = { _, _, _ -> },
-            onDeleteTask = {}
+            onDeleteTask = {},
+            onAddSubtask = { _, _ -> }
         )
     }
 }

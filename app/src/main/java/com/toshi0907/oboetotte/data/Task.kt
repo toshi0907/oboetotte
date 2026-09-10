@@ -10,5 +10,6 @@ data class Task(
     val title: String,
     val isDone: Boolean = false,
     val dueAt: Long? = null,
-    val listId: Long? = null
+    val listId: Long? = null,
+    val parentTaskId: Long? = null
 )
