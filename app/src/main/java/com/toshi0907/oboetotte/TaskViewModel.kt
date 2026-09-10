@@ -20,14 +20,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     val lists: StateFlow<List<TaskList>> = taskListDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val allTasks: StateFlow<List<Task>> = taskDao.getAll()
+    val allTasks: StateFlow<List<Task>> = taskDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _selectedListId = MutableStateFlow<Long?>(null)
     val selectedListId: StateFlow<Long?> = _selectedListId
 
     val tasks: StateFlow<List<Task>> = combine(allTasks, _selectedListId) { tasks, listId ->
-        if (listId == null) tasks else tasks.filter { it.listId == listId }
+        val topLevel = tasks.filter { it.parentTaskId == null }
+        if (listId == null) topLevel else topLevel.filter { it.listId == listId }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun selectList(listId: Long?) {
@@ -59,6 +60,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteTask(task: Task) {
         viewModelScope.launch {
             taskDao.delete(task)
+        }
+    }
+
+    fun addSubtask(parent: Task, title: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            taskDao.insert(Task(title = trimmed, parentTaskId = parent.id))
         }
     }
 
