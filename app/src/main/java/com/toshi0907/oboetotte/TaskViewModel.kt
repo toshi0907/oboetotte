@@ -12,6 +12,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+
+object RepeatRule {
+    const val DAILY = "DAILY"
+    const val WEEKLY = "WEEKLY"
+    const val MONTHLY = "MONTHLY"
+}
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val taskDao = AppDatabase.getInstance(application).taskDao()
@@ -45,15 +53,27 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleDone(task: Task) {
         viewModelScope.launch {
-            taskDao.setDone(task.id, !task.isDone)
+            val newDone = !task.isDone
+            taskDao.setDone(task.id, newDone)
+            val rule = task.repeatRule
+            val dueAt = task.dueAt
+            if (newDone && rule != null && dueAt != null) {
+                taskDao.insert(
+                    task.copy(
+                        id = 0,
+                        isDone = false,
+                        dueAt = nextDueAt(dueAt, rule)
+                    )
+                )
+            }
         }
     }
 
-    fun updateTask(task: Task, newTitle: String, dueAt: Long?) {
+    fun updateTask(task: Task, newTitle: String, dueAt: Long?, repeatRule: String?) {
         val trimmed = newTitle.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            taskDao.update(task.copy(title = trimmed, dueAt = dueAt))
+            taskDao.update(task.copy(title = trimmed, dueAt = dueAt, repeatRule = repeatRule))
         }
     }
 
@@ -95,5 +115,16 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedListId.value = null
             }
         }
+    }
+
+    private fun nextDueAt(current: Long, rule: String): Long {
+        val zoned = Instant.ofEpochMilli(current).atZone(ZoneId.systemDefault())
+        val next = when (rule) {
+            RepeatRule.DAILY -> zoned.plusDays(1)
+            RepeatRule.WEEKLY -> zoned.plusWeeks(1)
+            RepeatRule.MONTHLY -> zoned.plusMonths(1)
+            else -> zoned
+        }
+        return next.toInstant().toEpochMilli()
     }
 }
