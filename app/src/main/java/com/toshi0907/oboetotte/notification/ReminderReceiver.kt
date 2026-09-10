@@ -23,7 +23,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_TEST, false)) {
-            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。")
+            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showSnoozeActions = false)
             return
         }
 
@@ -35,7 +35,7 @@ class ReminderReceiver : BroadcastReceiver() {
             try {
                 val task = AppDatabase.getInstance(context).taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
-                    showNotification(context, taskId, task.title)
+                    showNotification(context, taskId, task.title, showSnoozeActions = true)
                 }
             } finally {
                 pendingResult.finish()
@@ -43,7 +43,12 @@ class ReminderReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun showNotification(context: Context, notificationId: Long, title: String) {
+    private fun showNotification(
+        context: Context,
+        notificationId: Long,
+        title: String,
+        showSnoozeActions: Boolean
+    ) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -67,14 +72,25 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("リマインダー")
             .setContentText(title)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
+
+        if (showSnoozeActions) {
+            ReminderScheduler.SNOOZE_OPTIONS.forEachIndexed { index, option ->
+                builder.addAction(
+                    R.drawable.ic_notification,
+                    option.label,
+                    ReminderScheduler.snoozePendingIntent(context, notificationId, option, index)
+                )
+            }
+        }
+
+        val notification = builder.build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ActivityCompat.checkSelfPermission(
