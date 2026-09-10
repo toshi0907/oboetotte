@@ -7,6 +7,9 @@ on:
     branches: ["**"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,3 +36,15 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Update latest debug release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-debug
+          name: "最新デバッグビルド"
+          body: |
+            pushのたびに自動更新される最新のデバッグ用APKです。
+            コミット: ${{ github.sha }}
+          prerelease: true
+          files: app/build/outputs/apk/debug/app-debug.apk
