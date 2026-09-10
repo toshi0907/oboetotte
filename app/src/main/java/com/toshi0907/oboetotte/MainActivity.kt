@@ -247,13 +247,13 @@ fun TaskScreen(
     editingTask?.let { task ->
         EditTaskDialog(
             task = task,
-            subtasks = allTasks.filter { it.parentTaskId == task.id },
-            onConfirm = { newTitle, dueAt ->
-                onUpdateTask(task, newTitle, dueAt)
+            allTasks = allTasks,
+            onConfirm = { t, newTitle, dueAt ->
+                onUpdateTask(t, newTitle, dueAt)
                 editingTask = null
             },
-            onAddSubtask = { title -> onAddSubtask(task, title) },
-            onToggleSubtaskDone = onToggleDone,
+            onAddSubtask = onAddSubtask,
+            onToggleDone = onToggleDone,
             onDismiss = { editingTask = null }
         )
     }
@@ -365,10 +365,10 @@ fun ManageListsDialog(
 @Composable
 fun EditTaskDialog(
     task: Task,
-    subtasks: List<Task>,
-    onConfirm: (title: String, dueAt: Long?) -> Unit,
-    onAddSubtask: (String) -> Unit,
-    onToggleSubtaskDone: (Task) -> Unit,
+    allTasks: List<Task>,
+    onConfirm: (task: Task, title: String, dueAt: Long?) -> Unit,
+    onAddSubtask: (Task, String) -> Unit,
+    onToggleDone: (Task) -> Unit,
     onDismiss: () -> Unit
 ) {
     var title by remember(task.id) { mutableStateOf(task.title) }
@@ -376,6 +376,8 @@ fun EditTaskDialog(
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var subtaskInput by remember(task.id) { mutableStateOf("") }
+    var nestedTask by remember { mutableStateOf<Task?>(null) }
+    val subtasks = allTasks.filter { it.parentTaskId == task.id }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -407,18 +409,28 @@ fun EditTaskDialog(
 
                 Text(text = "サブタスク", style = MaterialTheme.typography.titleSmall)
                 subtasks.forEach { subtask ->
+                    val grandchildren = allTasks.filter { it.parentTaskId == subtask.id }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Checkbox(
                             checked = subtask.isDone,
-                            onCheckedChange = { onToggleSubtaskDone(subtask) }
+                            onCheckedChange = { onToggleDone(subtask) }
                         )
-                        Text(
-                            text = subtask.title,
-                            textDecoration = if (subtask.isDone) TextDecoration.LineThrough else null
-                        )
+                        Column(modifier = Modifier.clickable { nestedTask = subtask }) {
+                            Text(
+                                text = subtask.title,
+                                textDecoration = if (subtask.isDone) TextDecoration.LineThrough else null
+                            )
+                            if (grandchildren.isNotEmpty()) {
+                                Text(
+                                    text = "${grandchildren.count { it.isDone }}/${grandchildren.size}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
                 Row(
@@ -433,7 +445,7 @@ fun EditTaskDialog(
                         singleLine = true
                     )
                     TextButton(onClick = {
-                        onAddSubtask(subtaskInput)
+                        onAddSubtask(task, subtaskInput)
                         subtaskInput = ""
                     }) {
                         Text("追加")
@@ -442,7 +454,7 @@ fun EditTaskDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(title, dueAt) }) {
+            TextButton(onClick = { onConfirm(task, title, dueAt) }) {
                 Text("保存")
             }
         },
@@ -494,6 +506,20 @@ fun EditTaskDialog(
                     Text("キャンセル")
                 }
             }
+        )
+    }
+
+    nestedTask?.let { nested ->
+        EditTaskDialog(
+            task = nested,
+            allTasks = allTasks,
+            onConfirm = { t, newTitle, dueAt2 ->
+                onConfirm(t, newTitle, dueAt2)
+                nestedTask = null
+            },
+            onAddSubtask = onAddSubtask,
+            onToggleDone = onToggleDone,
+            onDismiss = { nestedTask = null }
         )
     }
 }
