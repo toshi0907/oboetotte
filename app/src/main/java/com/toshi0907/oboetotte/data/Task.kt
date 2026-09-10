@@ -11,5 +11,6 @@ data class Task(
     val isDone: Boolean = false,
     val dueAt: Long? = null,
     val listId: Long? = null,
-    val parentTaskId: Long? = null
+    val parentTaskId: Long? = null,
+    val repeatRule: String? = null
 )

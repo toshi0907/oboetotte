@@ -106,6 +106,13 @@ private fun formatDueAt(millis: Long): String {
     )
 }
 
+private fun repeatRuleLabel(rule: String): String = when (rule) {
+    RepeatRule.DAILY -> "毎日"
+    RepeatRule.WEEKLY -> "毎週"
+    RepeatRule.MONTHLY -> "毎月"
+    else -> rule
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TaskScreen(
@@ -119,7 +126,7 @@ fun TaskScreen(
     onDeleteList: (TaskList) -> Unit,
     onAddTask: (String) -> Unit,
     onToggleDone: (Task) -> Unit,
-    onUpdateTask: (Task, String, Long?) -> Unit,
+    onUpdateTask: (Task, String, Long?, String?) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     modifier: Modifier = Modifier
@@ -219,9 +226,12 @@ fun TaskScreen(
                                     MaterialTheme.colorScheme.onSurface
                                 }
                             )
-                            task.dueAt?.let { dueAt ->
+                            if (task.dueAt != null || task.repeatRule != null) {
                                 Text(
-                                    text = formatDueAt(dueAt),
+                                    text = listOfNotNull(
+                                        task.dueAt?.let { formatDueAt(it) },
+                                        task.repeatRule?.let { repeatRuleLabel(it) }
+                                    ).joinToString(" ・ "),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (isOverdue) {
                                         MaterialTheme.colorScheme.error
@@ -248,8 +258,8 @@ fun TaskScreen(
         EditTaskDialog(
             task = task,
             allTasks = allTasks,
-            onConfirm = { t, newTitle, dueAt ->
-                onUpdateTask(t, newTitle, dueAt)
+            onConfirm = { t, newTitle, dueAt, repeatRule ->
+                onUpdateTask(t, newTitle, dueAt, repeatRule)
                 editingTask = null
             },
             onAddSubtask = onAddSubtask,
@@ -366,13 +376,14 @@ fun ManageListsDialog(
 fun EditTaskDialog(
     task: Task,
     allTasks: List<Task>,
-    onConfirm: (task: Task, title: String, dueAt: Long?) -> Unit,
+    onConfirm: (task: Task, title: String, dueAt: Long?, repeatRule: String?) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     onToggleDone: (Task) -> Unit,
     onDismiss: () -> Unit
 ) {
     var title by remember(task.id) { mutableStateOf(task.title) }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
+    var repeatRule by remember(task.id) { mutableStateOf(task.repeatRule) }
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var subtaskInput by remember(task.id) { mutableStateOf("") }
@@ -404,6 +415,22 @@ fun EditTaskDialog(
                         TextButton(onClick = { dueAt = null }) {
                             Text("クリア")
                         }
+                    }
+                }
+
+                Text(text = "繰り返し", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        null to "なし",
+                        RepeatRule.DAILY to "毎日",
+                        RepeatRule.WEEKLY to "毎週",
+                        RepeatRule.MONTHLY to "毎月"
+                    ).forEach { (value, label) ->
+                        FilterChip(
+                            selected = repeatRule == value,
+                            onClick = { repeatRule = value },
+                            label = { Text(label) }
+                        )
                     }
                 }
 
@@ -454,7 +481,7 @@ fun EditTaskDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(task, title, dueAt) }) {
+            TextButton(onClick = { onConfirm(task, title, dueAt, repeatRule) }) {
                 Text("保存")
             }
         },
@@ -513,8 +540,8 @@ fun EditTaskDialog(
         EditTaskDialog(
             task = nested,
             allTasks = allTasks,
-            onConfirm = { t, newTitle, dueAt2 ->
-                onConfirm(t, newTitle, dueAt2)
+            onConfirm = { t, newTitle, dueAt2, repeatRule2 ->
+                onConfirm(t, newTitle, dueAt2, repeatRule2)
                 nestedTask = null
             },
             onAddSubtask = onAddSubtask,
@@ -566,7 +593,7 @@ fun TaskScreenPreview() {
             onDeleteList = {},
             onAddTask = {},
             onToggleDone = {},
-            onUpdateTask = { _, _, _ -> },
+            onUpdateTask = { _, _, _, _ -> },
             onDeleteTask = {},
             onAddSubtask = { _, _ -> }
         )
