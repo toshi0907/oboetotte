@@ -34,13 +34,25 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedListId = MutableStateFlow<Long?>(null)
     val selectedListId: StateFlow<Long?> = _selectedListId
 
-    val tasks: StateFlow<List<Task>> = combine(allTasks, _selectedListId) { tasks, listId ->
+    private val _showCompleted = MutableStateFlow(true)
+    val showCompleted: StateFlow<Boolean> = _showCompleted
+
+    val tasks: StateFlow<List<Task>> = combine(
+        allTasks,
+        _selectedListId,
+        _showCompleted
+    ) { tasks, listId, showCompleted ->
         val topLevel = tasks.filter { it.parentTaskId == null }
-        if (listId == null) topLevel else topLevel.filter { it.listId == listId }
+        val byList = if (listId == null) topLevel else topLevel.filter { it.listId == listId }
+        if (showCompleted) byList else byList.filter { !it.isDone }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun selectList(listId: Long?) {
         _selectedListId.value = listId
+    }
+
+    fun setShowCompleted(show: Boolean) {
+        _showCompleted.value = show
     }
 
     fun addTask(title: String) {
