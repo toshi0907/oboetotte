@@ -29,4 +29,18 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             taskDao.setDone(task.id, !task.isDone)
         }
     }
+
+    fun updateTitle(task: Task, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            taskDao.updateTitle(task.id, trimmed)
+        }
+    }
+
+    fun deleteTask(task: Task) {
+        viewModelScope.launch {
+            taskDao.delete(task)
+        }
+    }
 }

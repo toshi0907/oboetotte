@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -48,6 +52,8 @@ class MainActivity : ComponentActivity() {
                         tasks = tasks,
                         onAddTask = taskViewModel::addTask,
                         onToggleDone = taskViewModel::toggleDone,
+                        onUpdateTask = taskViewModel::updateTitle,
+                        onDeleteTask = taskViewModel::deleteTask,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -56,14 +62,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TaskScreen(
     tasks: List<Task>,
     onAddTask: (String) -> Unit,
     onToggleDone: (Task) -> Unit,
+    onUpdateTask: (Task, String) -> Unit,
+    onDeleteTask: (Task) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
+    var editingTask by remember { mutableStateOf<Task?>(null) }
+    var deletingTask by remember { mutableStateOf<Task?>(null) }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -100,6 +111,10 @@ fun TaskScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .combinedClickable(
+                                onClick = { editingTask = task },
+                                onLongClick = { deletingTask = task }
+                            )
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -122,6 +137,82 @@ fun TaskScreen(
             }
         }
     }
+
+    editingTask?.let { task ->
+        EditTaskDialog(
+            task = task,
+            onConfirm = { newTitle ->
+                onUpdateTask(task, newTitle)
+                editingTask = null
+            },
+            onDismiss = { editingTask = null }
+        )
+    }
+
+    deletingTask?.let { task ->
+        DeleteTaskDialog(
+            task = task,
+            onConfirm = {
+                onDeleteTask(task)
+                deletingTask = null
+            },
+            onDismiss = { deletingTask = null }
+        )
+    }
+}
+
+@Composable
+fun EditTaskDialog(
+    task: Task,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var title by remember(task.id) { mutableStateOf(task.title) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("タスクを編集") },
+        text = {
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(title) }) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("キャンセル")
+            }
+        }
+    )
+}
+
+@Composable
+fun DeleteTaskDialog(
+    task: Task,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("タスクを削除") },
+        text = { Text("「${task.title}」を削除しますか?") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("削除")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("キャンセル")
+            }
+        }
+    )
 }
 
 @Preview(showBackground = true)
@@ -134,7 +225,9 @@ fun TaskScreenPreview() {
                 Task(id = 2, title = "掃除機をかける", isDone = true)
             ),
             onAddTask = {},
-            onToggleDone = {}
+            onToggleDone = {},
+            onUpdateTask = { _, _ -> },
+            onDeleteTask = {}
         )
     }
 }
