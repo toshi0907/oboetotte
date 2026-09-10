@@ -196,59 +196,14 @@ fun TaskScreen(
 
             LazyColumn {
                 items(tasks, key = { it.id }) { task ->
-                    val isOverdue = task.dueAt != null &&
-                        !task.isDone &&
-                        task.dueAt < System.currentTimeMillis()
-                    val subtasks = allTasks.filter { it.parentTaskId == task.id }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = { editingTask = task },
-                                onLongClick = { deletingTask = task }
-                            )
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Checkbox(
-                            checked = task.isDone,
-                            onCheckedChange = { onToggleDone(task) }
-                        )
-                        Column {
-                            Text(
-                                text = task.title,
-                                textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
-                                color = if (task.isDone) {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                }
-                            )
-                            if (task.dueAt != null || task.repeatRule != null) {
-                                Text(
-                                    text = listOfNotNull(
-                                        task.dueAt?.let { formatDueAt(it) },
-                                        task.repeatRule?.let { repeatRuleLabel(it) }
-                                    ).joinToString(" ・ "),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isOverdue) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                )
-                            }
-                            if (subtasks.isNotEmpty()) {
-                                Text(
-                                    text = "${subtasks.count { it.isDone }}/${subtasks.size}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
+                    TaskTreeRow(
+                        task = task,
+                        allTasks = allTasks,
+                        depth = 0,
+                        onToggleDone = onToggleDone,
+                        onEditTask = { editingTask = it },
+                        onDeleteTask = { deletingTask = it }
+                    )
                 }
             }
         }
@@ -287,6 +242,83 @@ fun TaskScreen(
             onDeleteList = onDeleteList,
             onDismiss = { showManageLists = false }
         )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TaskTreeRow(
+    task: Task,
+    allTasks: List<Task>,
+    depth: Int,
+    onToggleDone: (Task) -> Unit,
+    onEditTask: (Task) -> Unit,
+    onDeleteTask: (Task) -> Unit
+) {
+    val children = allTasks.filter { it.parentTaskId == task.id }
+    val isOverdue = task.dueAt != null &&
+        !task.isDone &&
+        task.dueAt < System.currentTimeMillis()
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = { onEditTask(task) },
+                    onLongClick = { onDeleteTask(task) }
+                )
+                .padding(start = (depth * 20).dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Checkbox(
+                checked = task.isDone,
+                onCheckedChange = { onToggleDone(task) }
+            )
+            Column {
+                Text(
+                    text = task.title,
+                    textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
+                    color = if (task.isDone) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
+                )
+                if (task.dueAt != null || task.repeatRule != null) {
+                    Text(
+                        text = listOfNotNull(
+                            task.dueAt?.let { formatDueAt(it) },
+                            task.repeatRule?.let { repeatRuleLabel(it) }
+                        ).joinToString(" ・ "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isOverdue) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+                if (children.isNotEmpty()) {
+                    Text(
+                        text = "${children.count { it.isDone }}/${children.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        children.forEach { child ->
+            TaskTreeRow(
+                task = child,
+                allTasks = allTasks,
+                depth = depth + 1,
+                onToggleDone = onToggleDone,
+                onEditTask = onEditTask,
+                onDeleteTask = onDeleteTask
+            )
+        }
     }
 }
 
