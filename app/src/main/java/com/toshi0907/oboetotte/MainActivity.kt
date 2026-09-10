@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -24,7 +26,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.toshi0907.oboetotte.data.Task
@@ -43,6 +47,7 @@ class MainActivity : ComponentActivity() {
                     TaskScreen(
                         tasks = tasks,
                         onAddTask = taskViewModel::addTask,
+                        onToggleDone = taskViewModel::toggleDone,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -55,6 +60,7 @@ class MainActivity : ComponentActivity() {
 fun TaskScreen(
     tasks: List<Task>,
     onAddTask: (String) -> Unit,
+    onToggleDone: (Task) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
@@ -91,12 +97,27 @@ fun TaskScreen(
 
             LazyColumn {
                 items(tasks, key = { it.id }) { task ->
-                    Text(
-                        text = task.title,
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 8.dp)
-                    )
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Checkbox(
+                            checked = task.isDone,
+                            onCheckedChange = { onToggleDone(task) }
+                        )
+                        Text(
+                            text = task.title,
+                            textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
+                            color = if (task.isDone) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -108,8 +129,12 @@ fun TaskScreen(
 fun TaskScreenPreview() {
     OboetotteTheme {
         TaskScreen(
-            tasks = listOf(Task(id = 1, title = "牛乳を買う")),
-            onAddTask = {}
+            tasks = listOf(
+                Task(id = 1, title = "牛乳を買う"),
+                Task(id = 2, title = "掃除機をかける", isDone = true)
+            ),
+            onAddTask = {},
+            onToggleDone = {}
         )
     }
 }
