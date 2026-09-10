@@ -23,7 +23,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_TEST, false)) {
-            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showSnoozeActions = false)
+            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showTaskActions = false)
             return
         }
 
@@ -35,7 +35,7 @@ class ReminderReceiver : BroadcastReceiver() {
             try {
                 val task = AppDatabase.getInstance(context).taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
-                    showNotification(context, taskId, task.title, showSnoozeActions = true)
+                    showNotification(context, taskId, task.title, showTaskActions = true)
                 }
             } finally {
                 pendingResult.finish()
@@ -47,7 +47,7 @@ class ReminderReceiver : BroadcastReceiver() {
         context: Context,
         notificationId: Long,
         title: String,
-        showSnoozeActions: Boolean
+        showTaskActions: Boolean
     ) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -80,7 +80,12 @@ class ReminderReceiver : BroadcastReceiver() {
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
 
-        if (showSnoozeActions) {
+        if (showTaskActions) {
+            builder.addAction(
+                R.drawable.ic_notification,
+                "完了",
+                ReminderScheduler.completePendingIntent(context, notificationId)
+            )
             ReminderScheduler.SNOOZE_OPTIONS.forEachIndexed { index, option ->
                 builder.addAction(
                     R.drawable.ic_notification,

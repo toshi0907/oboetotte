@@ -13,8 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.ZoneId
 
 object RepeatRule {
     const val DAILY = "DAILY"
@@ -55,23 +53,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleDone(task: Task) {
         viewModelScope.launch {
-            val newDone = !task.isDone
-            taskDao.setDone(task.id, newDone)
-            if (newDone) {
-                ReminderScheduler.cancel(appContext, task.id)
-            } else {
+            if (task.isDone) {
+                taskDao.setDone(task.id, false)
                 ReminderScheduler.schedule(appContext, task.copy(isDone = false))
-            }
-            val rule = task.repeatRule
-            val dueAt = task.dueAt
-            if (newDone && rule != null && dueAt != null) {
-                val nextTask = task.copy(
-                    id = 0,
-                    isDone = false,
-                    dueAt = nextDueAt(dueAt, rule)
-                )
-                val newId = taskDao.insert(nextTask)
-                ReminderScheduler.schedule(appContext, nextTask.copy(id = newId))
+            } else {
+                TaskCompletion.complete(appContext, task)
             }
         }
     }
@@ -125,16 +111,5 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedListId.value = null
             }
         }
-    }
-
-    private fun nextDueAt(current: Long, rule: String): Long {
-        val zoned = Instant.ofEpochMilli(current).atZone(ZoneId.systemDefault())
-        val next = when (rule) {
-            RepeatRule.DAILY -> zoned.plusDays(1)
-            RepeatRule.WEEKLY -> zoned.plusWeeks(1)
-            RepeatRule.MONTHLY -> zoned.plusMonths(1)
-            else -> zoned
-        }
-        return next.toInstant().toEpochMilli()
     }
 }
