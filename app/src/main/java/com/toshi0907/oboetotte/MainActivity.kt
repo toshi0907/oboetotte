@@ -1,9 +1,16 @@
 package com.toshi0907.oboetotte
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -20,6 +27,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -35,6 +44,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,11 +52,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import java.time.Instant
 import java.time.LocalTime
@@ -55,9 +71,21 @@ import java.time.ZoneId
 class MainActivity : ComponentActivity() {
     private val taskViewModel: TaskViewModel by viewModels()
 
+    private val requestNotificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* 拒否されてもアプリは通常通り使えるため、明示的なハンドリングは不要 */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         setContent {
             OboetotteTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -65,6 +93,21 @@ class MainActivity : ComponentActivity() {
                     val allTasks by taskViewModel.allTasks.collectAsState()
                     val lists by taskViewModel.lists.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
+                    val context = LocalContext.current
+                    val lifecycleOwner = LocalLifecycleOwner.current
+                    var exactAlarmPermissionGranted by remember {
+                        mutableStateOf(ReminderScheduler.canScheduleExactAlarms(context))
+                    }
+                    DisposableEffect(lifecycleOwner) {
+                        val observer = LifecycleEventObserver { _, event ->
+                            if (event == Lifecycle.Event.ON_RESUME) {
+                                exactAlarmPermissionGranted =
+                                    ReminderScheduler.canScheduleExactAlarms(context)
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                    }
                     TaskScreen(
                         tasks = tasks,
                         allTasks = allTasks,
@@ -79,6 +122,13 @@ class MainActivity : ComponentActivity() {
                         onUpdateTask = taskViewModel::updateTask,
                         onDeleteTask = taskViewModel::deleteTask,
                         onAddSubtask = taskViewModel::addSubtask,
+                        showExactAlarmBanner = !exactAlarmPermissionGranted,
+                        onRequestExactAlarmPermission = {
+                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                data = Uri.parse("package:$packageName")
+                            }
+                            startActivity(intent)
+                        },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -129,6 +179,8 @@ fun TaskScreen(
     onUpdateTask: (Task, String, Long?, String?) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
+    showExactAlarmBanner: Boolean = false,
+    onRequestExactAlarmPermission: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
@@ -143,6 +195,27 @@ fun TaskScreen(
                 .padding(16.dp)
         ) {
             Text(text = "Oboetotte", style = MaterialTheme.typography.headlineMedium)
+
+            if (showExactAlarmBanner) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "リマインダー通知を正確な時刻に届けるには、「アラームとリマインダー」の権限が必要です。",
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        TextButton(onClick = onRequestExactAlarmPermission) {
+                            Text("設定を開く")
+                        }
+                    }
+                }
+            }
 
             LazyRow(
                 modifier = Modifier

@@ -10,10 +10,16 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TaskDao {
     @Insert
-    suspend fun insert(task: Task)
+    suspend fun insert(task: Task): Long
 
     @Query("SELECT * FROM tasks ORDER BY isDone ASC, dueAt IS NULL ASC, dueAt ASC, id DESC")
     fun getAll(): Flow<List<Task>>
+
+    @Query("SELECT * FROM tasks WHERE id = :taskId LIMIT 1")
+    suspend fun getById(taskId: Long): Task?
+
+    @Query("SELECT * FROM tasks WHERE dueAt IS NOT NULL AND isDone = 0")
+    suspend fun getPendingWithDueDate(): List<Task>
 
     @Query("UPDATE tasks SET isDone = :isDone WHERE id = :taskId")
     suspend fun setDone(taskId: Long, isDone: Boolean)
