@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -129,6 +130,15 @@ class MainActivity : ComponentActivity() {
                             }
                             startActivity(intent)
                         },
+                        onSendTestNotification = {
+                            val scheduled = ReminderScheduler.scheduleTestNotification(context)
+                            val message = if (scheduled) {
+                                "${ReminderScheduler.TEST_DELAY_SECONDS}秒後にテスト通知が届きます"
+                            } else {
+                                "「アラームとリマインダー」の権限が無いため送信できません"
+                            }
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -181,6 +191,7 @@ fun TaskScreen(
     onAddSubtask: (Task, String) -> Unit,
     showExactAlarmBanner: Boolean = false,
     onRequestExactAlarmPermission: () -> Unit = {},
+    onSendTestNotification: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
@@ -241,6 +252,12 @@ fun TaskScreen(
                     AssistChip(
                         onClick = { showManageLists = true },
                         label = { Text("リストを編集") }
+                    )
+                }
+                item {
+                    AssistChip(
+                        onClick = onSendTestNotification,
+                        label = { Text("テスト通知") }
                     )
                 }
             }
