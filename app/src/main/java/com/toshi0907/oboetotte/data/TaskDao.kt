@@ -12,7 +12,7 @@ interface TaskDao {
     @Insert
     suspend fun insert(task: Task)
 
-    @Query("SELECT * FROM tasks ORDER BY id DESC")
+    @Query("SELECT * FROM tasks ORDER BY isDone ASC, dueAt IS NULL ASC, dueAt ASC, id DESC")
     fun getAll(): Flow<List<Task>>
 
     @Query("UPDATE tasks SET isDone = :isDone WHERE id = :taskId")
