@@ -21,12 +21,9 @@ class SnoozeReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val taskDao = AppDatabase.getInstance(context).taskDao()
-                val task = taskDao.getById(taskId)
+                val task = AppDatabase.getInstance(context).taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
-                    val updated = task.copy(dueAt = System.currentTimeMillis() + snoozeMinutes * 60_000)
-                    taskDao.update(updated)
-                    ReminderScheduler.schedule(context, updated)
+                    ReminderScheduler.scheduleSnooze(context, taskId, snoozeMinutes)
                 }
             } finally {
                 pendingResult.finish()

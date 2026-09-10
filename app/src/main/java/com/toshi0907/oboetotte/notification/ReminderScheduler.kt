@@ -51,6 +51,23 @@ object ReminderScheduler {
         alarmManager.cancel(pendingIntentFor(context, taskId))
     }
 
+    /**
+     * スヌーズ用。タスクの`dueAt`は書き換えず、通知だけを「タップ時刻+[minutes]分後」に
+     * 再スケジュールする。アラーム本体と同じ[pendingIntentFor]を使うため、次に
+     * [schedule]/[cancel]が呼ばれれば通常どおり上書き・キャンセルされる。
+     */
+    fun scheduleSnooze(context: Context, taskId: Long, minutes: Long): Boolean {
+        if (!canScheduleExactAlarms(context)) return false
+
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            System.currentTimeMillis() + minutes * 60_000,
+            pendingIntentFor(context, taskId)
+        )
+        return true
+    }
+
     /** [TEST_DELAY_SECONDS]秒後にテスト通知を発火させる。本番と同じAlarmManager経由の経路を検証する。 */
     fun scheduleTestNotification(context: Context): Boolean {
         if (!canScheduleExactAlarms(context)) return false
