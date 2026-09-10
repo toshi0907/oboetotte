@@ -371,6 +371,54 @@ fun ManageListsDialog(
     )
 }
 
+@Composable
+fun SubtaskTreeRow(
+    task: Task,
+    allTasks: List<Task>,
+    depth: Int,
+    onToggleDone: (Task) -> Unit,
+    onOpenTask: (Task) -> Unit
+) {
+    val children = allTasks.filter { it.parentTaskId == task.id }
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = (depth * 20).dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Checkbox(
+                checked = task.isDone,
+                onCheckedChange = { onToggleDone(task) }
+            )
+            Column(modifier = Modifier.clickable { onOpenTask(task) }) {
+                Text(
+                    text = task.title,
+                    textDecoration = if (task.isDone) TextDecoration.LineThrough else null
+                )
+                if (children.isNotEmpty()) {
+                    Text(
+                        text = "${children.count { it.isDone }}/${children.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        children.forEach { child ->
+            SubtaskTreeRow(
+                task = child,
+                allTasks = allTasks,
+                depth = depth + 1,
+                onToggleDone = onToggleDone,
+                onOpenTask = onOpenTask
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditTaskDialog(
@@ -436,29 +484,13 @@ fun EditTaskDialog(
 
                 Text(text = "サブタスク", style = MaterialTheme.typography.titleSmall)
                 subtasks.forEach { subtask ->
-                    val grandchildren = allTasks.filter { it.parentTaskId == subtask.id }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Checkbox(
-                            checked = subtask.isDone,
-                            onCheckedChange = { onToggleDone(subtask) }
-                        )
-                        Column(modifier = Modifier.clickable { nestedTask = subtask }) {
-                            Text(
-                                text = subtask.title,
-                                textDecoration = if (subtask.isDone) TextDecoration.LineThrough else null
-                            )
-                            if (grandchildren.isNotEmpty()) {
-                                Text(
-                                    text = "${grandchildren.count { it.isDone }}/${grandchildren.size}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
+                    SubtaskTreeRow(
+                        task = subtask,
+                        allTasks = allTasks,
+                        depth = 0,
+                        onToggleDone = onToggleDone,
+                        onOpenTask = { nestedTask = it }
+                    )
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
