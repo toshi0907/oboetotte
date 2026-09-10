@@ -26,6 +26,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 作業用ブランチはPRがマージされたら削除してください。マージ済みブランチを残さず、リポジトリをブランチが整理された状態に保ちます。
 
+## 機能追加・変更時の注意
+
+機能の追加・変更を行った際は、`README.md`(実装済みの機能一覧、今後の実装予定)の更新を忘れないでください。あわせて、その変更がアーキテクチャや開発フローに関わる場合は、このCLAUDE.mdの該当箇所も更新してください。
+
 ## アーキテクチャに関する補足
 
 - パッケージ名/applicationId: `com.toshi0907.oboetotte`、minSdk 26、target/compileSdk 35。
