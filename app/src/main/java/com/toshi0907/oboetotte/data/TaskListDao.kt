@@ -20,4 +20,10 @@ interface TaskListDao {
 
     @Delete
     suspend fun delete(taskList: TaskList)
+
+    @Insert
+    suspend fun insertAll(taskLists: List<TaskList>)
+
+    @Query("DELETE FROM task_lists")
+    suspend fun deleteAll()
 }

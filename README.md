@@ -16,6 +16,7 @@
 - サブタスク(チェックリスト、多階層ネスト対応。メイン画面・編集ダイアログの両方でインデント付きツリー表示)
 - 繰り返しタスク(毎日・毎週・毎月。完了すると次回分を自動生成)
 - リマインダー通知(期限日時に通知。端末再起動後も再スケジュール。「テスト通知」ボタンで動作確認可能)
+- ローカルバックアップ(JSON形式でのエクスポート/インポート。設定画面から実行)
 
 ## アプリのインストール方法
 
@@ -47,6 +48,7 @@ Artifactは90日で失効するため、通常は方法1のReleaseを使うこ�
 ```
 app/
   src/main/java/com/toshi0907/oboetotte/       アプリのKotlinソースコード
+    backup/                                      ローカルバックアップ(JSON export/import)
     data/                                       Room(Task, TaskList, DAO, Database)
     notification/                                リマインダー通知(AlarmManager, BroadcastReceiver)
     ui/theme/                                    Compose Material3テーマ
@@ -64,7 +66,6 @@ Android Studioやローカル環境がある場合は以下でもビルド可能
 
 ## 今後の実装予定
 
-- ローカルバックアップ(エクスポート/インポート)
 - カレンダー表示、ホーム画面ウィジェットなど
 
 詳細な機能設計の方針は [Issues](https://github.com/toshi0907/oboetotte/issues) を参照してください。

@@ -61,6 +61,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
+import com.toshi0907.oboetotte.backup.BackupManager
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.ReminderScheduler
@@ -68,6 +70,8 @@ import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val taskViewModel: TaskViewModel by viewModels()
@@ -75,6 +79,36 @@ class MainActivity : ComponentActivity() {
     private val requestNotificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* 拒否されてもアプリは通常通り使えるため、明示的なハンドリングは不要 */ }
+
+    private val exportBackupLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            lifecycleScope.launch {
+                try {
+                    BackupManager.export(this@MainActivity, uri)
+                    Toast.makeText(this@MainActivity, "エクスポートしました", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "エクスポートに失敗しました", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private val importBackupLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            lifecycleScope.launch {
+                try {
+                    BackupManager.import(this@MainActivity, uri)
+                    Toast.makeText(this@MainActivity, "インポートしました", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "インポートに失敗しました。ファイル形式を確認してください", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -139,6 +173,17 @@ class MainActivity : ComponentActivity() {
                             }
                             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                         },
+                        onExportRequested = {
+                            val zoned = ZonedDateTime.now()
+                            val fileName = "oboetotte_backup_%04d%02d%02d_%02d%02d%02d.json".format(
+                                zoned.year, zoned.monthValue, zoned.dayOfMonth,
+                                zoned.hour, zoned.minute, zoned.second
+                            )
+                            exportBackupLauncher.launch(fileName)
+                        },
+                        onImportRequested = {
+                            importBackupLauncher.launch(arrayOf("application/json"))
+                        },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -192,12 +237,15 @@ fun TaskScreen(
     showExactAlarmBanner: Boolean = false,
     onRequestExactAlarmPermission: () -> Unit = {},
     onSendTestNotification: () -> Unit = {},
+    onExportRequested: () -> Unit = {},
+    onImportRequested: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     var showManageLists by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -258,6 +306,12 @@ fun TaskScreen(
                     AssistChip(
                         onClick = onSendTestNotification,
                         label = { Text("テスト通知") }
+                    )
+                }
+                item {
+                    AssistChip(
+                        onClick = { showSettings = true },
+                        label = { Text("設定") }
                     )
                 }
             }
@@ -331,6 +385,20 @@ fun TaskScreen(
             onRenameList = onRenameList,
             onDeleteList = onDeleteList,
             onDismiss = { showManageLists = false }
+        )
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            onExport = {
+                onExportRequested()
+                showSettings = false
+            },
+            onImport = {
+                onImportRequested()
+                showSettings = false
+            },
+            onDismiss = { showSettings = false }
         )
     }
 }
@@ -410,6 +478,43 @@ fun TaskTreeRow(
             )
         }
     }
+}
+
+@Composable
+fun SettingsDialog(
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("設定") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("タスクデータをファイルにバックアップしたり、バックアップから復元したりできます。")
+                Text(
+                    text = "インポートすると、現在のタスクデータはすべてインポートしたファイルの内容に置き換わります。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onExport) {
+                Text("エクスポート")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onImport) {
+                    Text("インポート")
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("閉じる")
+                }
+            }
+        }
+    )
 }
 
 @Composable
