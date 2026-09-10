@@ -20,6 +20,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `.github/workflows/android-build.yml` は、全ブランチへのpushとPR、および手動の`workflow_dispatch`で実行されます。`ubuntu-latest`上で`./gradlew assembleDebug`を実行し、`app/build/outputs/apk/debug/app-debug.apk`を`app-debug`という名前のArtifactとしてアップロードします。このArtifactが、インストール可能なAPKをスマホに持っていく手段です。Actionsの実行結果からダウンロードし、端末に転送して「提供元不明のアプリ」を許可した上でインストールします。
 
+## ブランチ運用
+
+作業用ブランチはPRがマージされたら削除してください。マージ済みブランチを残さず、リポジトリをブランチが整理された状態に保ちます。
+
 ## アーキテクチャに関する補足
 
 - パッケージ名/applicationId: `com.toshi0907.oboetotte`、minSdk 26、target/compileSdk 35。
