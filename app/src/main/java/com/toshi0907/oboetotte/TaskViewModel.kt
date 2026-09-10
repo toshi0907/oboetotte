@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.notification.ReminderScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,7 @@ object RepeatRule {
 }
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
+    private val appContext = application
     private val taskDao = AppDatabase.getInstance(application).taskDao()
     private val taskListDao = AppDatabase.getInstance(application).taskListDao()
 
@@ -55,16 +57,21 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val newDone = !task.isDone
             taskDao.setDone(task.id, newDone)
+            if (newDone) {
+                ReminderScheduler.cancel(appContext, task.id)
+            } else {
+                ReminderScheduler.schedule(appContext, task.copy(isDone = false))
+            }
             val rule = task.repeatRule
             val dueAt = task.dueAt
             if (newDone && rule != null && dueAt != null) {
-                taskDao.insert(
-                    task.copy(
-                        id = 0,
-                        isDone = false,
-                        dueAt = nextDueAt(dueAt, rule)
-                    )
+                val nextTask = task.copy(
+                    id = 0,
+                    isDone = false,
+                    dueAt = nextDueAt(dueAt, rule)
                 )
+                val newId = taskDao.insert(nextTask)
+                ReminderScheduler.schedule(appContext, nextTask.copy(id = newId))
             }
         }
     }
@@ -73,13 +80,16 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = newTitle.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            taskDao.update(task.copy(title = trimmed, dueAt = dueAt, repeatRule = repeatRule))
+            val updated = task.copy(title = trimmed, dueAt = dueAt, repeatRule = repeatRule)
+            taskDao.update(updated)
+            ReminderScheduler.schedule(appContext, updated)
         }
     }
 
     fun deleteTask(task: Task) {
         viewModelScope.launch {
             taskDao.delete(task)
+            ReminderScheduler.cancel(appContext, task.id)
         }
     }
 
