@@ -30,11 +30,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateTitle(task: Task, newTitle: String) {
+    fun updateTask(task: Task, newTitle: String, dueAt: Long?) {
         val trimmed = newTitle.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            taskDao.updateTitle(task.id, trimmed)
+            taskDao.update(task.copy(title = trimmed, dueAt = dueAt))
         }
     }
 
