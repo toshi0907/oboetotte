@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -17,8 +18,8 @@ interface TaskDao {
     @Query("UPDATE tasks SET isDone = :isDone WHERE id = :taskId")
     suspend fun setDone(taskId: Long, isDone: Boolean)
 
-    @Query("UPDATE tasks SET title = :title WHERE id = :taskId")
-    suspend fun updateTitle(taskId: Long, title: String)
+    @Update
+    suspend fun update(task: Task)
 
     @Delete
     suspend fun delete(task: Task)
