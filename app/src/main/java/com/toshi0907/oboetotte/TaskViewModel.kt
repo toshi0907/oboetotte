@@ -23,4 +23,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             taskDao.insert(Task(title = trimmed))
         }
     }
+
+    fun toggleDone(task: Task) {
+        viewModelScope.launch {
+            taskDao.setDone(task.id, !task.isDone)
+        }
+    }
 }
