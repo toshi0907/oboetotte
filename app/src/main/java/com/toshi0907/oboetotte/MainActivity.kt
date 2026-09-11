@@ -248,6 +248,16 @@ private fun formatDueAt(millis: Long): String {
 
 private val WEEKDAY_LABELS = listOf(1 to "月", 2 to "火", 3 to "水", 4 to "木", 5 to "金", 6 to "土", 7 to "日")
 
+/** [EditTaskDialog]の期限クイック選択チップ用。ラベルと現在時刻からの分数のペア。 */
+private val DUE_QUICK_OPTIONS = listOf(
+    "5分後" to 5L,
+    "15分後" to 15L,
+    "30分後" to 30L,
+    "1時間後" to 60L,
+    "3時間後" to 180L,
+    "6時間後" to 360L
+)
+
 private fun radiusLabel(meters: Int): String =
     if (meters >= 1000) "${meters / 1000}km" else "${meters}m"
 
@@ -1270,6 +1280,17 @@ fun EditTaskDialog(
                         TextButton(onClick = { dueAt = null }) {
                             Text("クリア")
                         }
+                    }
+                }
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(DUE_QUICK_OPTIONS) { (label, minutes) ->
+                        AssistChip(
+                            onClick = { dueAt = System.currentTimeMillis() + minutes * 60_000 },
+                            label = { Text(label) }
+                        )
                     }
                 }
 
