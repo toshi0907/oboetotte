@@ -34,6 +34,7 @@ object RepeatRule {
 /** [EditTaskDialog]で編集可能な項目をまとめたもの。[TaskViewModel.updateTask]に渡す。 */
 data class TaskEdits(
     val title: String,
+    val listId: Long?,
     val dueAt: Long?,
     val repeatRule: String?,
     val repeatDaysOfWeek: String?,
@@ -113,6 +114,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val updated = task.copy(
                 title = trimmed,
+                listId = edits.listId,
                 dueAt = edits.dueAt,
                 repeatRule = edits.repeatRule,
                 repeatDaysOfWeek = edits.repeatDaysOfWeek,
