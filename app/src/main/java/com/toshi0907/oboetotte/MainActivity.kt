@@ -291,10 +291,16 @@ fun TaskScreen(
                 }
             }
 
+            Text(
+                text = "リスト",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp)
+            )
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp),
+                    .padding(top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 item {
@@ -311,6 +317,14 @@ fun TaskScreen(
                         label = { Text(list.name) }
                     )
                 }
+            }
+
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 item {
                     FilterChip(
                         selected = showCompleted,
