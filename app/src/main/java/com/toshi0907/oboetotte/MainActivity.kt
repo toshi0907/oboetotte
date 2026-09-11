@@ -1259,7 +1259,7 @@ fun EditTaskDialog(
     val context = LocalContext.current
     val attachments = allAttachments.filter { it.taskId == task.id }
     val attachmentPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocument()
+        ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> uris.forEach { onAddAttachment(task, it) } }
     var title by remember(task.id) { mutableStateOf(task.title) }
     var listId by remember(task.id) { mutableStateOf(task.listId) }
