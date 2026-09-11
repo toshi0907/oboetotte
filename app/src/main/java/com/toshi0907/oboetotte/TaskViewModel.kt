@@ -17,7 +17,16 @@ import kotlinx.coroutines.launch
 object RepeatRule {
     const val DAILY = "DAILY"
     const val WEEKLY = "WEEKLY"
+    const val WEEKLY_DAYS = "WEEKLY_DAYS"
     const val MONTHLY = "MONTHLY"
+
+    // 曜日はISO-8601に合わせて月曜=1〜日曜=7の数値をカンマ区切りで保存する。
+    fun parseDaysOfWeek(value: String?): Set<Int> {
+        if (value.isNullOrBlank()) return emptySet()
+        return value.split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
+    }
+
+    fun formatDaysOfWeek(days: Set<Int>): String = days.sorted().joinToString(",")
 }
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
@@ -74,11 +83,16 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateTask(task: Task, newTitle: String, dueAt: Long?, repeatRule: String?) {
+    fun updateTask(task: Task, newTitle: String, dueAt: Long?, repeatRule: String?, repeatDaysOfWeek: String?) {
         val trimmed = newTitle.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            val updated = task.copy(title = trimmed, dueAt = dueAt, repeatRule = repeatRule)
+            val updated = task.copy(
+                title = trimmed,
+                dueAt = dueAt,
+                repeatRule = repeatRule,
+                repeatDaysOfWeek = repeatDaysOfWeek
+            )
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
         }

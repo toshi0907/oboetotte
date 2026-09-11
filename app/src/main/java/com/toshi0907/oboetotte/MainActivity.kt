@@ -224,11 +224,21 @@ private fun formatDueAt(millis: Long): String {
     )
 }
 
-private fun repeatRuleLabel(rule: String): String = when (rule) {
-    RepeatRule.DAILY -> "毎日"
-    RepeatRule.WEEKLY -> "毎週"
-    RepeatRule.MONTHLY -> "毎月"
-    else -> rule
+private val WEEKDAY_LABELS = listOf(1 to "月", 2 to "火", 3 to "水", 4 to "木", 5 to "金", 6 to "土", 7 to "日")
+
+private fun repeatRuleLabel(task: Task): String? {
+    val rule = task.repeatRule ?: return null
+    return when (rule) {
+        RepeatRule.DAILY -> "毎日"
+        RepeatRule.WEEKLY -> "毎週"
+        RepeatRule.WEEKLY_DAYS -> {
+            val days = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek)
+            val labels = WEEKDAY_LABELS.filter { it.first in days }.joinToString("・") { it.second }
+            "毎週($labels)"
+        }
+        RepeatRule.MONTHLY -> "毎月"
+        else -> rule
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -246,7 +256,7 @@ fun TaskScreen(
     onDeleteList: (TaskList) -> Unit,
     onAddTask: (String) -> Unit,
     onToggleDone: (Task) -> Unit,
-    onUpdateTask: (Task, String, Long?, String?) -> Unit,
+    onUpdateTask: (Task, String, Long?, String?, String?) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     showExactAlarmBanner: Boolean = false,
@@ -393,8 +403,8 @@ fun TaskScreen(
         EditTaskDialog(
             task = task,
             allTasks = allTasks,
-            onConfirm = { t, newTitle, dueAt, repeatRule ->
-                onUpdateTask(t, newTitle, dueAt, repeatRule)
+            onConfirm = { t, newTitle, dueAt, repeatRule, repeatDaysOfWeek ->
+                onUpdateTask(t, newTitle, dueAt, repeatRule, repeatDaysOfWeek)
                 editingTask = null
             },
             onAddSubtask = onAddSubtask,
@@ -484,7 +494,7 @@ fun TaskTreeRow(
                     Text(
                         text = listOfNotNull(
                             task.dueAt?.let { formatDueAt(it) },
-                            task.repeatRule?.let { repeatRuleLabel(it) }
+                            repeatRuleLabel(task)
                         ).joinToString(" ・ "),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isOverdue) {
@@ -687,7 +697,7 @@ fun SubtaskTreeRow(
 fun EditTaskDialog(
     task: Task,
     allTasks: List<Task>,
-    onConfirm: (task: Task, title: String, dueAt: Long?, repeatRule: String?) -> Unit,
+    onConfirm: (task: Task, title: String, dueAt: Long?, repeatRule: String?, repeatDaysOfWeek: String?) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     onToggleDone: (Task) -> Unit,
     onDismiss: () -> Unit
@@ -695,6 +705,9 @@ fun EditTaskDialog(
     var title by remember(task.id) { mutableStateOf(task.title) }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
     var repeatRule by remember(task.id) { mutableStateOf(task.repeatRule) }
+    var selectedDays by remember(task.id) {
+        mutableStateOf(RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek))
+    }
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var subtaskInput by remember(task.id) { mutableStateOf("") }
@@ -735,12 +748,42 @@ fun EditTaskDialog(
                         null to "なし",
                         RepeatRule.DAILY to "毎日",
                         RepeatRule.WEEKLY to "毎週",
+                        RepeatRule.WEEKLY_DAYS to "毎週(曜日)",
                         RepeatRule.MONTHLY to "毎月"
                     ).forEach { (value, label) ->
                         FilterChip(
                             selected = repeatRule == value,
                             onClick = { repeatRule = value },
                             label = { Text(label) }
+                        )
+                    }
+                }
+                if (repeatRule == RepeatRule.WEEKLY_DAYS) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        WEEKDAY_LABELS.forEach { (value, label) ->
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Checkbox(
+                                    checked = value in selectedDays,
+                                    onCheckedChange = { checked ->
+                                        selectedDays = if (checked) {
+                                            selectedDays + value
+                                        } else {
+                                            selectedDays - value
+                                        }
+                                    }
+                                )
+                                Text(text = label, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    if (selectedDays.isEmpty()) {
+                        Text(
+                            text = "曜日を1つ以上選択してください",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
                         )
                     }
                 }
@@ -776,7 +819,18 @@ fun EditTaskDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(task, title, dueAt, repeatRule) }) {
+            val canSave = repeatRule != RepeatRule.WEEKLY_DAYS || selectedDays.isNotEmpty()
+            TextButton(
+                enabled = canSave,
+                onClick = {
+                    val daysOfWeek = if (repeatRule == RepeatRule.WEEKLY_DAYS) {
+                        RepeatRule.formatDaysOfWeek(selectedDays)
+                    } else {
+                        null
+                    }
+                    onConfirm(task, title, dueAt, repeatRule, daysOfWeek)
+                }
+            ) {
                 Text("保存")
             }
         },
@@ -843,8 +897,8 @@ fun EditTaskDialog(
         EditTaskDialog(
             task = nested,
             allTasks = allTasks,
-            onConfirm = { t, newTitle, dueAt2, repeatRule2 ->
-                onConfirm(t, newTitle, dueAt2, repeatRule2)
+            onConfirm = { t, newTitle, dueAt2, repeatRule2, repeatDaysOfWeek2 ->
+                onConfirm(t, newTitle, dueAt2, repeatRule2, repeatDaysOfWeek2)
                 nestedTask = null
             },
             onAddSubtask = onAddSubtask,
@@ -898,7 +952,7 @@ fun TaskScreenPreview() {
             onDeleteList = {},
             onAddTask = {},
             onToggleDone = {},
-            onUpdateTask = { _, _, _, _ -> },
+            onUpdateTask = { _, _, _, _, _ -> },
             onDeleteTask = {},
             onAddSubtask = { _, _ -> }
         )

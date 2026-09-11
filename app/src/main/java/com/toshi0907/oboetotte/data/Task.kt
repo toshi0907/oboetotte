@@ -12,5 +12,6 @@ data class Task(
     val dueAt: Long? = null,
     val listId: Long? = null,
     val parentTaskId: Long? = null,
-    val repeatRule: String? = null
+    val repeatRule: String? = null,
+    val repeatDaysOfWeek: String? = null
 )
