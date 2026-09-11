@@ -70,6 +70,9 @@ object LocationReminderManager {
         }
         val request = GeofencingRequest.Builder()
             .setInitialTrigger(initialTrigger)
+            // デフォルトの応答性(数分単位)だとエリア再突入の検知が遅れたり
+            // 漏れたりしやすいため、短めに指定して繰り返しの発火を検知しやすくする。
+            .setNotificationResponsiveness(NOTIFICATION_RESPONSIVENESS_MILLIS)
             .addGeofence(geofence)
             .build()
 
@@ -103,4 +106,7 @@ object LocationReminderManager {
     }
 
     private const val TAG = "LocationReminder"
+
+    /** ジオフェンスの通知応答性(ミリ秒)。短くするほど再突入の検知が速くなる代わりに電池消費が増える。 */
+    private const val NOTIFICATION_RESPONSIVENESS_MILLIS = 60_000
 }

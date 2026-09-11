@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -30,9 +31,20 @@ class GeofenceReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val event = GeofencingEvent.fromIntent(intent) ?: return
-        if (event.hasError()) return
+        if (event.hasError()) {
+            Log.e(TAG, "ジオフェンスイベントがエラーを含んでいます: errorCode=${event.errorCode}")
+            return
+        }
 
         val transition = event.geofenceTransition
+        val transitionName = when (transition) {
+            Geofence.GEOFENCE_TRANSITION_ENTER -> "ENTER"
+            Geofence.GEOFENCE_TRANSITION_EXIT -> "EXIT"
+            else -> "transition=$transition"
+        }
+        val requestIds = event.triggeringGeofences?.map { it.requestId }.orEmpty()
+        Log.d(TAG, "ジオフェンスイベントを受信: $transitionName, requestIds=$requestIds")
+
         if (transition != Geofence.GEOFENCE_TRANSITION_ENTER &&
             transition != Geofence.GEOFENCE_TRANSITION_EXIT
         ) {
@@ -46,19 +58,30 @@ class GeofenceReceiver : BroadcastReceiver() {
             try {
                 val taskDao = AppDatabase.getInstance(context).taskDao()
                 taskIds.forEach { taskId ->
-                    val task = taskDao.getById(taskId) ?: return@forEach
-                    if (task.isDone) return@forEach
+                    val task = taskDao.getById(taskId)
+                    if (task == null) {
+                        Log.w(TAG, "タスク${taskId}が見つからないため通知をスキップします")
+                        return@forEach
+                    }
+                    if (task.isDone) {
+                        Log.d(TAG, "タスク${taskId}は完了済みのため通知をスキップします")
+                        return@forEach
+                    }
                     val matches = when (transition) {
                         Geofence.GEOFENCE_TRANSITION_ENTER -> task.notifyOnArrival
                         Geofence.GEOFENCE_TRANSITION_EXIT -> task.notifyOnDeparture
                         else -> false
                     }
-                    if (!matches) return@forEach
+                    if (!matches) {
+                        Log.d(TAG, "タスク${taskId}は$transitionName の通知を希望していないためスキップします")
+                        return@forEach
+                    }
                     val suffix = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) {
                         "に近づきました"
                     } else {
                         "から離れました"
                     }
+                    Log.d(TAG, "タスク${taskId}の通知を表示します")
                     showNotification(context, taskId, "${task.title}${suffix}")
                 }
             } finally {
@@ -120,5 +143,6 @@ class GeofenceReceiver : BroadcastReceiver() {
 
     companion object {
         const val CHANNEL_ID = "location_reminders"
+        private const val TAG = "LocationReminder"
     }
 }
