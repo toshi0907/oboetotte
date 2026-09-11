@@ -11,7 +11,6 @@ import com.toshi0907.oboetotte.data.Task
 object ReminderScheduler {
     const val EXTRA_TASK_ID = "task_id"
     const val EXTRA_IS_TEST = "is_test"
-    const val EXTRA_SNOOZE_MINUTES = "snooze_minutes"
     private const val TEST_REQUEST_CODE = -1
     const val TEST_DELAY_SECONDS = 5L
 
@@ -112,26 +111,26 @@ object ReminderScheduler {
         )
     }
 
-    /** 通知のスヌーズボタン用。[optionIndex]は[SNOOZE_OPTIONS]内のインデックス(リクエストコードの重複回避用)。 */
-    fun snoozePendingIntent(
-        context: Context,
-        taskId: Long,
-        option: SnoozeOption,
-        optionIndex: Int
-    ): PendingIntent {
-        val intent = Intent(context, SnoozeReceiver::class.java).apply {
+    /**
+     * 通知の「スヌーズ」ボタン用。Androidの通知は表示できるアクションボタンが最大3個程度に
+     * 制限されるため、[SNOOZE_OPTIONS]の件数分ボタンを並べる方式はやめ、1つの「スヌーズ」
+     * ボタンから[SnoozePickerActivity](透明な背景でダイアログのみ表示)を起動し、そこで
+     * 分数を選ばせる。リクエストコードは[openUrlPendingIntent]の`+9`と衝突しないよう`+5`を使う。
+     */
+    fun snoozePickerPendingIntent(context: Context, taskId: Long): PendingIntent {
+        val intent = Intent(context, SnoozePickerActivity::class.java).apply {
             putExtra(EXTRA_TASK_ID, taskId)
-            putExtra(EXTRA_SNOOZE_MINUTES, option.minutes)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        return PendingIntent.getBroadcast(
+        return PendingIntent.getActivity(
             context,
-            taskId.toInt() * 10 + optionIndex,
+            taskId.toInt() * 10 + SNOOZE_PICKER_REQUEST_CODE_OFFSET,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
-    /** 通知の「完了」ボタン用。[CompleteReceiver]宛で、[SnoozeReceiver]とは別コンポーネントのため衝突しない。 */
+    /** 通知の「完了」ボタン用。[CompleteReceiver]宛で、通知アクションを起動する他のコンポーネントとは異なるため衝突しない。 */
     fun completePendingIntent(context: Context, taskId: Long): PendingIntent {
         val intent = Intent(context, CompleteReceiver::class.java).apply {
             putExtra(EXTRA_TASK_ID, taskId)
@@ -146,8 +145,7 @@ object ReminderScheduler {
 
     /**
      * 通知の「リンクを開く」ボタン用。タスクの[url]をブラウザ等で開くACTION_VIEWの[PendingIntent]。
-     * リクエストコードは[snoozePendingIntent]([SNOOZE_OPTIONS]は最大5件、インデックス0〜4)と
-     * 衝突しないよう`taskId.toInt() * 10 + 9`を使う。
+     * リクエストコードは[snoozePickerPendingIntent]の`+5`と衝突しないよう`taskId.toInt() * 10 + 9`を使う。
      */
     fun openUrlPendingIntent(context: Context, taskId: Long, url: String): PendingIntent {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
@@ -161,5 +159,6 @@ object ReminderScheduler {
         )
     }
 
+    private const val SNOOZE_PICKER_REQUEST_CODE_OFFSET = 5
     private const val OPEN_URL_REQUEST_CODE_OFFSET = 9
 }

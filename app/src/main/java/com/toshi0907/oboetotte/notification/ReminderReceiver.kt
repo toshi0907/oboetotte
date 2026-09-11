@@ -87,13 +87,11 @@ class ReminderReceiver : BroadcastReceiver() {
                 "完了",
                 ReminderScheduler.completePendingIntent(context, notificationId)
             )
-            ReminderScheduler.SNOOZE_OPTIONS.forEachIndexed { index, option ->
-                builder.addAction(
-                    R.drawable.ic_notification,
-                    option.label,
-                    ReminderScheduler.snoozePendingIntent(context, notificationId, option, index)
-                )
-            }
+            builder.addAction(
+                R.drawable.ic_notification,
+                "スヌーズ",
+                ReminderScheduler.snoozePickerPendingIntent(context, notificationId)
+            )
         }
         if (!url.isNullOrBlank()) {
             builder.addAction(
