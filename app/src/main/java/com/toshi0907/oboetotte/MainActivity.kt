@@ -3,6 +3,7 @@ package com.toshi0907.oboetotte
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -303,6 +304,7 @@ fun TaskScreen(
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     var showManageLists by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showLocationDebug by remember { mutableStateOf(false) }
     val hasLocationTasks = allTasks.any {
         !it.isDone && it.latitude != null && it.longitude != null && it.radiusMeters != null &&
             (it.notifyOnArrival || it.notifyOnDeparture)
@@ -417,6 +419,12 @@ fun TaskScreen(
                         label = { Text("設定") }
                     )
                 }
+                item {
+                    AssistChip(
+                        onClick = { showLocationDebug = true },
+                        label = { Text("位置情報デバッグ") }
+                    )
+                }
             }
 
             Row(
@@ -502,6 +510,13 @@ fun TaskScreen(
                 showSettings = false
             },
             onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showLocationDebug) {
+        LocationDebugDialog(
+            allTasks = allTasks,
+            onDismiss = { showLocationDebug = false }
         )
     }
 }
@@ -616,6 +631,124 @@ fun SettingsDialog(
                 TextButton(onClick = onDismiss) {
                     Text("閉じる")
                 }
+            }
+        }
+    )
+}
+
+@Composable
+fun LocationDebugDialog(
+    allTasks: List<Task>,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var currentLocation by remember { mutableStateOf<GeocodeResult?>(null) }
+    var isLocating by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+    val foregroundGranted = LocationReminderManager.hasForegroundPermission(context)
+    val backgroundGranted = LocationReminderManager.hasBackgroundPermission(context)
+    val locationTasks = allTasks.filter {
+        !it.isDone && it.latitude != null && it.longitude != null && it.radiusMeters != null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("位置情報デバッグ") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "権限: 前面(${if (foregroundGranted) "許可" else "未許可"}) / " +
+                        "常に許可(${if (backgroundGranted) "許可" else "未許可"})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (foregroundGranted && backgroundGranted) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+                if (!backgroundGranted) {
+                    Text(
+                        text = "「常に許可」が無いと、アプリを閉じていてもジオフェンスが発火しません。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                TextButton(onClick = {
+                    isLocating = true
+                    errorText = null
+                    coroutineScope.launch {
+                        val result = getCurrentLocationResult(context)
+                        isLocating = false
+                        if (result != null) {
+                            currentLocation = result
+                        } else {
+                            errorText = "現在地を取得できませんでした"
+                        }
+                    }
+                }) {
+                    Text(if (isLocating) "取得中…" else "現在地を取得")
+                }
+                currentLocation?.let { location ->
+                    Text(
+                        text = "現在地: %.5f, %.5f".format(location.latitude, location.longitude),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                errorText?.let { error ->
+                    Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+
+                Text(text = "位置情報を設定したタスク", style = MaterialTheme.typography.titleSmall)
+                if (locationTasks.isEmpty()) {
+                    Text(
+                        "位置情報が設定された未完了タスクはありません",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    locationTasks.forEach { task ->
+                        val lat = task.latitude!!
+                        val lng = task.longitude!!
+                        val radius = task.radiusMeters!!
+                        val timing = listOfNotNull(
+                            if (task.notifyOnArrival) "到着時" else null,
+                            if (task.notifyOnDeparture) "離脱時" else null
+                        ).joinToString("/")
+                        Column(modifier = Modifier.padding(top = 4.dp)) {
+                            Text(task.title, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                text = "登録座標: %.5f, %.5f ・ 半径%s ・ %s".format(
+                                    lat,
+                                    lng,
+                                    radiusLabel(radius),
+                                    timing
+                                ),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            currentLocation?.let { current ->
+                                val results = FloatArray(1)
+                                Location.distanceBetween(current.latitude, current.longitude, lat, lng, results)
+                                val distance = results[0]
+                                val inside = distance <= radius
+                                Text(
+                                    text = "現在地からの距離: ${distance.toInt()}m (${if (inside) "圏内" else "圏外"})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (inside) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("閉じる")
             }
         }
     )
