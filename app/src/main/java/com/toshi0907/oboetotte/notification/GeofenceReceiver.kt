@@ -76,13 +76,8 @@ class GeofenceReceiver : BroadcastReceiver() {
                         Log.d(TAG, "タスク${taskId}は$transitionName の通知を希望していないためスキップします")
                         return@forEach
                     }
-                    val suffix = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) {
-                        "に近づきました"
-                    } else {
-                        "から離れました"
-                    }
                     Log.d(TAG, "タスク${taskId}の通知を表示します")
-                    showNotification(context, taskId, "${task.title}${suffix}", task.url)
+                    showNotification(context, taskId, task.title, task.url)
                 }
             } finally {
                 pendingResult.finish()
@@ -90,7 +85,7 @@ class GeofenceReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun showNotification(context: Context, taskId: Long, text: String, url: String?) {
+    private fun showNotification(context: Context, taskId: Long, title: String, url: String?) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -117,7 +112,7 @@ class GeofenceReceiver : BroadcastReceiver() {
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("位置リマインダー")
-            .setContentText(text)
+            .setContentText(title)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
