@@ -22,8 +22,25 @@ object AttachmentStorage {
     fun directory(context: Context): File =
         File(context.filesDir, DIR_NAME).apply { mkdirs() }
 
-    fun file(context: Context, storedFileName: String): File =
-        File(directory(context), storedFileName)
+    /**
+     * [storedFileName]はバックアップのインポート時など端末外で作られたZIP/JSONに由来する値を
+     * 扱うことがあるため、パストラバーサル(`../`等でattachmentsディレクトリの外を指す値)を
+     * 拒否する。単一のファイル名(パス区切り無し)であることと、正規化後のパスが必ず
+     * attachmentsディレクトリの直下に収まることの両方を検証する。
+     */
+    fun file(context: Context, storedFileName: String): File {
+        require(
+            storedFileName.isNotBlank() &&
+                storedFileName != "." &&
+                storedFileName != ".." &&
+                '/' !in storedFileName &&
+                '\\' !in storedFileName
+        ) { "不正な添付ファイル名です: $storedFileName" }
+        val dir = directory(context).canonicalFile
+        val candidate = File(dir, storedFileName).canonicalFile
+        require(candidate.parentFile == dir) { "不正な添付ファイル名です: $storedFileName" }
+        return candidate
+    }
 
     /**
      * [uri]の内容を端末内にコピーする。呼び出し元([TaskViewModel])が`Dispatchers.IO`上で

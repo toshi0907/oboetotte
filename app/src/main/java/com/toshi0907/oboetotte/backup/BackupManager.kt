@@ -2,6 +2,7 @@ package com.toshi0907.oboetotte.backup
 
 import android.content.Context
 import android.net.Uri
+import androidx.room.withTransaction
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.SavedLocation
@@ -143,8 +144,12 @@ object BackupManager {
                 while (entry != null) {
                     when {
                         entry.name == ENTRY_JSON -> jsonText = zip.readBytes().toString(Charsets.UTF_8)
-                        entry.name.startsWith("$ENTRY_ATTACHMENTS_DIR/") && !entry.isDirectory ->
-                            attachmentFiles[entry.name.removePrefix("$ENTRY_ATTACHMENTS_DIR/")] = zip.readBytes()
+                        entry.name.startsWith("$ENTRY_ATTACHMENTS_DIR/") && !entry.isDirectory -> {
+                            val storedFileName = entry.name.removePrefix("$ENTRY_ATTACHMENTS_DIR/")
+                            // パストラバーサルを狙った不正なエントリ名なら例外を投げてインポートを中断する。
+                            AttachmentStorage.file(context, storedFileName)
+                            attachmentFiles[storedFileName] = zip.readBytes()
+                        }
                     }
                     zip.closeEntry()
                     entry = zip.nextEntry
@@ -208,11 +213,14 @@ object BackupManager {
         } else {
             (0 until attachmentsJson.length()).map { i ->
                 val obj = attachmentsJson.getJSONObject(i)
+                val storedFileName = obj.getString("storedFileName")
+                // パストラバーサルを狙った不正な値なら例外を投げてインポートを中断する。
+                AttachmentStorage.file(context, storedFileName)
                 TaskAttachment(
                     id = obj.getLong("id"),
                     taskId = obj.getLong("taskId"),
                     fileName = obj.getString("fileName"),
-                    storedFileName = obj.getString("storedFileName"),
+                    storedFileName = storedFileName,
                     mimeType = if (obj.isNull("mimeType")) null else obj.getString("mimeType"),
                     sizeBytes = obj.getLong("sizeBytes"),
                     createdAt = obj.getLong("createdAt")
@@ -220,18 +228,33 @@ object BackupManager {
             }
         }
 
+        // 添付ファイルのメタデータ(JSON)と実体(ZIPエントリ)が1対1で対応していることを検証する。
+        // 一方にしか無い場合、実体の無い添付やインポートされない孤立ファイルが生まれてしまう。
+        val declaredNames = attachments.map { it.storedFileName }
+        if (declaredNames.toSet().size != declaredNames.size) {
+            throw IOException("バックアップの形式が不正です(添付ファイルのstoredFileNameが重複しています)")
+        }
+        if (declaredNames.toSet() != attachmentFiles.keys) {
+            throw IOException("バックアップの形式が不正です(添付ファイルのメタデータと実体が一致しません)")
+        }
+
+        // ここまでのバリデーションをすべて通過した後にのみ、既存データの削除・新データの反映を行う。
+        // DB側はトランザクションでまとめて置き換え、削除より前に検証を済ませているため、
+        // 万一トランザクションが失敗しても(ロールバックされ)既存データが失われることはない。
+        // ファイル実体の削除・書き込みはDBの置き換えが成功した後にのみ行う。
         val db = AppDatabase.getInstance(context)
-        db.taskDao().deleteAll()
-        db.taskListDao().deleteAll()
-        db.savedLocationDao().deleteAll()
-        db.taskAttachmentDao().deleteAll()
+        db.withTransaction {
+            db.taskDao().deleteAll()
+            db.taskListDao().deleteAll()
+            db.savedLocationDao().deleteAll()
+            db.taskAttachmentDao().deleteAll()
+            db.taskListDao().insertAll(lists)
+            db.taskDao().insertAll(tasks)
+            db.savedLocationDao().insertAll(savedLocations)
+            db.taskAttachmentDao().insertAll(attachments)
+        }
+
         AttachmentStorage.directory(context).listFiles()?.forEach { it.delete() }
-
-        db.taskListDao().insertAll(lists)
-        db.taskDao().insertAll(tasks)
-        db.savedLocationDao().insertAll(savedLocations)
-        db.taskAttachmentDao().insertAll(attachments)
-
         attachmentFiles.forEach { (storedFileName, fileBytes) ->
             AttachmentStorage.file(context, storedFileName).writeBytes(fileBytes)
         }
