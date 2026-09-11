@@ -496,6 +496,7 @@ fun TaskScreen(
         EditTaskDialog(
             task = task,
             allTasks = allTasks,
+            lists = lists,
             savedLocations = savedLocations,
             onConfirm = { t, edits ->
                 onUpdateTask(t, edits)
@@ -1175,6 +1176,7 @@ fun ManageLocationsDialog(
 fun EditTaskDialog(
     task: Task,
     allTasks: List<Task>,
+    lists: List<TaskList> = emptyList(),
     savedLocations: List<SavedLocation> = emptyList(),
     onConfirm: (task: Task, edits: TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
@@ -1182,6 +1184,7 @@ fun EditTaskDialog(
     onDismiss: () -> Unit
 ) {
     var title by remember(task.id) { mutableStateOf(task.title) }
+    var listId by remember(task.id) { mutableStateOf(task.listId) }
     var url by remember(task.id) { mutableStateOf(task.url ?: "") }
     var memo by remember(task.id) { mutableStateOf(task.memo ?: "") }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
@@ -1225,6 +1228,26 @@ fun EditTaskDialog(
                     onValueChange = { title = it },
                     singleLine = true
                 )
+                Text(text = "リスト", style = MaterialTheme.typography.titleSmall)
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = listId == null,
+                            onClick = { listId = null },
+                            label = { Text("なし") }
+                        )
+                    }
+                    items(lists, key = { it.id }) { list ->
+                        FilterChip(
+                            selected = listId == list.id,
+                            onClick = { listId = list.id },
+                            label = { Text(list.name) }
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
@@ -1510,6 +1533,7 @@ fun EditTaskDialog(
                         task,
                         TaskEdits(
                             title = title,
+                            listId = listId,
                             dueAt = dueAt,
                             repeatRule = repeatRule,
                             repeatDaysOfWeek = daysOfWeek,
@@ -1591,6 +1615,7 @@ fun EditTaskDialog(
         EditTaskDialog(
             task = nested,
             allTasks = allTasks,
+            lists = lists,
             savedLocations = savedLocations,
             onConfirm = { t, edits ->
                 onConfirm(t, edits)
