@@ -1195,7 +1195,11 @@ fun EditTaskDialog(
     var nestedTask by remember { mutableStateOf<Task?>(null) }
     val subtasks = allTasks.filter { it.parentTaskId == task.id }
 
-    var locationTab by remember(task.id) { mutableStateOf(LocationSourceTab.ADDRESS) }
+    var locationTab by remember(task.id) {
+        val matchesSavedLocation = task.latitude != null && task.longitude != null &&
+            savedLocations.any { it.latitude == task.latitude && it.longitude == task.longitude }
+        mutableStateOf(if (matchesSavedLocation) LocationSourceTab.SAVED else LocationSourceTab.ADDRESS)
+    }
     var addressInput by remember(task.id) { mutableStateOf(task.locationName ?: "") }
     var resolvedLocation by remember(task.id) {
         mutableStateOf(
