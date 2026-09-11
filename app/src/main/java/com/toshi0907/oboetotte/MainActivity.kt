@@ -2042,7 +2042,7 @@ private fun renderPdfPages(file: File, targetWidthPx: Int = 1080): List<Bitmap> 
                             Bitmap.Config.ARGB_8888
                         )
                         val matrix = Matrix().apply { setScale(scale, scale) }
-                        page.render(bitmap, null, matrix, PdfRenderer.RenderMode.RENDER_MODE_FOR_DISPLAY)
+                        page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                         bitmap
                     }
                 }
