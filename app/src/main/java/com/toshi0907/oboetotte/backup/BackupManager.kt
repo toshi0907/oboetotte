@@ -242,11 +242,15 @@ object BackupManager {
         }
 
         // ここまでのバリデーションをすべて通過した後にのみ、既存データの削除・新データの反映を行う。
-        // 添付ファイルの実体はまず一時ディレクトリへ書き込み(ディスク容量不足等のI/O失敗はここで
-        // 起きるため、この時点で失敗すれば既存のDB・添付ファイルには一切触れずに済む)、全件の
-        // 書き込みが成功した後にDBをトランザクションで置き換える。最後の添付ディレクトリの入れ替えは
-        // ファイル単位ではなくディレクトリ単位のrenameTo(同一ボリューム上でのディレクトリ名の
-        // 付け替えのみで完了する軽い操作)で行い、失敗時は戻り値を見て旧ディレクトリを復元する。
+        // DBとファイルシステムは別々のリソースであり単一のトランザクションにできないため、
+        // 失敗した場合に「より復元しやすい」順序で処理する。
+        // 1. 添付ファイルの実体をまず一時ディレクトリへ書き込む(ディスク容量不足等のI/O失敗は
+        //    ここで起きるため、失敗すれば既存のDB・添付ファイルには一切触れずに済む)。
+        // 2. 添付ディレクトリの入れ替え(ファイル単位ではなくディレクトリ単位のrenameTo。
+        //    同一ボリューム上でのディレクトリ名の付け替えのみで完了する軽い操作で、失敗の
+        //    可能性は低い)を、DBの更新より先に行う。この時点で失敗してもDBは未着手のまま。
+        // 3. 最後にDBをトランザクションで置き換える。DB側が失敗した場合(Room側で自動的に
+        //    ロールバックされる)は、2で入れ替えたディレクトリも明示的に元へ戻す。
         val stagingDir = File(context.filesDir, ATTACHMENT_STAGING_DIR_NAME).apply {
             deleteRecursively()
             mkdirs()
@@ -254,18 +258,6 @@ object BackupManager {
         try {
             attachmentFiles.forEach { (storedFileName, fileBytes) ->
                 File(stagingDir, storedFileName).writeBytes(fileBytes)
-            }
-
-            val db = AppDatabase.getInstance(context)
-            db.withTransaction {
-                db.taskDao().deleteAll()
-                db.taskListDao().deleteAll()
-                db.savedLocationDao().deleteAll()
-                db.taskAttachmentDao().deleteAll()
-                db.taskListDao().insertAll(lists)
-                db.taskDao().insertAll(tasks)
-                db.savedLocationDao().insertAll(savedLocations)
-                db.taskAttachmentDao().insertAll(attachments)
             }
 
             val attachmentsDir = AttachmentStorage.directory(context)
@@ -279,6 +271,27 @@ object BackupManager {
                 backupDir.renameTo(attachmentsDir)
                 throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
             }
+
+            try {
+                val db = AppDatabase.getInstance(context)
+                db.withTransaction {
+                    db.taskDao().deleteAll()
+                    db.taskListDao().deleteAll()
+                    db.savedLocationDao().deleteAll()
+                    db.taskAttachmentDao().deleteAll()
+                    db.taskListDao().insertAll(lists)
+                    db.taskDao().insertAll(tasks)
+                    db.savedLocationDao().insertAll(savedLocations)
+                    db.taskAttachmentDao().insertAll(attachments)
+                }
+            } catch (e: Exception) {
+                // DB側が失敗した場合は、直前で入れ替えたディレクトリを元に戻す
+                // (新しい添付ディレクトリの内容はstagingDirへ戻し、finallyで削除する)。
+                attachmentsDir.renameTo(stagingDir)
+                backupDir.renameTo(attachmentsDir)
+                throw e
+            }
+
             backupDir.deleteRecursively()
         } finally {
             stagingDir.deleteRecursively()
