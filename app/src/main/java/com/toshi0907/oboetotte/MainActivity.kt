@@ -6,10 +6,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.graphics.pdf.PdfRenderer
 import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -17,6 +20,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -725,6 +729,7 @@ fun TaskDetailDialog(
                             onDelete = {},
                             showDelete = false
                         )
+                        AttachmentPreview(attachment)
                     }
                 }
                 if (subtasks.isNotEmpty()) {
@@ -1425,6 +1430,10 @@ fun EditTaskDialog(
     val attachmentPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> uris.forEach { onAddAttachment(task, it) } }
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris -> uris.forEach { onAddAttachment(task, it) } }
+    var showAttachmentSourceDialog by remember { mutableStateOf(false) }
     var title by remember(task.id) { mutableStateOf(task.title) }
     var listId by remember(task.id) { mutableStateOf(task.listId) }
     var url by remember(task.id) { mutableStateOf(task.url ?: "") }
@@ -1756,7 +1765,7 @@ fun EditTaskDialog(
                         onDelete = { onDeleteAttachment(attachment) }
                     )
                 }
-                TextButton(onClick = { attachmentPicker.launch(arrayOf("*/*")) }) {
+                TextButton(onClick = { showAttachmentSourceDialog = true }) {
                     Text("ファイルを追加")
                 }
 
@@ -1904,6 +1913,34 @@ fun EditTaskDialog(
             onDismiss = { nestedTask = null }
         )
     }
+
+    if (showAttachmentSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showAttachmentSourceDialog = false },
+            title = { Text("添付ファイルの選択方法") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = {
+                        showAttachmentSourceDialog = false
+                        attachmentPicker.launch(arrayOf("*/*"))
+                    }) {
+                        Text("全ファイルから選択")
+                    }
+                    TextButton(onClick = {
+                        showAttachmentSourceDialog = false
+                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }) {
+                        Text("写真から選択")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAttachmentSourceDialog = false }) {
+                    Text("キャンセル")
+                }
+            }
+        )
+    }
 }
 
 private fun formatFileSize(bytes: Long): String = when {
@@ -1945,6 +1982,74 @@ private fun AttachmentThumbnail(attachment: TaskAttachment) {
         )
     } else {
         Text(text = "📎")
+    }
+}
+
+/**
+ * [attachment]が画像またはPDFであれば、確認画面にインラインでプレビュー表示する。
+ * それ以外の形式はプレビュー非対応のため何も表示しない([AttachmentRow]のタップで
+ * 外部アプリを開く導線のみとなる)。
+ */
+@Composable
+private fun AttachmentPreview(attachment: TaskAttachment) {
+    val context = LocalContext.current
+    when {
+        attachment.mimeType?.startsWith("image/") == true -> {
+            val bitmap by produceState<Bitmap?>(initialValue = null, attachment.storedFileName) {
+                value = withContext(Dispatchers.IO) {
+                    decodeThumbnail(AttachmentStorage.file(context, attachment.storedFileName), maxSize = 1080)
+                }
+            }
+            bitmap?.let {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = attachment.fileName,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+        attachment.mimeType == "application/pdf" -> {
+            val pages by produceState<List<Bitmap>>(initialValue = emptyList(), attachment.storedFileName) {
+                value = withContext(Dispatchers.IO) {
+                    renderPdfPages(AttachmentStorage.file(context, attachment.storedFileName))
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                pages.forEach { page ->
+                    Image(
+                        bitmap = page.asImageBitmap(),
+                        contentDescription = attachment.fileName,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** PDFの各ページを画面幅相当の解像度でBitmap化する。1ページずつ開いて閉じるため大きなPDFでも安全。 */
+private fun renderPdfPages(file: File, targetWidthPx: Int = 1080): List<Bitmap> {
+    if (!file.exists()) return emptyList()
+    return try {
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+            PdfRenderer(fd).use { renderer ->
+                (0 until renderer.pageCount).map { index ->
+                    renderer.openPage(index).use { page ->
+                        val scale = targetWidthPx.toFloat() / page.width
+                        val bitmap = Bitmap.createBitmap(
+                            targetWidthPx,
+                            (page.height * scale).toInt(),
+                            Bitmap.Config.ARGB_8888
+                        )
+                        val matrix = Matrix().apply { setScale(scale, scale) }
+                        page.render(bitmap, null, matrix, PdfRenderer.RenderMode.RENDER_MODE_FOR_DISPLAY)
+                        bitmap
+                    }
+                }
+            }
+        }
+    } catch (e: Exception) {
+        emptyList()
     }
 }
 
