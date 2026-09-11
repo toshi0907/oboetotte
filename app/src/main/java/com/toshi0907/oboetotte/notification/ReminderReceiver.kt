@@ -23,7 +23,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_TEST, false)) {
-            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showTaskActions = false)
+            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showTaskActions = false, url = null)
             return
         }
 
@@ -35,7 +35,7 @@ class ReminderReceiver : BroadcastReceiver() {
             try {
                 val task = AppDatabase.getInstance(context).taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
-                    showNotification(context, taskId, task.title, showTaskActions = true)
+                    showNotification(context, taskId, task.title, showTaskActions = true, url = task.url)
                 }
             } finally {
                 pendingResult.finish()
@@ -47,7 +47,8 @@ class ReminderReceiver : BroadcastReceiver() {
         context: Context,
         notificationId: Long,
         title: String,
-        showTaskActions: Boolean
+        showTaskActions: Boolean,
+        url: String?
     ) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -93,6 +94,13 @@ class ReminderReceiver : BroadcastReceiver() {
                     ReminderScheduler.snoozePendingIntent(context, notificationId, option, index)
                 )
             }
+        }
+        if (!url.isNullOrBlank()) {
+            builder.addAction(
+                R.drawable.ic_notification,
+                "リンクを開く",
+                ReminderScheduler.openUrlPendingIntent(context, notificationId, url)
+            )
         }
 
         val notification = builder.build()

@@ -42,7 +42,9 @@ data class TaskEdits(
     val longitude: Double?,
     val radiusMeters: Int?,
     val notifyOnArrival: Boolean,
-    val notifyOnDeparture: Boolean
+    val notifyOnDeparture: Boolean,
+    val url: String?,
+    val memo: String?
 )
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
@@ -119,7 +121,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 longitude = edits.longitude,
                 radiusMeters = edits.radiusMeters,
                 notifyOnArrival = edits.notifyOnArrival,
-                notifyOnDeparture = edits.notifyOnDeparture
+                notifyOnDeparture = edits.notifyOnDeparture,
+                url = edits.url,
+                memo = edits.memo
             )
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)

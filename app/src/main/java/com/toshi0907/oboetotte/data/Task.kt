@@ -19,5 +19,7 @@ data class Task(
     val longitude: Double? = null,
     val radiusMeters: Int? = null,
     val notifyOnArrival: Boolean = false,
-    val notifyOnDeparture: Boolean = false
+    val notifyOnDeparture: Boolean = false,
+    val url: String? = null,
+    val memo: String? = null
 )
