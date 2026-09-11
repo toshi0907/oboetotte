@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingRequest
@@ -45,7 +46,10 @@ object LocationReminderManager {
             unregister(context, task.id)
             return
         }
-        if (!hasLocationPermission(context)) return
+        if (!hasLocationPermission(context)) {
+            Log.w(TAG, "位置情報の権限が不足しているためタスク${task.id}のジオフェンス登録をスキップします")
+            return
+        }
 
         val transitionTypes = (if (task.notifyOnArrival) Geofence.GEOFENCE_TRANSITION_ENTER else 0) or
             (if (task.notifyOnDeparture) Geofence.GEOFENCE_TRANSITION_EXIT else 0)
@@ -57,16 +61,29 @@ object LocationReminderManager {
             .setTransitionTypes(transitionTypes)
             .build()
 
+        // 到着時通知が有効な場合、登録した時点で既に圏内にいればすぐに通知が届く
+        // (INITIAL_TRIGGER_ENTER)。動作確認のしやすさを優先している。
+        val initialTrigger = if (task.notifyOnArrival) {
+            GeofencingRequest.INITIAL_TRIGGER_ENTER
+        } else {
+            0
+        }
         val request = GeofencingRequest.Builder()
-            .setInitialTrigger(0)
+            .setInitialTrigger(initialTrigger)
             .addGeofence(geofence)
             .build()
 
         try {
             LocationServices.getGeofencingClient(context)
                 .addGeofences(request, geofencePendingIntent(context))
+                .addOnSuccessListener {
+                    Log.d(TAG, "タスク${task.id}のジオフェンスを登録しました")
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "タスク${task.id}のジオフェンス登録に失敗しました", e)
+                }
         } catch (e: SecurityException) {
-            // 権限が無い場合は登録をスキップする
+            Log.e(TAG, "タスク${task.id}のジオフェンス登録で権限エラーが発生しました", e)
         }
     }
 
@@ -84,4 +101,6 @@ object LocationReminderManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
     }
+
+    private const val TAG = "LocationReminder"
 }
