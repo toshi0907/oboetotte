@@ -2,6 +2,7 @@ package com.toshi0907.oboetotte.backup
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.room.withTransaction
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.data.AppDatabase
@@ -33,6 +34,7 @@ object BackupManager {
     private const val ENTRY_ATTACHMENTS_DIR = "attachments"
     private const val ATTACHMENT_STAGING_DIR_NAME = "attachments_import_staging"
     private const val ATTACHMENT_BACKUP_DIR_NAME = "attachments_import_backup"
+    private const val TAG = "BackupManager"
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 
     suspend fun export(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
@@ -267,8 +269,13 @@ object BackupManager {
                 throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
             }
             if (!stagingDir.renameTo(attachmentsDir)) {
-                // 失敗時は退避しておいた旧ディレクトリを元の名前に戻す。
-                backupDir.renameTo(attachmentsDir)
+                // 失敗時は退避しておいた旧ディレクトリを元の名前に戻す。この「復旧」自体が
+                // 失敗する可能性もゼロではないが、同一ボリューム上のディレクトリ名の
+                // 付け替えのみであり実際に失敗する見込みは極めて低いため、失敗時はLogに
+                // 残すのみとする(端末のストレージ破損など、アプリ側での対処が困難な状況)。
+                if (!backupDir.renameTo(attachmentsDir)) {
+                    Log.e(TAG, "添付ディレクトリの復旧に失敗しました: $backupDir")
+                }
                 throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
             }
 
@@ -287,8 +294,9 @@ object BackupManager {
             } catch (e: Exception) {
                 // DB側が失敗した場合は、直前で入れ替えたディレクトリを元に戻す
                 // (新しい添付ディレクトリの内容はstagingDirへ戻し、finallyで削除する)。
-                attachmentsDir.renameTo(stagingDir)
-                backupDir.renameTo(attachmentsDir)
+                if (!attachmentsDir.renameTo(stagingDir) || !backupDir.renameTo(attachmentsDir)) {
+                    Log.e(TAG, "DB更新失敗後の添付ディレクトリの復旧に失敗しました: $backupDir")
+                }
                 throw e
             }
 
