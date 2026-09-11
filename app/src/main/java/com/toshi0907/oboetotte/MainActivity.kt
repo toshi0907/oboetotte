@@ -1,8 +1,11 @@
 package com.toshi0907.oboetotte
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.location.Location
 import android.net.Uri
 import android.os.Build
@@ -17,6 +20,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +29,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -54,11 +59,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.ImeAction
@@ -69,19 +76,24 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
+import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.backup.BackupManager
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** [MainActivity]がナビゲーションライブラリ無しで切り替える2画面。 */
 private enum class MainScreen { Tasks, Settings }
@@ -94,7 +106,7 @@ class MainActivity : ComponentActivity() {
     ) { /* 拒否されてもアプリは通常通り使えるため、明示的なハンドリングは不要 */ }
 
     private val exportBackupLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
+        ActivityResultContracts.CreateDocument("application/zip")
     ) { uri ->
         if (uri != null) {
             lifecycleScope.launch {
@@ -141,6 +153,7 @@ class MainActivity : ComponentActivity() {
                     val allTasks by taskViewModel.allTasks.collectAsState()
                     val lists by taskViewModel.lists.collectAsState()
                     val savedLocations by taskViewModel.savedLocations.collectAsState()
+                    val attachments by taskViewModel.attachments.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
@@ -179,6 +192,9 @@ class MainActivity : ComponentActivity() {
                             onDeleteTask = taskViewModel::deleteTask,
                             onAddSubtask = taskViewModel::addSubtask,
                             savedLocations = savedLocations,
+                            allAttachments = attachments,
+                            onAddAttachment = taskViewModel::addAttachment,
+                            onDeleteAttachment = taskViewModel::deleteAttachment,
                             showExactAlarmBanner = !exactAlarmPermissionGranted,
                             onRequestExactAlarmPermission = {
                                 val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
@@ -217,14 +233,16 @@ class MainActivity : ComponentActivity() {
                             },
                             onExportRequested = {
                                 val zoned = ZonedDateTime.now()
-                                val fileName = "oboetotte_backup_%04d%02d%02d_%02d%02d%02d.json".format(
+                                val fileName = "oboetotte_backup_%04d%02d%02d_%02d%02d%02d.zip".format(
                                     zoned.year, zoned.monthValue, zoned.dayOfMonth,
                                     zoned.hour, zoned.minute, zoned.second
                                 )
                                 exportBackupLauncher.launch(fileName)
                             },
                             onImportRequested = {
-                                importBackupLauncher.launch(arrayOf("application/json"))
+                                // ZIP(添付あり)・旧形式のプレーンJSON(添付なし)の両方を受け付ける。
+                                // 実際の形式判定はBackupManager.import側でマジックナンバーを見て行う。
+                                importBackupLauncher.launch(arrayOf("*/*"))
                             },
                             onBack = { currentScreen = MainScreen.Tasks },
                             modifier = Modifier.padding(innerPadding)
@@ -333,6 +351,9 @@ fun TaskScreen(
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     savedLocations: List<SavedLocation> = emptyList(),
+    allAttachments: List<TaskAttachment> = emptyList(),
+    onAddAttachment: (Task, Uri) -> Unit = { _, _ -> },
+    onDeleteAttachment: (TaskAttachment) -> Unit = {},
     showExactAlarmBanner: Boolean = false,
     onRequestExactAlarmPermission: () -> Unit = {},
     locationPermissionGranted: Boolean = true,
@@ -496,12 +517,15 @@ fun TaskScreen(
             allTasks = allTasks,
             lists = lists,
             savedLocations = savedLocations,
+            allAttachments = allAttachments,
             onConfirm = { t, edits ->
                 onUpdateTask(t, edits)
                 editingTask = null
             },
             onAddSubtask = onAddSubtask,
             onToggleDone = onToggleDone,
+            onAddAttachment = onAddAttachment,
+            onDeleteAttachment = onDeleteAttachment,
             onDismiss = { editingTask = null }
         )
     }
@@ -1224,11 +1248,19 @@ fun EditTaskDialog(
     allTasks: List<Task>,
     lists: List<TaskList> = emptyList(),
     savedLocations: List<SavedLocation> = emptyList(),
+    allAttachments: List<TaskAttachment> = emptyList(),
     onConfirm: (task: Task, edits: TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     onToggleDone: (Task) -> Unit,
+    onAddAttachment: (Task, Uri) -> Unit = { _, _ -> },
+    onDeleteAttachment: (TaskAttachment) -> Unit = {},
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val attachments = allAttachments.filter { it.taskId == task.id }
+    val attachmentPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris -> uris.forEach { onAddAttachment(task, it) } }
     var title by remember(task.id) { mutableStateOf(task.title) }
     var listId by remember(task.id) { mutableStateOf(task.listId) }
     var url by remember(task.id) { mutableStateOf(task.url ?: "") }
@@ -1543,6 +1575,24 @@ fun EditTaskDialog(
                     minLines = 3
                 )
 
+                Text(text = "添付ファイル", style = MaterialTheme.typography.titleSmall)
+                attachments.forEach { attachment ->
+                    AttachmentRow(
+                        attachment = attachment,
+                        onOpen = {
+                            try {
+                                context.startActivity(AttachmentStorage.openIntent(context, attachment))
+                            } catch (e: ActivityNotFoundException) {
+                                Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onDelete = { onDeleteAttachment(attachment) }
+                    )
+                }
+                TextButton(onClick = { attachmentPicker.launch(arrayOf("*/*")) }) {
+                    Text("ファイルを追加")
+                }
+
                 Text(text = "サブタスク", style = MaterialTheme.typography.titleSmall)
                 subtasks.forEach { subtask ->
                     SubtaskTreeRow(
@@ -1674,14 +1724,91 @@ fun EditTaskDialog(
             allTasks = allTasks,
             lists = lists,
             savedLocations = savedLocations,
+            allAttachments = allAttachments,
             onConfirm = { t, edits ->
                 onConfirm(t, edits)
                 nestedTask = null
             },
             onAddSubtask = onAddSubtask,
             onToggleDone = onToggleDone,
+            onAddAttachment = onAddAttachment,
+            onDeleteAttachment = onDeleteAttachment,
             onDismiss = { nestedTask = null }
         )
+    }
+}
+
+private fun formatFileSize(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> "%.1fMB".format(bytes / (1024.0 * 1024.0))
+    bytes >= 1024 -> "%.1fKB".format(bytes / 1024.0)
+    else -> "${bytes}B"
+}
+
+/** 画像添付のサムネイル用に、大きすぎないサイズへダウンサンプリングしてデコードする。 */
+private fun decodeThumbnail(file: File, maxSize: Int = 200): Bitmap? {
+    if (!file.exists()) return null
+    return try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        var sampleSize = 1
+        while (bounds.outWidth / sampleSize > maxSize || bounds.outHeight / sampleSize > maxSize) {
+            sampleSize *= 2
+        }
+        BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sampleSize })
+    } catch (e: Exception) {
+        null
+    }
+}
+
+@Composable
+private fun AttachmentThumbnail(attachment: TaskAttachment) {
+    val context = LocalContext.current
+    val bitmap by produceState<Bitmap?>(initialValue = null, attachment.storedFileName) {
+        value = withContext(Dispatchers.IO) {
+            decodeThumbnail(AttachmentStorage.file(context, attachment.storedFileName))
+        }
+    }
+    val current = bitmap
+    if (current != null) {
+        Image(
+            bitmap = current.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier.size(40.dp)
+        )
+    } else {
+        Text(text = "📎")
+    }
+}
+
+@Composable
+private fun AttachmentRow(
+    attachment: TaskAttachment,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (attachment.mimeType?.startsWith("image/") == true) {
+            AttachmentThumbnail(attachment)
+        } else {
+            Text(text = "📎")
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = attachment.fileName, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = formatFileSize(attachment.sizeBytes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        TextButton(onClick = onDelete) {
+            Text("削除")
+        }
     }
 }
 

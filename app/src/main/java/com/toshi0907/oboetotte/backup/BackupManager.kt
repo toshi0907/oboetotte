@@ -2,23 +2,41 @@ package com.toshi0907.oboetotte.backup
 
 import android.content.Context
 import android.net.Uri
+import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import java.io.IOException
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+/**
+ * ローカルバックアップの実体。エクスポート形式はZIP(`oboetotte_backup_*.zip`)で、
+ * [ENTRY_JSON]エントリにタスク等のメタデータ([FORMAT_VERSION]管理のJSON、内容は従来と同じ)、
+ * [ENTRY_ATTACHMENTS_DIR]/配下に添付ファイルの実体を格納する。インポート時はZIPのマジックナンバー
+ * (先頭4バイト)で自動判別しており、添付機能追加前の(添付を含まない)プレーンJSON形式の
+ * バックアップファイルも引き続き読み込める。
+ */
 object BackupManager {
-    private const val FORMAT_VERSION = 1
+    private const val FORMAT_VERSION = 2
+    private const val ENTRY_JSON = "backup.json"
+    private const val ENTRY_ATTACHMENTS_DIR = "attachments"
+    private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 
-    suspend fun export(context: Context, uri: Uri) {
+    suspend fun export(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
         val db = AppDatabase.getInstance(context)
         val lists = db.taskListDao().getAll().first()
         val tasks = db.taskDao().getAll().first()
         val savedLocations = db.savedLocationDao().getAll().first()
+        val attachments = db.taskAttachmentDao().getAll().first()
 
         val json = JSONObject().apply {
             put("version", FORMAT_VERSION)
@@ -73,18 +91,69 @@ object BackupManager {
                     }
                 )
             )
+            put(
+                "attachments",
+                JSONArray(
+                    attachments.map { attachment ->
+                        JSONObject().apply {
+                            put("id", attachment.id)
+                            put("taskId", attachment.taskId)
+                            put("fileName", attachment.fileName)
+                            put("storedFileName", attachment.storedFileName)
+                            put("mimeType", attachment.mimeType ?: JSONObject.NULL)
+                            put("sizeBytes", attachment.sizeBytes)
+                            put("createdAt", attachment.createdAt)
+                        }
+                    }
+                )
+            )
         }
 
         val output = context.contentResolver.openOutputStream(uri)
             ?: throw IOException("出力先を開けませんでした")
-        output.use { it.write(json.toString(2).toByteArray(Charsets.UTF_8)) }
+        output.use { out ->
+            ZipOutputStream(out).use { zip ->
+                zip.putNextEntry(ZipEntry(ENTRY_JSON))
+                zip.write(json.toString(2).toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+
+                attachments.forEach { attachment ->
+                    val file = AttachmentStorage.file(context, attachment.storedFileName)
+                    if (file.exists()) {
+                        zip.putNextEntry(ZipEntry("$ENTRY_ATTACHMENTS_DIR/${attachment.storedFileName}"))
+                        file.inputStream().use { it.copyTo(zip) }
+                        zip.closeEntry()
+                    }
+                }
+            }
+        }
     }
 
-    suspend fun import(context: Context, uri: Uri) {
-        val input = context.contentResolver.openInputStream(uri)
+    suspend fun import(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: throw IOException("ファイルを開けませんでした")
-        val text = input.use { it.readBytes().toString(Charsets.UTF_8) }
-        val json = JSONObject(text)
+
+        val json: JSONObject
+        val attachmentFiles = mutableMapOf<String, ByteArray>()
+
+        if (isZip(bytes)) {
+            var jsonText: String? = null
+            ZipInputStream(bytes.inputStream()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    when {
+                        entry.name == ENTRY_JSON -> jsonText = zip.readBytes().toString(Charsets.UTF_8)
+                        entry.name.startsWith("$ENTRY_ATTACHMENTS_DIR/") && !entry.isDirectory ->
+                            attachmentFiles[entry.name.removePrefix("$ENTRY_ATTACHMENTS_DIR/")] = zip.readBytes()
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+            json = JSONObject(jsonText ?: throw IOException("バックアップの形式が不正です"))
+        } else {
+            json = JSONObject(bytes.toString(Charsets.UTF_8))
+        }
 
         val listsJson = json.getJSONArray("lists")
         val lists = (0 until listsJson.length()).map { i ->
@@ -115,7 +184,8 @@ object BackupManager {
             )
         }
 
-        // 旧形式のバックアップにはsavedLocationsキーが無いため、optJSONArrayで無ければ空扱いにする。
+        // 旧形式のバックアップにはsavedLocations/attachmentsキーが無いため、
+        // optJSONArrayで無ければ空扱いにする。
         val savedLocationsJson = json.optJSONArray("savedLocations")
         val savedLocations = if (savedLocationsJson == null) {
             emptyList()
@@ -132,12 +202,43 @@ object BackupManager {
             }
         }
 
+        val attachmentsJson = json.optJSONArray("attachments")
+        val attachments = if (attachmentsJson == null) {
+            emptyList()
+        } else {
+            (0 until attachmentsJson.length()).map { i ->
+                val obj = attachmentsJson.getJSONObject(i)
+                TaskAttachment(
+                    id = obj.getLong("id"),
+                    taskId = obj.getLong("taskId"),
+                    fileName = obj.getString("fileName"),
+                    storedFileName = obj.getString("storedFileName"),
+                    mimeType = if (obj.isNull("mimeType")) null else obj.getString("mimeType"),
+                    sizeBytes = obj.getLong("sizeBytes"),
+                    createdAt = obj.getLong("createdAt")
+                )
+            }
+        }
+
         val db = AppDatabase.getInstance(context)
         db.taskDao().deleteAll()
         db.taskListDao().deleteAll()
         db.savedLocationDao().deleteAll()
+        db.taskAttachmentDao().deleteAll()
+        AttachmentStorage.directory(context).listFiles()?.forEach { it.delete() }
+
         db.taskListDao().insertAll(lists)
         db.taskDao().insertAll(tasks)
         db.savedLocationDao().insertAll(savedLocations)
+        db.taskAttachmentDao().insertAll(attachments)
+
+        attachmentFiles.forEach { (storedFileName, fileBytes) ->
+            AttachmentStorage.file(context, storedFileName).writeBytes(fileBytes)
+        }
+    }
+
+    private fun isZip(bytes: ByteArray): Boolean {
+        if (bytes.size < ZIP_MAGIC.size) return false
+        return ZIP_MAGIC.indices.all { bytes[it] == ZIP_MAGIC[it] }
     }
 }
