@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -79,6 +80,9 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.launch
 
+/** [MainActivity]がナビゲーションライブラリ無しで切り替える2画面。 */
+private enum class MainScreen { Tasks, Settings }
+
 class MainActivity : ComponentActivity() {
     private val taskViewModel: TaskViewModel by viewModels()
 
@@ -138,6 +142,7 @@ class MainActivity : ComponentActivity() {
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
                     val lifecycleOwner = LocalLifecycleOwner.current
+                    var currentScreen by remember { mutableStateOf(MainScreen.Tasks) }
                     var exactAlarmPermissionGranted by remember {
                         mutableStateOf(ReminderScheduler.canScheduleExactAlarms(context))
                     }
@@ -156,62 +161,72 @@ class MainActivity : ComponentActivity() {
                         lifecycleOwner.lifecycle.addObserver(observer)
                         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                     }
-                    TaskScreen(
-                        tasks = tasks,
-                        allTasks = allTasks,
-                        lists = lists,
-                        selectedListId = selectedListId,
-                        onSelectList = taskViewModel::selectList,
-                        showCompleted = showCompleted,
-                        onSetShowCompleted = taskViewModel::setShowCompleted,
-                        onAddList = taskViewModel::addList,
-                        onRenameList = taskViewModel::renameList,
-                        onDeleteList = taskViewModel::deleteList,
-                        onAddTask = taskViewModel::addTask,
-                        onToggleDone = taskViewModel::toggleDone,
-                        onUpdateTask = taskViewModel::updateTask,
-                        onDeleteTask = taskViewModel::deleteTask,
-                        onAddSubtask = taskViewModel::addSubtask,
-                        savedLocations = savedLocations,
-                        onAddSavedLocation = taskViewModel::addSavedLocation,
-                        onUpdateSavedLocation = taskViewModel::updateSavedLocation,
-                        onDeleteSavedLocation = taskViewModel::deleteSavedLocation,
-                        showExactAlarmBanner = !exactAlarmPermissionGranted,
-                        onRequestExactAlarmPermission = {
-                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                                data = Uri.parse("package:$packageName")
-                            }
-                            startActivity(intent)
-                        },
-                        locationPermissionGranted = locationPermissionGranted,
-                        onRequestLocationSettings = {
-                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                data = Uri.fromParts("package", packageName, null)
-                            }
-                            startActivity(intent)
-                        },
-                        onSendTestNotification = {
-                            val scheduled = ReminderScheduler.scheduleTestNotification(context)
-                            val message = if (scheduled) {
-                                "${ReminderScheduler.TEST_DELAY_SECONDS}秒後にテスト通知が届きます"
-                            } else {
-                                "「アラームとリマインダー」の権限が無いため送信できません"
-                            }
-                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                        },
-                        onExportRequested = {
-                            val zoned = ZonedDateTime.now()
-                            val fileName = "oboetotte_backup_%04d%02d%02d_%02d%02d%02d.json".format(
-                                zoned.year, zoned.monthValue, zoned.dayOfMonth,
-                                zoned.hour, zoned.minute, zoned.second
-                            )
-                            exportBackupLauncher.launch(fileName)
-                        },
-                        onImportRequested = {
-                            importBackupLauncher.launch(arrayOf("application/json"))
-                        },
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                    when (currentScreen) {
+                        MainScreen.Tasks -> TaskScreen(
+                            tasks = tasks,
+                            allTasks = allTasks,
+                            lists = lists,
+                            selectedListId = selectedListId,
+                            onSelectList = taskViewModel::selectList,
+                            showCompleted = showCompleted,
+                            onSetShowCompleted = taskViewModel::setShowCompleted,
+                            onAddTask = taskViewModel::addTask,
+                            onToggleDone = taskViewModel::toggleDone,
+                            onUpdateTask = taskViewModel::updateTask,
+                            onDeleteTask = taskViewModel::deleteTask,
+                            onAddSubtask = taskViewModel::addSubtask,
+                            savedLocations = savedLocations,
+                            showExactAlarmBanner = !exactAlarmPermissionGranted,
+                            onRequestExactAlarmPermission = {
+                                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                    data = Uri.parse("package:$packageName")
+                                }
+                                startActivity(intent)
+                            },
+                            locationPermissionGranted = locationPermissionGranted,
+                            onRequestLocationSettings = {
+                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.fromParts("package", packageName, null)
+                                }
+                                startActivity(intent)
+                            },
+                            onOpenSettings = { currentScreen = MainScreen.Settings },
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                        MainScreen.Settings -> SettingsScreen(
+                            lists = lists,
+                            onAddList = taskViewModel::addList,
+                            onRenameList = taskViewModel::renameList,
+                            onDeleteList = taskViewModel::deleteList,
+                            savedLocations = savedLocations,
+                            onAddSavedLocation = taskViewModel::addSavedLocation,
+                            onUpdateSavedLocation = taskViewModel::updateSavedLocation,
+                            onDeleteSavedLocation = taskViewModel::deleteSavedLocation,
+                            allTasks = allTasks,
+                            onSendTestNotification = {
+                                val scheduled = ReminderScheduler.scheduleTestNotification(context)
+                                val message = if (scheduled) {
+                                    "${ReminderScheduler.TEST_DELAY_SECONDS}秒後にテスト通知が届きます"
+                                } else {
+                                    "「アラームとリマインダー」の権限が無いため送信できません"
+                                }
+                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                            },
+                            onExportRequested = {
+                                val zoned = ZonedDateTime.now()
+                                val fileName = "oboetotte_backup_%04d%02d%02d_%02d%02d%02d.json".format(
+                                    zoned.year, zoned.monthValue, zoned.dayOfMonth,
+                                    zoned.hour, zoned.minute, zoned.second
+                                )
+                                exportBackupLauncher.launch(fileName)
+                            },
+                            onImportRequested = {
+                                importBackupLauncher.launch(arrayOf("application/json"))
+                            },
+                            onBack = { currentScreen = MainScreen.Tasks },
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                    }
                 }
             }
         }
@@ -309,34 +324,22 @@ fun TaskScreen(
     onSelectList: (Long?) -> Unit,
     showCompleted: Boolean,
     onSetShowCompleted: (Boolean) -> Unit,
-    onAddList: (String) -> Unit,
-    onRenameList: (TaskList, String) -> Unit,
-    onDeleteList: (TaskList) -> Unit,
     onAddTask: (String) -> Unit,
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, TaskEdits) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     savedLocations: List<SavedLocation> = emptyList(),
-    onAddSavedLocation: (String, Double, Double, Int) -> Unit = { _, _, _, _ -> },
-    onUpdateSavedLocation: (SavedLocation, String, Int) -> Unit = { _, _, _ -> },
-    onDeleteSavedLocation: (SavedLocation) -> Unit = {},
     showExactAlarmBanner: Boolean = false,
     onRequestExactAlarmPermission: () -> Unit = {},
     locationPermissionGranted: Boolean = true,
     onRequestLocationSettings: () -> Unit = {},
-    onSendTestNotification: () -> Unit = {},
-    onExportRequested: () -> Unit = {},
-    onImportRequested: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
-    var showManageLists by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    var showLocationDebug by remember { mutableStateOf(false) }
-    var showManageLocations by remember { mutableStateOf(false) }
     val hasLocationTasks = allTasks.any {
         !it.isDone && it.latitude != null && it.longitude != null && it.radiusMeters != null &&
             (it.notifyOnArrival || it.notifyOnDeparture)
@@ -435,32 +438,8 @@ fun TaskScreen(
                 }
                 item {
                     AssistChip(
-                        onClick = { showManageLists = true },
-                        label = { Text("リストを編集") }
-                    )
-                }
-                item {
-                    AssistChip(
-                        onClick = { showManageLocations = true },
-                        label = { Text("場所を編集") }
-                    )
-                }
-                item {
-                    AssistChip(
-                        onClick = onSendTestNotification,
-                        label = { Text("テスト通知") }
-                    )
-                }
-                item {
-                    AssistChip(
-                        onClick = { showSettings = true },
+                        onClick = onOpenSettings,
                         label = { Text("設定") }
-                    )
-                }
-                item {
-                    AssistChip(
-                        onClick = { showLocationDebug = true },
-                        label = { Text("位置情報デバッグ") }
                     )
                 }
             }
@@ -526,47 +505,6 @@ fun TaskScreen(
                 deletingTask = null
             },
             onDismiss = { deletingTask = null }
-        )
-    }
-
-    if (showManageLists) {
-        ManageListsDialog(
-            lists = lists,
-            onAddList = onAddList,
-            onRenameList = onRenameList,
-            onDeleteList = onDeleteList,
-            onDismiss = { showManageLists = false }
-        )
-    }
-
-    if (showManageLocations) {
-        ManageLocationsDialog(
-            savedLocations = savedLocations,
-            onAddSavedLocation = onAddSavedLocation,
-            onUpdateSavedLocation = onUpdateSavedLocation,
-            onDeleteSavedLocation = onDeleteSavedLocation,
-            onDismiss = { showManageLocations = false }
-        )
-    }
-
-    if (showSettings) {
-        SettingsDialog(
-            onExport = {
-                onExportRequested()
-                showSettings = false
-            },
-            onImport = {
-                onImportRequested()
-                showSettings = false
-            },
-            onDismiss = { showSettings = false }
-        )
-    }
-
-    if (showLocationDebug) {
-        LocationDebugDialog(
-            allTasks = allTasks,
-            onDismiss = { showLocationDebug = false }
         )
     }
 }
@@ -649,41 +587,130 @@ fun TaskTreeRow(
     }
 }
 
+/**
+ * メイン画面(タスク一覧)を置き換える形で表示する設定用の全画面。ナビゲーション用のライブラリは
+ * 導入せず、[MainActivity]側の`currentScreen`状態で[TaskScreen]とどちらを描画するか切り替える
+ * だけのシンプルな構成。[BackHandler]でシステムの「戻る」操作もタスク一覧への復帰として扱う。
+ * リスト編集・場所編集・テスト通知・位置情報デバッグなど、以前メイン画面のチップに散らばっていた
+ * 補助的な操作をここに集約している。
+ */
 @Composable
-fun SettingsDialog(
-    onExport: () -> Unit,
-    onImport: () -> Unit,
-    onDismiss: () -> Unit
+fun SettingsScreen(
+    lists: List<TaskList>,
+    onAddList: (String) -> Unit,
+    onRenameList: (TaskList, String) -> Unit,
+    onDeleteList: (TaskList) -> Unit,
+    savedLocations: List<SavedLocation>,
+    onAddSavedLocation: (String, Double, Double, Int) -> Unit,
+    onUpdateSavedLocation: (SavedLocation, String, Int) -> Unit,
+    onDeleteSavedLocation: (SavedLocation) -> Unit,
+    allTasks: List<Task>,
+    onSendTestNotification: () -> Unit,
+    onExportRequested: () -> Unit,
+    onImportRequested: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("設定") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("タスクデータをファイルにバックアップしたり、バックアップから復元したりできます。")
-                Text(
-                    text = "インポートすると、現在のタスクデータはすべてインポートしたファイルの内容に置き換わります。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
+    var showManageLists by remember { mutableStateOf(false) }
+    var showManageLocations by remember { mutableStateOf(false) }
+    var showLocationDebug by remember { mutableStateOf(false) }
+
+    BackHandler(onBack = onBack)
+
+    Surface(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onBack) {
+                    Text("← 戻る")
+                }
+                Text(text = "設定", style = MaterialTheme.typography.headlineMedium)
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onExport) {
-                Text("エクスポート")
+
+            Text(
+                text = "リスト",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 16.dp)
+            )
+            TextButton(onClick = { showManageLists = true }) {
+                Text("リストを編集")
             }
-        },
-        dismissButton = {
+
+            Text(
+                text = "場所",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            TextButton(onClick = { showManageLocations = true }) {
+                Text("場所を編集")
+            }
+
+            Text(
+                text = "バックアップ",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                text = "タスクデータをファイルにバックアップしたり、バックアップから復元したりできます。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text = "インポートすると、現在のタスクデータはすべてインポートしたファイルの内容に置き換わります。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
             Row {
-                TextButton(onClick = onImport) {
+                TextButton(onClick = onExportRequested) {
+                    Text("エクスポート")
+                }
+                TextButton(onClick = onImportRequested) {
                     Text("インポート")
                 }
-                TextButton(onClick = onDismiss) {
-                    Text("閉じる")
-                }
+            }
+
+            Text(
+                text = "デバッグ",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            TextButton(onClick = onSendTestNotification) {
+                Text("テスト通知")
+            }
+            TextButton(onClick = { showLocationDebug = true }) {
+                Text("位置情報デバッグ")
             }
         }
-    )
+    }
+
+    if (showManageLists) {
+        ManageListsDialog(
+            lists = lists,
+            onAddList = onAddList,
+            onRenameList = onRenameList,
+            onDeleteList = onDeleteList,
+            onDismiss = { showManageLists = false }
+        )
+    }
+
+    if (showManageLocations) {
+        ManageLocationsDialog(
+            savedLocations = savedLocations,
+            onAddSavedLocation = onAddSavedLocation,
+            onUpdateSavedLocation = onUpdateSavedLocation,
+            onDeleteSavedLocation = onDeleteSavedLocation,
+            onDismiss = { showManageLocations = false }
+        )
+    }
+
+    if (showLocationDebug) {
+        LocationDebugDialog(
+            allTasks = allTasks,
+            onDismiss = { showLocationDebug = false }
+        )
+    }
 }
 
 @Composable
@@ -1688,9 +1715,6 @@ fun TaskScreenPreview() {
             onSelectList = {},
             showCompleted = true,
             onSetShowCompleted = {},
-            onAddList = {},
-            onRenameList = { _, _ -> },
-            onDeleteList = {},
             onAddTask = {},
             onToggleDone = {},
             onUpdateTask = { _, _ -> },
