@@ -22,18 +22,22 @@ object TaskCompletion {
 
         val rule = task.repeatRule
         val dueAt = task.dueAt
-        if (rule != null && dueAt != null) {
-            val nextTask = task.copy(id = 0, isDone = false, dueAt = nextDueAt(dueAt, rule))
+        val daysOfWeek = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek)
+        if (rule != null && dueAt != null && (rule != RepeatRule.WEEKLY_DAYS || daysOfWeek.isNotEmpty())) {
+            val nextTask = task.copy(id = 0, isDone = false, dueAt = nextDueAt(dueAt, rule, daysOfWeek))
             val newId = taskDao.insert(nextTask)
             ReminderScheduler.schedule(context, nextTask.copy(id = newId))
         }
     }
 
-    private fun nextDueAt(current: Long, rule: String): Long {
+    private fun nextDueAt(current: Long, rule: String, daysOfWeek: Set<Int>): Long {
         val zoned = Instant.ofEpochMilli(current).atZone(ZoneId.systemDefault())
         val next = when (rule) {
             RepeatRule.DAILY -> zoned.plusDays(1)
             RepeatRule.WEEKLY -> zoned.plusWeeks(1)
+            RepeatRule.WEEKLY_DAYS -> (1..7)
+                .map { zoned.plusDays(it.toLong()) }
+                .first { it.dayOfWeek.value in daysOfWeek }
             RepeatRule.MONTHLY -> zoned.plusMonths(1)
             else -> zoned
         }
