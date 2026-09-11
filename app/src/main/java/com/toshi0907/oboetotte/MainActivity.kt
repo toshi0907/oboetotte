@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -50,6 +51,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +67,7 @@ import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.backup.BackupManager
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import java.time.Instant
@@ -135,11 +138,16 @@ class MainActivity : ComponentActivity() {
                     var exactAlarmPermissionGranted by remember {
                         mutableStateOf(ReminderScheduler.canScheduleExactAlarms(context))
                     }
+                    var locationPermissionGranted by remember {
+                        mutableStateOf(LocationReminderManager.hasLocationPermission(context))
+                    }
                     DisposableEffect(lifecycleOwner) {
                         val observer = LifecycleEventObserver { _, event ->
                             if (event == Lifecycle.Event.ON_RESUME) {
                                 exactAlarmPermissionGranted =
                                     ReminderScheduler.canScheduleExactAlarms(context)
+                                locationPermissionGranted =
+                                    LocationReminderManager.hasLocationPermission(context)
                             }
                         }
                         lifecycleOwner.lifecycle.addObserver(observer)
@@ -165,6 +173,13 @@ class MainActivity : ComponentActivity() {
                         onRequestExactAlarmPermission = {
                             val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
                                 data = Uri.parse("package:$packageName")
+                            }
+                            startActivity(intent)
+                        },
+                        locationPermissionGranted = locationPermissionGranted,
+                        onRequestLocationSettings = {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
                             }
                             startActivity(intent)
                         },
@@ -226,6 +241,21 @@ private fun formatDueAt(millis: Long): String {
 
 private val WEEKDAY_LABELS = listOf(1 to "月", 2 to "火", 3 to "水", 4 to "木", 5 to "金", 6 to "土", 7 to "日")
 
+private fun radiusLabel(meters: Int): String =
+    if (meters >= 1000) "${meters / 1000}km" else "${meters}m"
+
+private fun locationLabel(task: Task): String? {
+    val name = task.locationName ?: return null
+    val radius = task.radiusMeters ?: return null
+    val timing = when {
+        task.notifyOnArrival && task.notifyOnDeparture -> "到着/離脱"
+        task.notifyOnArrival -> "到着時"
+        task.notifyOnDeparture -> "離脱時"
+        else -> return null
+    }
+    return "📍$name ${radiusLabel(radius)}・$timing"
+}
+
 private fun repeatRuleLabel(task: Task): String? {
     val rule = task.repeatRule ?: return null
     return when (rule) {
@@ -256,11 +286,13 @@ fun TaskScreen(
     onDeleteList: (TaskList) -> Unit,
     onAddTask: (String) -> Unit,
     onToggleDone: (Task) -> Unit,
-    onUpdateTask: (Task, String, Long?, String?, String?) -> Unit,
+    onUpdateTask: (Task, TaskEdits) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     showExactAlarmBanner: Boolean = false,
     onRequestExactAlarmPermission: () -> Unit = {},
+    locationPermissionGranted: Boolean = true,
+    onRequestLocationSettings: () -> Unit = {},
     onSendTestNotification: () -> Unit = {},
     onExportRequested: () -> Unit = {},
     onImportRequested: () -> Unit = {},
@@ -271,6 +303,10 @@ fun TaskScreen(
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     var showManageLists by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    val hasLocationTasks = allTasks.any {
+        !it.isDone && it.latitude != null && it.longitude != null && it.radiusMeters != null &&
+            (it.notifyOnArrival || it.notifyOnDeparture)
+    }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -295,6 +331,27 @@ fun TaskScreen(
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                         TextButton(onClick = onRequestExactAlarmPermission) {
+                            Text("設定を開く")
+                        }
+                    }
+                }
+            }
+
+            if (hasLocationTasks && !locationPermissionGranted) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "位置による通知を届けるには、位置情報の権限(常に許可)が必要です。",
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        TextButton(onClick = onRequestLocationSettings) {
                             Text("設定を開く")
                         }
                     }
@@ -403,8 +460,8 @@ fun TaskScreen(
         EditTaskDialog(
             task = task,
             allTasks = allTasks,
-            onConfirm = { t, newTitle, dueAt, repeatRule, repeatDaysOfWeek ->
-                onUpdateTask(t, newTitle, dueAt, repeatRule, repeatDaysOfWeek)
+            onConfirm = { t, edits ->
+                onUpdateTask(t, edits)
                 editingTask = null
             },
             onAddSubtask = onAddSubtask,
@@ -490,11 +547,12 @@ fun TaskTreeRow(
                         MaterialTheme.colorScheme.onSurface
                     }
                 )
-                if (task.dueAt != null || task.repeatRule != null) {
+                if (task.dueAt != null || task.repeatRule != null || locationLabel(task) != null) {
                     Text(
                         text = listOfNotNull(
                             task.dueAt?.let { formatDueAt(it) },
-                            repeatRuleLabel(task)
+                            repeatRuleLabel(task),
+                            locationLabel(task)
                         ).joinToString(" ・ "),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isOverdue) {
@@ -697,7 +755,7 @@ fun SubtaskTreeRow(
 fun EditTaskDialog(
     task: Task,
     allTasks: List<Task>,
-    onConfirm: (task: Task, title: String, dueAt: Long?, repeatRule: String?, repeatDaysOfWeek: String?) -> Unit,
+    onConfirm: (task: Task, edits: TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     onToggleDone: (Task) -> Unit,
     onDismiss: () -> Unit
@@ -713,6 +771,42 @@ fun EditTaskDialog(
     var subtaskInput by remember(task.id) { mutableStateOf("") }
     var nestedTask by remember { mutableStateOf<Task?>(null) }
     val subtasks = allTasks.filter { it.parentTaskId == task.id }
+
+    var useCurrentLocationTab by remember(task.id) { mutableStateOf(false) }
+    var addressInput by remember(task.id) { mutableStateOf(task.locationName ?: "") }
+    var resolvedLocation by remember(task.id) {
+        mutableStateOf(
+            if (task.latitude != null && task.longitude != null) {
+                GeocodeResult(task.locationName ?: "", task.latitude, task.longitude)
+            } else {
+                null
+            }
+        )
+    }
+    var locationSearchError by remember(task.id) { mutableStateOf<String?>(null) }
+    var isLocating by remember(task.id) { mutableStateOf(false) }
+    var radiusMeters by remember(task.id) { mutableStateOf(task.radiusMeters ?: 300) }
+    var notifyOnArrival by remember(task.id) { mutableStateOf(task.notifyOnArrival) }
+    var notifyOnDeparture by remember(task.id) { mutableStateOf(task.notifyOnDeparture) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        if (results.values.any { it }) {
+            isLocating = true
+            coroutineScope.launch {
+                val result = getCurrentLocationResult(context)
+                isLocating = false
+                if (result != null) {
+                    resolvedLocation = result
+                    locationSearchError = null
+                } else {
+                    locationSearchError = "現在地を取得できませんでした"
+                }
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -788,6 +882,142 @@ fun EditTaskDialog(
                     }
                 }
 
+                Text(text = "位置", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterChip(
+                        selected = !useCurrentLocationTab,
+                        onClick = { useCurrentLocationTab = false },
+                        label = { Text("住所で指定") }
+                    )
+                    FilterChip(
+                        selected = useCurrentLocationTab,
+                        onClick = {
+                            useCurrentLocationTab = true
+                            resolvedLocation = null
+                            locationSearchError = null
+                        },
+                        label = { Text("現在地を使う") }
+                    )
+                }
+
+                if (!useCurrentLocationTab) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = addressInput,
+                            onValueChange = { addressInput = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("住所または場所名") },
+                            singleLine = true
+                        )
+                        TextButton(onClick = {
+                            val query = addressInput
+                            coroutineScope.launch {
+                                val result = geocodeAddress(context, query)
+                                if (result != null) {
+                                    resolvedLocation = result
+                                    locationSearchError = null
+                                } else {
+                                    resolvedLocation = null
+                                    locationSearchError = "住所が見つかりませんでした。もう少し詳しい住所を入力してください。"
+                                }
+                            }
+                        }) {
+                            Text("検索")
+                        }
+                    }
+                } else {
+                    TextButton(onClick = {
+                        val hasPermission = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasPermission) {
+                            isLocating = true
+                            coroutineScope.launch {
+                                val result = getCurrentLocationResult(context)
+                                isLocating = false
+                                if (result != null) {
+                                    resolvedLocation = result
+                                    locationSearchError = null
+                                } else {
+                                    locationSearchError = "現在地を取得できませんでした"
+                                }
+                            }
+                        } else {
+                            locationPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                        }
+                    }) {
+                        Text(if (isLocating) "取得中…" else "📍 現在地を取得")
+                    }
+                }
+
+                resolvedLocation?.let { location ->
+                    Text(
+                        text = "✓ ${location.name.ifBlank { "選択した場所" }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                locationSearchError?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                if (resolvedLocation != null) {
+                    Text(text = "半径", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(100, 300, 500, 1000).forEach { meters ->
+                            FilterChip(
+                                selected = radiusMeters == meters,
+                                onClick = { radiusMeters = meters },
+                                label = { Text(radiusLabel(meters)) }
+                            )
+                        }
+                    }
+
+                    Text(text = "通知タイミング", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FilterChip(
+                            selected = notifyOnArrival,
+                            onClick = { notifyOnArrival = !notifyOnArrival },
+                            label = { Text("到着時") }
+                        )
+                        FilterChip(
+                            selected = notifyOnDeparture,
+                            onClick = { notifyOnDeparture = !notifyOnDeparture },
+                            label = { Text("離脱時") }
+                        )
+                    }
+                    if (!notifyOnArrival && !notifyOnDeparture) {
+                        Text(
+                            text = "通知タイミングを1つ以上選択してください",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    TextButton(onClick = {
+                        resolvedLocation = null
+                        addressInput = ""
+                        notifyOnArrival = false
+                        notifyOnDeparture = false
+                        locationSearchError = null
+                    }) {
+                        Text("位置をクリア")
+                    }
+                }
+
                 Text(text = "サブタスク", style = MaterialTheme.typography.titleSmall)
                 subtasks.forEach { subtask ->
                     SubtaskTreeRow(
@@ -819,7 +1049,9 @@ fun EditTaskDialog(
             }
         },
         confirmButton = {
-            val canSave = repeatRule != RepeatRule.WEEKLY_DAYS || selectedDays.isNotEmpty()
+            val repeatValid = repeatRule != RepeatRule.WEEKLY_DAYS || selectedDays.isNotEmpty()
+            val locationValid = resolvedLocation == null || notifyOnArrival || notifyOnDeparture
+            val canSave = repeatValid && locationValid
             TextButton(
                 enabled = canSave,
                 onClick = {
@@ -828,7 +1060,22 @@ fun EditTaskDialog(
                     } else {
                         null
                     }
-                    onConfirm(task, title, dueAt, repeatRule, daysOfWeek)
+                    val location = resolvedLocation
+                    onConfirm(
+                        task,
+                        TaskEdits(
+                            title = title,
+                            dueAt = dueAt,
+                            repeatRule = repeatRule,
+                            repeatDaysOfWeek = daysOfWeek,
+                            locationName = location?.name,
+                            latitude = location?.latitude,
+                            longitude = location?.longitude,
+                            radiusMeters = if (location != null) radiusMeters else null,
+                            notifyOnArrival = location != null && notifyOnArrival,
+                            notifyOnDeparture = location != null && notifyOnDeparture
+                        )
+                    )
                 }
             ) {
                 Text("保存")
@@ -897,8 +1144,8 @@ fun EditTaskDialog(
         EditTaskDialog(
             task = nested,
             allTasks = allTasks,
-            onConfirm = { t, newTitle, dueAt2, repeatRule2, repeatDaysOfWeek2 ->
-                onConfirm(t, newTitle, dueAt2, repeatRule2, repeatDaysOfWeek2)
+            onConfirm = { t, edits ->
+                onConfirm(t, edits)
                 nestedTask = null
             },
             onAddSubtask = onAddSubtask,
@@ -952,7 +1199,7 @@ fun TaskScreenPreview() {
             onDeleteList = {},
             onAddTask = {},
             onToggleDone = {},
-            onUpdateTask = { _, _, _, _, _ -> },
+            onUpdateTask = { _, _ -> },
             onDeleteTask = {},
             onAddSubtask = { _, _ -> }
         )

@@ -45,6 +45,12 @@ object BackupManager {
                             put("parentTaskId", task.parentTaskId ?: JSONObject.NULL)
                             put("repeatRule", task.repeatRule ?: JSONObject.NULL)
                             put("repeatDaysOfWeek", task.repeatDaysOfWeek ?: JSONObject.NULL)
+                            put("locationName", task.locationName ?: JSONObject.NULL)
+                            put("latitude", task.latitude ?: JSONObject.NULL)
+                            put("longitude", task.longitude ?: JSONObject.NULL)
+                            put("radiusMeters", task.radiusMeters ?: JSONObject.NULL)
+                            put("notifyOnArrival", task.notifyOnArrival)
+                            put("notifyOnDeparture", task.notifyOnDeparture)
                         }
                     }
                 )
@@ -79,7 +85,13 @@ object BackupManager {
                 listId = if (obj.isNull("listId")) null else obj.getLong("listId"),
                 parentTaskId = if (obj.isNull("parentTaskId")) null else obj.getLong("parentTaskId"),
                 repeatRule = if (obj.isNull("repeatRule")) null else obj.getString("repeatRule"),
-                repeatDaysOfWeek = if (obj.isNull("repeatDaysOfWeek")) null else obj.getString("repeatDaysOfWeek")
+                repeatDaysOfWeek = if (obj.isNull("repeatDaysOfWeek")) null else obj.getString("repeatDaysOfWeek"),
+                locationName = if (obj.isNull("locationName")) null else obj.getString("locationName"),
+                latitude = if (obj.isNull("latitude")) null else obj.getDouble("latitude"),
+                longitude = if (obj.isNull("longitude")) null else obj.getDouble("longitude"),
+                radiusMeters = if (obj.isNull("radiusMeters")) null else obj.getInt("radiusMeters"),
+                notifyOnArrival = obj.optBoolean("notifyOnArrival", false),
+                notifyOnDeparture = obj.optBoolean("notifyOnDeparture", false)
             )
         }
 

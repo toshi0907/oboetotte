@@ -3,6 +3,7 @@ package com.toshi0907.oboetotte
 import android.content.Context
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import java.time.Instant
 import java.time.ZoneId
@@ -19,6 +20,7 @@ object TaskCompletion {
         val taskDao = AppDatabase.getInstance(context).taskDao()
         taskDao.setDone(task.id, true)
         ReminderScheduler.cancel(context, task.id)
+        LocationReminderManager.unregister(context, task.id)
 
         val rule = task.repeatRule
         val dueAt = task.dueAt
@@ -26,7 +28,9 @@ object TaskCompletion {
         if (rule != null && dueAt != null && (rule != RepeatRule.WEEKLY_DAYS || daysOfWeek.isNotEmpty())) {
             val nextTask = task.copy(id = 0, isDone = false, dueAt = nextDueAt(dueAt, rule, daysOfWeek))
             val newId = taskDao.insert(nextTask)
-            ReminderScheduler.schedule(context, nextTask.copy(id = newId))
+            val inserted = nextTask.copy(id = newId)
+            ReminderScheduler.schedule(context, inserted)
+            LocationReminderManager.register(context, inserted)
         }
     }
 

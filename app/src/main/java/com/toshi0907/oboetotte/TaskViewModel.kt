@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,6 +29,20 @@ object RepeatRule {
 
     fun formatDaysOfWeek(days: Set<Int>): String = days.sorted().joinToString(",")
 }
+
+/** [EditTaskDialog]で編集可能な項目をまとめたもの。[TaskViewModel.updateTask]に渡す。 */
+data class TaskEdits(
+    val title: String,
+    val dueAt: Long?,
+    val repeatRule: String?,
+    val repeatDaysOfWeek: String?,
+    val locationName: String?,
+    val latitude: Double?,
+    val longitude: Double?,
+    val radiusMeters: Int?,
+    val notifyOnArrival: Boolean,
+    val notifyOnDeparture: Boolean
+)
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application
@@ -76,25 +91,34 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             if (task.isDone) {
                 taskDao.setDone(task.id, false)
-                ReminderScheduler.schedule(appContext, task.copy(isDone = false))
+                val updated = task.copy(isDone = false)
+                ReminderScheduler.schedule(appContext, updated)
+                LocationReminderManager.register(appContext, updated)
             } else {
                 TaskCompletion.complete(appContext, task)
             }
         }
     }
 
-    fun updateTask(task: Task, newTitle: String, dueAt: Long?, repeatRule: String?, repeatDaysOfWeek: String?) {
-        val trimmed = newTitle.trim()
+    fun updateTask(task: Task, edits: TaskEdits) {
+        val trimmed = edits.title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             val updated = task.copy(
                 title = trimmed,
-                dueAt = dueAt,
-                repeatRule = repeatRule,
-                repeatDaysOfWeek = repeatDaysOfWeek
+                dueAt = edits.dueAt,
+                repeatRule = edits.repeatRule,
+                repeatDaysOfWeek = edits.repeatDaysOfWeek,
+                locationName = edits.locationName,
+                latitude = edits.latitude,
+                longitude = edits.longitude,
+                radiusMeters = edits.radiusMeters,
+                notifyOnArrival = edits.notifyOnArrival,
+                notifyOnDeparture = edits.notifyOnDeparture
             )
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
+            LocationReminderManager.register(appContext, updated)
         }
     }
 
@@ -102,6 +126,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             taskDao.delete(task)
             ReminderScheduler.cancel(appContext, task.id)
+            LocationReminderManager.unregister(appContext, task.id)
         }
     }
 
