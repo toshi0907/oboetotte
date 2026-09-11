@@ -16,8 +16,9 @@ class BootReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val tasks = AppDatabase.getInstance(context).taskDao().getPendingWithDueDate()
-                tasks.forEach { task -> ReminderScheduler.schedule(context, task) }
+                val taskDao = AppDatabase.getInstance(context).taskDao()
+                taskDao.getPendingWithDueDate().forEach { task -> ReminderScheduler.schedule(context, task) }
+                taskDao.getPendingWithLocation().forEach { task -> LocationReminderManager.register(context, task) }
             } finally {
                 pendingResult.finish()
             }

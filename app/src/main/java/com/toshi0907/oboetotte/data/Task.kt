@@ -13,5 +13,11 @@ data class Task(
     val listId: Long? = null,
     val parentTaskId: Long? = null,
     val repeatRule: String? = null,
-    val repeatDaysOfWeek: String? = null
+    val repeatDaysOfWeek: String? = null,
+    val locationName: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val radiusMeters: Int? = null,
+    val notifyOnArrival: Boolean = false,
+    val notifyOnDeparture: Boolean = false
 )

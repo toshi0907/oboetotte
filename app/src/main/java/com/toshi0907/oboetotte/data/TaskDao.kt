@@ -21,6 +21,12 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE dueAt IS NOT NULL AND isDone = 0")
     suspend fun getPendingWithDueDate(): List<Task>
 
+    @Query(
+        "SELECT * FROM tasks WHERE latitude IS NOT NULL AND longitude IS NOT NULL " +
+            "AND radiusMeters IS NOT NULL AND isDone = 0"
+    )
+    suspend fun getPendingWithLocation(): List<Task>
+
     @Query("UPDATE tasks SET isDone = :isDone WHERE id = :taskId")
     suspend fun setDone(taskId: Long, isDone: Boolean)
 
