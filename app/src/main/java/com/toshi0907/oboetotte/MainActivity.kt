@@ -2009,13 +2009,13 @@ private fun AttachmentPreview(attachment: TaskAttachment) {
             }
         }
         attachment.mimeType == "application/pdf" -> {
-            val pages by produceState<List<Bitmap>>(initialValue = emptyList(), attachment.storedFileName) {
+            val pages by produceState<List<Bitmap>?>(initialValue = null, attachment.storedFileName) {
                 value = withContext(Dispatchers.IO) {
                     renderPdfPages(AttachmentStorage.file(context, attachment.storedFileName))
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                pages.forEach { page ->
+                pages?.forEach { page ->
                     Image(
                         bitmap = page.asImageBitmap(),
                         contentDescription = attachment.fileName,
@@ -2027,12 +2027,29 @@ private fun AttachmentPreview(attachment: TaskAttachment) {
     }
 }
 
-/** PDFの各ページを画面幅相当の解像度でBitmap化する。1ページずつ開いて閉じるため大きなPDFでも安全。 */
-private fun renderPdfPages(file: File, targetWidthPx: Int = 1080): List<Bitmap> {
+/** 全ページ分のプレビュー用ビットマップの合計サイズがこれを超える場合はプレビューを諦める(OutOfMemoryError対策)。 */
+private const val MAX_PDF_PREVIEW_BYTES = 64L * 1024 * 1024
+
+/**
+ * PDFの各ページを画面幅相当の解像度でBitmap化する。1ページずつ開いて閉じるためページ単位では安全だが、
+ * 全ページ分のビットマップを同時に保持するため、合計サイズが[MAX_PDF_PREVIEW_BYTES]を超えるページ数・
+ * 解像度のPDFではメモリ超過を避けるためプレビューせずnullを返す(呼び出し元は`AttachmentRow`のタップに
+ * よる外部アプリでの表示にフォールバックする)。
+ */
+private fun renderPdfPages(file: File, targetWidthPx: Int = 1080): List<Bitmap>? {
     if (!file.exists()) return emptyList()
     return try {
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
             PdfRenderer(fd).use { renderer ->
+                var estimatedBytes = 0L
+                for (index in 0 until renderer.pageCount) {
+                    renderer.openPage(index).use { page ->
+                        val scale = targetWidthPx.toFloat() / page.width
+                        val height = (page.height * scale).toInt()
+                        estimatedBytes += targetWidthPx.toLong() * height * 4
+                    }
+                }
+                if (estimatedBytes > MAX_PDF_PREVIEW_BYTES) return@use null
                 (0 until renderer.pageCount).map { index ->
                     renderer.openPage(index).use { page ->
                         val scale = targetWidthPx.toFloat() / page.width
