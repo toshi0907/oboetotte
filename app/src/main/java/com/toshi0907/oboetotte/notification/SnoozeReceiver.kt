@@ -16,7 +16,9 @@ class SnoozeReceiver : BroadcastReceiver() {
         val snoozeMinutes = intent.getLongExtra(ReminderScheduler.EXTRA_SNOOZE_MINUTES, -1L)
         if (taskId == -1L || snoozeMinutes <= 0) return
 
-        NotificationManagerCompat.from(context).cancel(taskId.toInt())
+        // スヌーズボタンは期限日時通知にのみ付与されるため、そのタグの通知だけを消去する
+        // (位置情報通知が同時に表示されていても消さない)。
+        NotificationManagerCompat.from(context).cancel(ReminderScheduler.NOTIFICATION_TAG_DUE, taskId.toInt())
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {

@@ -16,7 +16,11 @@ class CompleteReceiver : BroadcastReceiver() {
         val taskId = intent.getLongExtra(ReminderScheduler.EXTRA_TASK_ID, -1L)
         if (taskId == -1L) return
 
-        NotificationManagerCompat.from(context).cancel(taskId.toInt())
+        // タスク完了時は、期限日時・位置情報どちらの通知が表示中でも両方消去する。
+        NotificationManagerCompat.from(context).apply {
+            cancel(ReminderScheduler.NOTIFICATION_TAG_DUE, taskId.toInt())
+            cancel(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt())
+        }
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {

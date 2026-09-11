@@ -15,6 +15,15 @@ object ReminderScheduler {
     private const val TEST_REQUEST_CODE = -1
     const val TEST_DELAY_SECONDS = 5L
 
+    /**
+     * 通知の識別に使うタグ。期限日時通知(ReminderReceiver)と位置情報通知(GeofenceReceiver)は
+     * 通知ID自体はどちらも`taskId.toInt()`で揃えているが(「完了」ボタンでの消去用途)、タグを
+     * 分けることで、同じタスクに両方のリマインダーを設定していて両方が発火した場合でも、
+     * 片方がもう片方を上書きせず別々の通知として両方とも表示される。
+     */
+    const val NOTIFICATION_TAG_DUE = "due"
+    const val NOTIFICATION_TAG_LOCATION = "location"
+
     data class SnoozeOption(val label: String, val minutes: Long)
 
     val SNOOZE_OPTIONS = listOf(

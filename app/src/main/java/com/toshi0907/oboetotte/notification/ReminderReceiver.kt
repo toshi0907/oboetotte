@@ -113,7 +113,8 @@ class ReminderReceiver : BroadcastReceiver() {
         ) {
             return
         }
-        NotificationManagerCompat.from(context).notify(notificationId.toInt(), notification)
+        NotificationManagerCompat.from(context)
+            .notify(ReminderScheduler.NOTIFICATION_TAG_DUE, notificationId.toInt(), notification)
     }
 
     companion object {

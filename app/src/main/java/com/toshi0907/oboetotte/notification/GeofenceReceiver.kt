@@ -140,7 +140,10 @@ class GeofenceReceiver : BroadcastReceiver() {
         }
         // 期限日時通知(ReminderReceiver)と同じ taskId.toInt() をIDに使うため、
         // 「完了」ボタン(CompleteReceiver)からはどちらの通知でも正しく消去できる。
-        NotificationManagerCompat.from(context).notify(taskId.toInt(), notification)
+        // タグは期限日時通知と分けており、両方のリマインダーが発火しても片方がもう片方を
+        // 上書きせず別々の通知として表示される。
+        NotificationManagerCompat.from(context)
+            .notify(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt(), notification)
     }
 
     companion object {
