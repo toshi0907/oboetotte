@@ -7,11 +7,16 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Task::class, TaskList::class, SavedLocation::class], version = 10, exportSchema = false)
+@Database(
+    entities = [Task::class, TaskList::class, SavedLocation::class, TaskAttachment::class],
+    version = 11,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun taskListDao(): TaskListDao
     abstract fun savedLocationDao(): SavedLocationDao
+    abstract fun taskAttachmentDao(): TaskAttachmentDao
 
     companion object {
         @Volatile
@@ -55,6 +60,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `task_attachments` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`taskId` INTEGER NOT NULL, " +
+                        "`fileName` TEXT NOT NULL, " +
+                        "`storedFileName` TEXT NOT NULL, " +
+                        "`mimeType` TEXT, " +
+                        "`sizeBytes` INTEGER NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -62,7 +82,13 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "oboetotte.db"
                 )
-                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(
+                        MIGRATION_6_7,
+                        MIGRATION_7_8,
+                        MIGRATION_8_9,
+                        MIGRATION_9_10,
+                        MIGRATION_10_11
+                    )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
             }

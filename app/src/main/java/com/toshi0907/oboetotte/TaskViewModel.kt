@@ -1,20 +1,25 @@
 package com.toshi0907.oboetotte
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 object RepeatRule {
     const val DAILY = "DAILY"
@@ -53,11 +58,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val taskDao = AppDatabase.getInstance(application).taskDao()
     private val taskListDao = AppDatabase.getInstance(application).taskListDao()
     private val savedLocationDao = AppDatabase.getInstance(application).savedLocationDao()
+    private val taskAttachmentDao = AppDatabase.getInstance(application).taskAttachmentDao()
 
     val lists: StateFlow<List<TaskList>> = taskListDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val savedLocations: StateFlow<List<SavedLocation>> = savedLocationDao.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val attachments: StateFlow<List<TaskAttachment>> = taskAttachmentDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val allTasks: StateFlow<List<Task>> = taskDao.getAll()
@@ -135,9 +144,41 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteTask(task: Task) {
         viewModelScope.launch {
+            val attachmentsToDelete = taskAttachmentDao.getForTask(task.id)
             taskDao.delete(task)
+            taskAttachmentDao.deleteForTask(task.id)
             ReminderScheduler.cancel(appContext, task.id)
             LocationReminderManager.unregister(appContext, task.id)
+            withContext(Dispatchers.IO) {
+                attachmentsToDelete.forEach { AttachmentStorage.delete(appContext, it.storedFileName) }
+            }
+        }
+    }
+
+    /** [uri]の内容を端末内にコピーし、[task]の添付ファイルとして登録する。 */
+    fun addAttachment(task: Task, uri: Uri) {
+        viewModelScope.launch {
+            val copied = withContext(Dispatchers.IO) {
+                AttachmentStorage.copyToStorage(appContext, uri)
+            } ?: return@launch
+            taskAttachmentDao.insert(
+                TaskAttachment(
+                    taskId = task.id,
+                    fileName = copied.fileName,
+                    storedFileName = copied.storedFileName,
+                    mimeType = copied.mimeType,
+                    sizeBytes = copied.sizeBytes
+                )
+            )
+        }
+    }
+
+    fun deleteAttachment(attachment: TaskAttachment) {
+        viewModelScope.launch {
+            taskAttachmentDao.delete(attachment)
+            withContext(Dispatchers.IO) {
+                AttachmentStorage.delete(appContext, attachment.storedFileName)
+            }
         }
     }
 
