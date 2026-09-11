@@ -2,12 +2,15 @@ package com.toshi0907.oboetotte.backup
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
+import androidx.room.withTransaction
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
+import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -29,6 +32,9 @@ object BackupManager {
     private const val FORMAT_VERSION = 2
     private const val ENTRY_JSON = "backup.json"
     private const val ENTRY_ATTACHMENTS_DIR = "attachments"
+    private const val ATTACHMENT_STAGING_DIR_NAME = "attachments_import_staging"
+    private const val ATTACHMENT_BACKUP_DIR_NAME = "attachments_import_backup"
+    private const val TAG = "BackupManager"
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 
     suspend fun export(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
@@ -143,8 +149,12 @@ object BackupManager {
                 while (entry != null) {
                     when {
                         entry.name == ENTRY_JSON -> jsonText = zip.readBytes().toString(Charsets.UTF_8)
-                        entry.name.startsWith("$ENTRY_ATTACHMENTS_DIR/") && !entry.isDirectory ->
-                            attachmentFiles[entry.name.removePrefix("$ENTRY_ATTACHMENTS_DIR/")] = zip.readBytes()
+                        entry.name.startsWith("$ENTRY_ATTACHMENTS_DIR/") && !entry.isDirectory -> {
+                            val storedFileName = entry.name.removePrefix("$ENTRY_ATTACHMENTS_DIR/")
+                            // パストラバーサルを狙った不正なエントリ名なら例外を投げてインポートを中断する。
+                            AttachmentStorage.file(context, storedFileName)
+                            attachmentFiles[storedFileName] = zip.readBytes()
+                        }
                     }
                     zip.closeEntry()
                     entry = zip.nextEntry
@@ -208,11 +218,14 @@ object BackupManager {
         } else {
             (0 until attachmentsJson.length()).map { i ->
                 val obj = attachmentsJson.getJSONObject(i)
+                val storedFileName = obj.getString("storedFileName")
+                // パストラバーサルを狙った不正な値なら例外を投げてインポートを中断する。
+                AttachmentStorage.file(context, storedFileName)
                 TaskAttachment(
                     id = obj.getLong("id"),
                     taskId = obj.getLong("taskId"),
                     fileName = obj.getString("fileName"),
-                    storedFileName = obj.getString("storedFileName"),
+                    storedFileName = storedFileName,
                     mimeType = if (obj.isNull("mimeType")) null else obj.getString("mimeType"),
                     sizeBytes = obj.getLong("sizeBytes"),
                     createdAt = obj.getLong("createdAt")
@@ -220,20 +233,76 @@ object BackupManager {
             }
         }
 
-        val db = AppDatabase.getInstance(context)
-        db.taskDao().deleteAll()
-        db.taskListDao().deleteAll()
-        db.savedLocationDao().deleteAll()
-        db.taskAttachmentDao().deleteAll()
-        AttachmentStorage.directory(context).listFiles()?.forEach { it.delete() }
+        // 添付ファイルのメタデータ(JSON)と実体(ZIPエントリ)が1対1で対応していることを検証する。
+        // 一方にしか無い場合、実体の無い添付やインポートされない孤立ファイルが生まれてしまう。
+        val declaredNames = attachments.map { it.storedFileName }
+        if (declaredNames.toSet().size != declaredNames.size) {
+            throw IOException("バックアップの形式が不正です(添付ファイルのstoredFileNameが重複しています)")
+        }
+        if (declaredNames.toSet() != attachmentFiles.keys) {
+            throw IOException("バックアップの形式が不正です(添付ファイルのメタデータと実体が一致しません)")
+        }
 
-        db.taskListDao().insertAll(lists)
-        db.taskDao().insertAll(tasks)
-        db.savedLocationDao().insertAll(savedLocations)
-        db.taskAttachmentDao().insertAll(attachments)
+        // ここまでのバリデーションをすべて通過した後にのみ、既存データの削除・新データの反映を行う。
+        // DBとファイルシステムは別々のリソースであり単一のトランザクションにできないため、
+        // 失敗した場合に「より復元しやすい」順序で処理する。
+        // 1. 添付ファイルの実体をまず一時ディレクトリへ書き込む(ディスク容量不足等のI/O失敗は
+        //    ここで起きるため、失敗すれば既存のDB・添付ファイルには一切触れずに済む)。
+        // 2. 添付ディレクトリの入れ替え(ファイル単位ではなくディレクトリ単位のrenameTo。
+        //    同一ボリューム上でのディレクトリ名の付け替えのみで完了する軽い操作で、失敗の
+        //    可能性は低い)を、DBの更新より先に行う。この時点で失敗してもDBは未着手のまま。
+        // 3. 最後にDBをトランザクションで置き換える。DB側が失敗した場合(Room側で自動的に
+        //    ロールバックされる)は、2で入れ替えたディレクトリも明示的に元へ戻す。
+        val stagingDir = File(context.filesDir, ATTACHMENT_STAGING_DIR_NAME).apply {
+            deleteRecursively()
+            mkdirs()
+        }
+        try {
+            attachmentFiles.forEach { (storedFileName, fileBytes) ->
+                File(stagingDir, storedFileName).writeBytes(fileBytes)
+            }
 
-        attachmentFiles.forEach { (storedFileName, fileBytes) ->
-            AttachmentStorage.file(context, storedFileName).writeBytes(fileBytes)
+            val attachmentsDir = AttachmentStorage.directory(context)
+            val backupDir = File(context.filesDir, ATTACHMENT_BACKUP_DIR_NAME)
+            backupDir.deleteRecursively()
+            if (!attachmentsDir.renameTo(backupDir)) {
+                throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
+            }
+            if (!stagingDir.renameTo(attachmentsDir)) {
+                // 失敗時は退避しておいた旧ディレクトリを元の名前に戻す。この「復旧」自体が
+                // 失敗する可能性もゼロではないが、同一ボリューム上のディレクトリ名の
+                // 付け替えのみであり実際に失敗する見込みは極めて低いため、失敗時はLogに
+                // 残すのみとする(端末のストレージ破損など、アプリ側での対処が困難な状況)。
+                if (!backupDir.renameTo(attachmentsDir)) {
+                    Log.e(TAG, "添付ディレクトリの復旧に失敗しました: $backupDir")
+                }
+                throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
+            }
+
+            try {
+                val db = AppDatabase.getInstance(context)
+                db.withTransaction {
+                    db.taskDao().deleteAll()
+                    db.taskListDao().deleteAll()
+                    db.savedLocationDao().deleteAll()
+                    db.taskAttachmentDao().deleteAll()
+                    db.taskListDao().insertAll(lists)
+                    db.taskDao().insertAll(tasks)
+                    db.savedLocationDao().insertAll(savedLocations)
+                    db.taskAttachmentDao().insertAll(attachments)
+                }
+            } catch (e: Exception) {
+                // DB側が失敗した場合は、直前で入れ替えたディレクトリを元に戻す
+                // (新しい添付ディレクトリの内容はstagingDirへ戻し、finallyで削除する)。
+                if (!attachmentsDir.renameTo(stagingDir) || !backupDir.renameTo(attachmentsDir)) {
+                    Log.e(TAG, "DB更新失敗後の添付ディレクトリの復旧に失敗しました: $backupDir")
+                }
+                throw e
+            }
+
+            backupDir.deleteRecursively()
+        } finally {
+            stagingDir.deleteRecursively()
         }
     }
 
