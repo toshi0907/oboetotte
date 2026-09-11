@@ -362,7 +362,7 @@ fun TaskScreen(
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
-    var editingTask by remember { mutableStateOf<Task?>(null) }
+    var viewingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     val hasLocationTasks = allTasks.any {
         !it.isDone && it.latitude != null && it.longitude != null && it.radiusMeters != null &&
@@ -503,7 +503,7 @@ fun TaskScreen(
                         allTasks = allTasks,
                         depth = 0,
                         onToggleDone = onToggleDone,
-                        onEditTask = { editingTask = it },
+                        onViewTask = { viewingTask = it },
                         onDeleteTask = { deletingTask = it }
                     )
                 }
@@ -511,22 +511,19 @@ fun TaskScreen(
         }
     }
 
-    editingTask?.let { task ->
-        EditTaskDialog(
+    viewingTask?.let { task ->
+        TaskDetailDialog(
             task = task,
             allTasks = allTasks,
             lists = lists,
             savedLocations = savedLocations,
             allAttachments = allAttachments,
-            onConfirm = { t, edits ->
-                onUpdateTask(t, edits)
-                editingTask = null
-            },
-            onAddSubtask = onAddSubtask,
             onToggleDone = onToggleDone,
+            onUpdateTask = onUpdateTask,
+            onAddSubtask = onAddSubtask,
             onAddAttachment = onAddAttachment,
             onDeleteAttachment = onDeleteAttachment,
-            onDismiss = { editingTask = null }
+            onDismiss = { viewingTask = null }
         )
     }
 
@@ -549,7 +546,7 @@ fun TaskTreeRow(
     allTasks: List<Task>,
     depth: Int,
     onToggleDone: (Task) -> Unit,
-    onEditTask: (Task) -> Unit,
+    onViewTask: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit
 ) {
     val children = allTasks.filter { it.parentTaskId == task.id }
@@ -562,7 +559,7 @@ fun TaskTreeRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
-                    onClick = { onEditTask(task) },
+                    onClick = { onViewTask(task) },
                     onLongClick = { onDeleteTask(task) }
                 )
                 .padding(start = (depth * 20).dp, top = 4.dp, bottom = 4.dp),
@@ -613,10 +610,163 @@ fun TaskTreeRow(
                 allTasks = allTasks,
                 depth = depth + 1,
                 onToggleDone = onToggleDone,
-                onEditTask = onEditTask,
+                onViewTask = onViewTask,
                 onDeleteTask = onDeleteTask
             )
         }
+    }
+}
+
+/**
+ * タスク行タップで最初に開く読み取り専用の確認ダイアログ。[EditTaskDialog]と同じ項目
+ * (タイトル・リスト・URL・期限・繰り返し・位置情報・メモ・添付ファイル・サブタスク一覧)を
+ * すべて表示するが、値を書き換える操作は上部の「編集」ボタンから[EditTaskDialog]を開いた
+ * 先でのみ行う(添付ファイルの追加・削除、サブタスクの追加もここには置かない)。チェックボックスに
+ * よる完了/未完了の切り替えと添付ファイルを開く操作は、一覧行と同様にここでも直接行える。
+ * サブタスク行をタップすると、そのサブタスクの[TaskDetailDialog]がこの上に重ねて開く
+ * ([EditTaskDialog]の`nestedTask`と同じ、自分自身を再帰的に呼び出す入れ子構造)。
+ * 表示中に編集が保存されても`task`引数自体は古いスナップショットのままなので、
+ * 常に`allTasks`から最新の値(`current`)を探し直して表示する。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TaskDetailDialog(
+    task: Task,
+    allTasks: List<Task>,
+    lists: List<TaskList> = emptyList(),
+    savedLocations: List<SavedLocation> = emptyList(),
+    allAttachments: List<TaskAttachment> = emptyList(),
+    onToggleDone: (Task) -> Unit,
+    onUpdateTask: (Task, TaskEdits) -> Unit,
+    onAddSubtask: (Task, String) -> Unit,
+    onAddAttachment: (Task, Uri) -> Unit = { _, _ -> },
+    onDeleteAttachment: (TaskAttachment) -> Unit = {},
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val current = allTasks.find { it.id == task.id } ?: task
+    var editing by remember(task.id) { mutableStateOf(false) }
+    var nestedViewTask by remember { mutableStateOf<Task?>(null) }
+    val subtasks = allTasks.filter { it.parentTaskId == current.id }
+    val attachments = allAttachments.filter { it.taskId == current.id }
+    val listName = lists.find { it.id == current.listId }?.name
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("タスクの詳細")
+                TextButton(onClick = { editing = true }) {
+                    Text("編集")
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = current.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    textDecoration = if (current.isDone) TextDecoration.LineThrough else null
+                )
+                if (listName != null) {
+                    Text(text = "リスト: $listName", style = MaterialTheme.typography.bodyMedium)
+                }
+                current.url?.let { url ->
+                    Text(
+                        text = url,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            } catch (e: ActivityNotFoundException) {
+                                Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
+                Text(text = current.dueAt?.let { formatDueAt(it) } ?: "期限なし")
+                repeatRuleLabel(current)?.let { Text(text = "繰り返し: $it") }
+                locationLabel(current)?.let { Text(text = it) }
+                if (!current.memo.isNullOrBlank()) {
+                    Text(text = "メモ", style = MaterialTheme.typography.titleSmall)
+                    Text(text = current.memo)
+                }
+                if (attachments.isNotEmpty()) {
+                    Text(text = "添付ファイル", style = MaterialTheme.typography.titleSmall)
+                    attachments.forEach { attachment ->
+                        AttachmentRow(
+                            attachment = attachment,
+                            onOpen = {
+                                try {
+                                    context.startActivity(AttachmentStorage.openIntent(context, attachment))
+                                } catch (e: ActivityNotFoundException) {
+                                    Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onDelete = {},
+                            showDelete = false
+                        )
+                    }
+                }
+                if (subtasks.isNotEmpty()) {
+                    Text(text = "サブタスク", style = MaterialTheme.typography.titleSmall)
+                    subtasks.forEach { subtask ->
+                        SubtaskTreeRow(
+                            task = subtask,
+                            allTasks = allTasks,
+                            depth = 0,
+                            onToggleDone = onToggleDone,
+                            onOpenTask = { nestedViewTask = it }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("閉じる")
+            }
+        }
+    )
+
+    if (editing) {
+        EditTaskDialog(
+            task = current,
+            allTasks = allTasks,
+            lists = lists,
+            savedLocations = savedLocations,
+            allAttachments = allAttachments,
+            onConfirm = { t, edits ->
+                onUpdateTask(t, edits)
+                editing = false
+            },
+            onAddSubtask = onAddSubtask,
+            onToggleDone = onToggleDone,
+            onAddAttachment = onAddAttachment,
+            onDeleteAttachment = onDeleteAttachment,
+            onDismiss = { editing = false }
+        )
+    }
+
+    nestedViewTask?.let { nested ->
+        TaskDetailDialog(
+            task = nested,
+            allTasks = allTasks,
+            lists = lists,
+            savedLocations = savedLocations,
+            allAttachments = allAttachments,
+            onToggleDone = onToggleDone,
+            onUpdateTask = onUpdateTask,
+            onAddSubtask = onAddSubtask,
+            onAddAttachment = onAddAttachment,
+            onDeleteAttachment = onDeleteAttachment,
+            onDismiss = { nestedViewTask = null }
+        )
     }
 }
 
@@ -1784,7 +1934,8 @@ private fun AttachmentThumbnail(attachment: TaskAttachment) {
 private fun AttachmentRow(
     attachment: TaskAttachment,
     onOpen: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    showDelete: Boolean = true
 ) {
     Row(
         modifier = Modifier
@@ -1806,8 +1957,10 @@ private fun AttachmentRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        TextButton(onClick = onDelete) {
-            Text("削除")
+        if (showDelete) {
+            TextButton(onClick = onDelete) {
+                Text("削除")
+            }
         }
     }
 }
