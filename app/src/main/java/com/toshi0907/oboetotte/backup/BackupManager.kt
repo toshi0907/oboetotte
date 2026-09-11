@@ -32,6 +32,7 @@ object BackupManager {
     private const val ENTRY_JSON = "backup.json"
     private const val ENTRY_ATTACHMENTS_DIR = "attachments"
     private const val ATTACHMENT_STAGING_DIR_NAME = "attachments_import_staging"
+    private const val ATTACHMENT_BACKUP_DIR_NAME = "attachments_import_backup"
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 
     suspend fun export(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
@@ -243,8 +244,9 @@ object BackupManager {
         // ここまでのバリデーションをすべて通過した後にのみ、既存データの削除・新データの反映を行う。
         // 添付ファイルの実体はまず一時ディレクトリへ書き込み(ディスク容量不足等のI/O失敗はここで
         // 起きるため、この時点で失敗すれば既存のDB・添付ファイルには一切触れずに済む)、全件の
-        // 書き込みが成功した後にDBをトランザクションで置き換え、最後に一時ディレクトリの内容を
-        // 添付ディレクトリへ入れ替える(delete+renameのみで済むためI/O失敗の余地が小さい)。
+        // 書き込みが成功した後にDBをトランザクションで置き換える。最後の添付ディレクトリの入れ替えは
+        // ファイル単位ではなくディレクトリ単位のrenameTo(同一ボリューム上でのディレクトリ名の
+        // 付け替えのみで完了する軽い操作)で行い、失敗時は戻り値を見て旧ディレクトリを復元する。
         val stagingDir = File(context.filesDir, ATTACHMENT_STAGING_DIR_NAME).apply {
             deleteRecursively()
             mkdirs()
@@ -267,10 +269,17 @@ object BackupManager {
             }
 
             val attachmentsDir = AttachmentStorage.directory(context)
-            attachmentsDir.listFiles()?.forEach { it.delete() }
-            stagingDir.listFiles()?.forEach { staged ->
-                staged.renameTo(File(attachmentsDir, staged.name))
+            val backupDir = File(context.filesDir, ATTACHMENT_BACKUP_DIR_NAME)
+            backupDir.deleteRecursively()
+            if (!attachmentsDir.renameTo(backupDir)) {
+                throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
             }
+            if (!stagingDir.renameTo(attachmentsDir)) {
+                // 失敗時は退避しておいた旧ディレクトリを元の名前に戻す。
+                backupDir.renameTo(attachmentsDir)
+                throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
+            }
+            backupDir.deleteRecursively()
         } finally {
             stagingDir.deleteRecursively()
         }
