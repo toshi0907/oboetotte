@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.LocationReminderManager
@@ -48,8 +49,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application
     private val taskDao = AppDatabase.getInstance(application).taskDao()
     private val taskListDao = AppDatabase.getInstance(application).taskListDao()
+    private val savedLocationDao = AppDatabase.getInstance(application).savedLocationDao()
 
     val lists: StateFlow<List<TaskList>> = taskListDao.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val savedLocations: StateFlow<List<SavedLocation>> = savedLocationDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val allTasks: StateFlow<List<Task>> = taskDao.getAll()
@@ -161,6 +166,30 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             if (_selectedListId.value == list.id) {
                 _selectedListId.value = null
             }
+        }
+    }
+
+    fun addSavedLocation(name: String, latitude: Double, longitude: Double, radiusMeters: Int) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            savedLocationDao.insert(
+                SavedLocation(name = trimmed, latitude = latitude, longitude = longitude, radiusMeters = radiusMeters)
+            )
+        }
+    }
+
+    fun updateSavedLocation(location: SavedLocation, name: String, radiusMeters: Int) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            savedLocationDao.update(location.copy(name = trimmed, radiusMeters = radiusMeters))
+        }
+    }
+
+    fun deleteSavedLocation(location: SavedLocation) {
+        viewModelScope.launch {
+            savedLocationDao.delete(location)
         }
     }
 }

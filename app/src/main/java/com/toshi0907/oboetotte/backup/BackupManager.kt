@@ -3,6 +3,7 @@ package com.toshi0907.oboetotte.backup
 import android.content.Context
 import android.net.Uri
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskList
 import java.io.IOException
@@ -17,6 +18,7 @@ object BackupManager {
         val db = AppDatabase.getInstance(context)
         val lists = db.taskListDao().getAll().first()
         val tasks = db.taskDao().getAll().first()
+        val savedLocations = db.savedLocationDao().getAll().first()
 
         val json = JSONObject().apply {
             put("version", FORMAT_VERSION)
@@ -51,6 +53,20 @@ object BackupManager {
                             put("radiusMeters", task.radiusMeters ?: JSONObject.NULL)
                             put("notifyOnArrival", task.notifyOnArrival)
                             put("notifyOnDeparture", task.notifyOnDeparture)
+                        }
+                    }
+                )
+            )
+            put(
+                "savedLocations",
+                JSONArray(
+                    savedLocations.map { location ->
+                        JSONObject().apply {
+                            put("id", location.id)
+                            put("name", location.name)
+                            put("latitude", location.latitude)
+                            put("longitude", location.longitude)
+                            put("radiusMeters", location.radiusMeters)
                         }
                     }
                 )
@@ -95,10 +111,29 @@ object BackupManager {
             )
         }
 
+        // 旧形式のバックアップにはsavedLocationsキーが無いため、optJSONArrayで無ければ空扱いにする。
+        val savedLocationsJson = json.optJSONArray("savedLocations")
+        val savedLocations = if (savedLocationsJson == null) {
+            emptyList()
+        } else {
+            (0 until savedLocationsJson.length()).map { i ->
+                val obj = savedLocationsJson.getJSONObject(i)
+                SavedLocation(
+                    id = obj.getLong("id"),
+                    name = obj.getString("name"),
+                    latitude = obj.getDouble("latitude"),
+                    longitude = obj.getDouble("longitude"),
+                    radiusMeters = obj.getInt("radiusMeters")
+                )
+            }
+        }
+
         val db = AppDatabase.getInstance(context)
         db.taskDao().deleteAll()
         db.taskListDao().deleteAll()
+        db.savedLocationDao().deleteAll()
         db.taskListDao().insertAll(lists)
         db.taskDao().insertAll(tasks)
+        db.savedLocationDao().insertAll(savedLocations)
     }
 }
