@@ -9,6 +9,7 @@ import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
+import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -30,6 +31,7 @@ object BackupManager {
     private const val FORMAT_VERSION = 2
     private const val ENTRY_JSON = "backup.json"
     private const val ENTRY_ATTACHMENTS_DIR = "attachments"
+    private const val ATTACHMENT_STAGING_DIR_NAME = "attachments_import_staging"
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 
     suspend fun export(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
@@ -239,24 +241,38 @@ object BackupManager {
         }
 
         // ここまでのバリデーションをすべて通過した後にのみ、既存データの削除・新データの反映を行う。
-        // DB側はトランザクションでまとめて置き換え、削除より前に検証を済ませているため、
-        // 万一トランザクションが失敗しても(ロールバックされ)既存データが失われることはない。
-        // ファイル実体の削除・書き込みはDBの置き換えが成功した後にのみ行う。
-        val db = AppDatabase.getInstance(context)
-        db.withTransaction {
-            db.taskDao().deleteAll()
-            db.taskListDao().deleteAll()
-            db.savedLocationDao().deleteAll()
-            db.taskAttachmentDao().deleteAll()
-            db.taskListDao().insertAll(lists)
-            db.taskDao().insertAll(tasks)
-            db.savedLocationDao().insertAll(savedLocations)
-            db.taskAttachmentDao().insertAll(attachments)
+        // 添付ファイルの実体はまず一時ディレクトリへ書き込み(ディスク容量不足等のI/O失敗はここで
+        // 起きるため、この時点で失敗すれば既存のDB・添付ファイルには一切触れずに済む)、全件の
+        // 書き込みが成功した後にDBをトランザクションで置き換え、最後に一時ディレクトリの内容を
+        // 添付ディレクトリへ入れ替える(delete+renameのみで済むためI/O失敗の余地が小さい)。
+        val stagingDir = File(context.filesDir, ATTACHMENT_STAGING_DIR_NAME).apply {
+            deleteRecursively()
+            mkdirs()
         }
+        try {
+            attachmentFiles.forEach { (storedFileName, fileBytes) ->
+                File(stagingDir, storedFileName).writeBytes(fileBytes)
+            }
 
-        AttachmentStorage.directory(context).listFiles()?.forEach { it.delete() }
-        attachmentFiles.forEach { (storedFileName, fileBytes) ->
-            AttachmentStorage.file(context, storedFileName).writeBytes(fileBytes)
+            val db = AppDatabase.getInstance(context)
+            db.withTransaction {
+                db.taskDao().deleteAll()
+                db.taskListDao().deleteAll()
+                db.savedLocationDao().deleteAll()
+                db.taskAttachmentDao().deleteAll()
+                db.taskListDao().insertAll(lists)
+                db.taskDao().insertAll(tasks)
+                db.savedLocationDao().insertAll(savedLocations)
+                db.taskAttachmentDao().insertAll(attachments)
+            }
+
+            val attachmentsDir = AttachmentStorage.directory(context)
+            attachmentsDir.listFiles()?.forEach { it.delete() }
+            stagingDir.listFiles()?.forEach { staged ->
+                staged.renameTo(File(attachmentsDir, staged.name))
+            }
+        } finally {
+            stagingDir.deleteRecursively()
         }
     }
 
