@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `oboetotte` はスマートフォンのみで開発するAndroid向けTodoアプリです。Claude Codeがコードを書き、GitHubにpushし、GitHub Actionsがビルドし(ローカルのAndroid Studio/SDKは使わない)、生成されたAPKを端末にインストールして動作確認する、という開発フローを取ります。Kotlin + Jetpack Compose、単一の`app`モジュール構成で、バックエンドは無く、データは端末内のRoom(SQLite)にのみ保存します。
 
+## 依頼内容の確認
+
+ユーザーからの依頼内容や仕様について、解釈に迷う点がある場合、または実装方法・挙動に複数の選択肢が考えられる場合は、実装に着手する前に必ずユーザーに確認すること。曖昧な点を推測だけで補って実装を進めない。
+
 ## コマンド
 
 ```
