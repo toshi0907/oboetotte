@@ -66,6 +66,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.backup.BackupManager
+import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.LocationReminderManager
@@ -132,6 +133,7 @@ class MainActivity : ComponentActivity() {
                     val tasks by taskViewModel.tasks.collectAsState()
                     val allTasks by taskViewModel.allTasks.collectAsState()
                     val lists by taskViewModel.lists.collectAsState()
+                    val savedLocations by taskViewModel.savedLocations.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
@@ -170,6 +172,10 @@ class MainActivity : ComponentActivity() {
                         onUpdateTask = taskViewModel::updateTask,
                         onDeleteTask = taskViewModel::deleteTask,
                         onAddSubtask = taskViewModel::addSubtask,
+                        savedLocations = savedLocations,
+                        onAddSavedLocation = taskViewModel::addSavedLocation,
+                        onUpdateSavedLocation = taskViewModel::updateSavedLocation,
+                        onDeleteSavedLocation = taskViewModel::deleteSavedLocation,
                         showExactAlarmBanner = !exactAlarmPermissionGranted,
                         onRequestExactAlarmPermission = {
                             val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
@@ -290,6 +296,10 @@ fun TaskScreen(
     onUpdateTask: (Task, TaskEdits) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
+    savedLocations: List<SavedLocation> = emptyList(),
+    onAddSavedLocation: (String, Double, Double, Int) -> Unit = { _, _, _, _ -> },
+    onUpdateSavedLocation: (SavedLocation, String, Int) -> Unit = { _, _, _ -> },
+    onDeleteSavedLocation: (SavedLocation) -> Unit = {},
     showExactAlarmBanner: Boolean = false,
     onRequestExactAlarmPermission: () -> Unit = {},
     locationPermissionGranted: Boolean = true,
@@ -305,6 +315,7 @@ fun TaskScreen(
     var showManageLists by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showLocationDebug by remember { mutableStateOf(false) }
+    var showManageLocations by remember { mutableStateOf(false) }
     val hasLocationTasks = allTasks.any {
         !it.isDone && it.latitude != null && it.longitude != null && it.radiusMeters != null &&
             (it.notifyOnArrival || it.notifyOnDeparture)
@@ -409,6 +420,12 @@ fun TaskScreen(
                 }
                 item {
                     AssistChip(
+                        onClick = { showManageLocations = true },
+                        label = { Text("場所を編集") }
+                    )
+                }
+                item {
+                    AssistChip(
                         onClick = onSendTestNotification,
                         label = { Text("テスト通知") }
                     )
@@ -468,6 +485,7 @@ fun TaskScreen(
         EditTaskDialog(
             task = task,
             allTasks = allTasks,
+            savedLocations = savedLocations,
             onConfirm = { t, edits ->
                 onUpdateTask(t, edits)
                 editingTask = null
@@ -496,6 +514,16 @@ fun TaskScreen(
             onRenameList = onRenameList,
             onDeleteList = onDeleteList,
             onDismiss = { showManageLists = false }
+        )
+    }
+
+    if (showManageLocations) {
+        ManageLocationsDialog(
+            savedLocations = savedLocations,
+            onAddSavedLocation = onAddSavedLocation,
+            onUpdateSavedLocation = onUpdateSavedLocation,
+            onDeleteSavedLocation = onDeleteSavedLocation,
+            onDismiss = { showManageLocations = false }
         )
     }
 
@@ -883,11 +911,260 @@ fun SubtaskTreeRow(
     }
 }
 
+private enum class LocationSourceTab { ADDRESS, CURRENT, SAVED }
+
+private enum class LocationInputMode { ADDRESS, CURRENT }
+
+/**
+ * 住所検索または現在地取得による位置の入力UI。[EditTaskDialog]と[ManageLocationsDialog]の
+ * 両方から使う共通部品(登録済みの場所から選ぶタブは呼び出し側でそれぞれ個別に描画する)。
+ */
+@Composable
+private fun LocationPicker(
+    mode: LocationInputMode,
+    addressInput: String,
+    onAddressInputChange: (String) -> Unit,
+    onResolved: (GeocodeResult) -> Unit,
+    onError: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isLocating by remember { mutableStateOf(false) }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        if (results.values.any { it }) {
+            isLocating = true
+            coroutineScope.launch {
+                val result = getCurrentLocationResult(context)
+                isLocating = false
+                if (result != null) onResolved(result) else onError("現在地を取得できませんでした")
+            }
+        }
+    }
+
+    when (mode) {
+        LocationInputMode.ADDRESS -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            OutlinedTextField(
+                value = addressInput,
+                onValueChange = onAddressInputChange,
+                modifier = Modifier.weight(1f),
+                label = { Text("住所または場所名") },
+                singleLine = true
+            )
+            TextButton(onClick = {
+                val query = addressInput
+                coroutineScope.launch {
+                    val result = geocodeAddress(context, query)
+                    if (result != null) {
+                        onResolved(result)
+                    } else {
+                        onError("住所が見つかりませんでした。もう少し詳しい住所を入力してください。")
+                    }
+                }
+            }) {
+                Text("検索")
+            }
+        }
+        LocationInputMode.CURRENT -> TextButton(onClick = {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasPermission) {
+                isLocating = true
+                coroutineScope.launch {
+                    val result = getCurrentLocationResult(context)
+                    isLocating = false
+                    if (result != null) onResolved(result) else onError("現在地を取得できませんでした")
+                }
+            } else {
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
+            }
+        }) {
+            Text(if (isLocating) "取得中…" else "📍 現在地を取得")
+        }
+    }
+}
+
+@Composable
+fun ManageLocationsDialog(
+    savedLocations: List<SavedLocation>,
+    onAddSavedLocation: (String, Double, Double, Int) -> Unit,
+    onUpdateSavedLocation: (SavedLocation, String, Int) -> Unit,
+    onDeleteSavedLocation: (SavedLocation) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var locationTab by remember { mutableStateOf(LocationInputMode.ADDRESS) }
+    var addressInput by remember { mutableStateOf("") }
+    var resolvedLocation by remember { mutableStateOf<GeocodeResult?>(null) }
+    var locationSearchError by remember { mutableStateOf<String?>(null) }
+    var newName by remember { mutableStateOf("") }
+    var radiusMeters by remember { mutableStateOf(300) }
+    var editingLocationId by remember { mutableStateOf<Long?>(null) }
+    var editName by remember { mutableStateOf("") }
+    var editRadiusMeters by remember { mutableStateOf(300) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("場所を編集") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                savedLocations.forEach { location ->
+                    if (editingLocationId == location.id) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                value = editName,
+                                onValueChange = { editName = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                listOf(100, 300, 500, 1000).forEach { meters ->
+                                    FilterChip(
+                                        selected = editRadiusMeters == meters,
+                                        onClick = { editRadiusMeters = meters },
+                                        label = { Text(radiusLabel(meters)) }
+                                    )
+                                }
+                            }
+                            TextButton(onClick = {
+                                onUpdateSavedLocation(location, editName, editRadiusMeters)
+                                editingLocationId = null
+                            }) {
+                                Text("保存")
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        editingLocationId = location.id
+                                        editName = location.name
+                                        editRadiusMeters = location.radiusMeters
+                                    }
+                            ) {
+                                Text(location.name)
+                                Text(
+                                    text = "%.5f, %.5f ・ %s".format(
+                                        location.latitude,
+                                        location.longitude,
+                                        radiusLabel(location.radiusMeters)
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = { onDeleteSavedLocation(location) }) {
+                                Text("削除")
+                            }
+                        }
+                    }
+                }
+
+                Text(text = "新しい場所を追加", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterChip(
+                        selected = locationTab == LocationInputMode.ADDRESS,
+                        onClick = {
+                            locationTab = LocationInputMode.ADDRESS
+                            resolvedLocation = null
+                            locationSearchError = null
+                        },
+                        label = { Text("住所で指定") }
+                    )
+                    FilterChip(
+                        selected = locationTab == LocationInputMode.CURRENT,
+                        onClick = {
+                            locationTab = LocationInputMode.CURRENT
+                            resolvedLocation = null
+                            locationSearchError = null
+                        },
+                        label = { Text("現在地を使う") }
+                    )
+                }
+                LocationPicker(
+                    mode = locationTab,
+                    addressInput = addressInput,
+                    onAddressInputChange = { addressInput = it },
+                    onResolved = {
+                        resolvedLocation = it
+                        newName = it.name
+                        locationSearchError = null
+                    },
+                    onError = {
+                        resolvedLocation = null
+                        locationSearchError = it
+                    }
+                )
+                resolvedLocation?.let { location ->
+                    Text(
+                        text = "✓ %.5f, %.5f".format(location.latitude, location.longitude),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                locationSearchError?.let { error ->
+                    Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+
+                if (resolvedLocation != null) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("名称(例: 自宅・職場)") },
+                        singleLine = true
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(100, 300, 500, 1000).forEach { meters ->
+                            FilterChip(
+                                selected = radiusMeters == meters,
+                                onClick = { radiusMeters = meters },
+                                label = { Text(radiusLabel(meters)) }
+                            )
+                        }
+                    }
+                    TextButton(onClick = {
+                        val location = resolvedLocation ?: return@TextButton
+                        onAddSavedLocation(newName, location.latitude, location.longitude, radiusMeters)
+                        resolvedLocation = null
+                        addressInput = ""
+                        newName = ""
+                    }) {
+                        Text("この場所を登録")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("閉じる")
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditTaskDialog(
     task: Task,
     allTasks: List<Task>,
+    savedLocations: List<SavedLocation> = emptyList(),
     onConfirm: (task: Task, edits: TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     onToggleDone: (Task) -> Unit,
@@ -905,7 +1182,7 @@ fun EditTaskDialog(
     var nestedTask by remember { mutableStateOf<Task?>(null) }
     val subtasks = allTasks.filter { it.parentTaskId == task.id }
 
-    var useCurrentLocationTab by remember(task.id) { mutableStateOf(false) }
+    var locationTab by remember(task.id) { mutableStateOf(LocationSourceTab.ADDRESS) }
     var addressInput by remember(task.id) { mutableStateOf(task.locationName ?: "") }
     var resolvedLocation by remember(task.id) {
         mutableStateOf(
@@ -917,29 +1194,9 @@ fun EditTaskDialog(
         )
     }
     var locationSearchError by remember(task.id) { mutableStateOf<String?>(null) }
-    var isLocating by remember(task.id) { mutableStateOf(false) }
     var radiusMeters by remember(task.id) { mutableStateOf(task.radiusMeters ?: 300) }
     var notifyOnArrival by remember(task.id) { mutableStateOf(task.notifyOnArrival) }
     var notifyOnDeparture by remember(task.id) { mutableStateOf(task.notifyOnDeparture) }
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        if (results.values.any { it }) {
-            isLocating = true
-            coroutineScope.launch {
-                val result = getCurrentLocationResult(context)
-                isLocating = false
-                if (result != null) {
-                    resolvedLocation = result
-                    locationSearchError = null
-                } else {
-                    locationSearchError = "現在地を取得できませんでした"
-                }
-            }
-        }
-    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1016,79 +1273,102 @@ fun EditTaskDialog(
                 }
 
                 Text(text = "位置", style = MaterialTheme.typography.titleSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    FilterChip(
-                        selected = !useCurrentLocationTab,
-                        onClick = { useCurrentLocationTab = false },
-                        label = { Text("住所で指定") }
-                    )
-                    FilterChip(
-                        selected = useCurrentLocationTab,
-                        onClick = {
-                            useCurrentLocationTab = true
-                            resolvedLocation = null
-                            locationSearchError = null
-                        },
-                        label = { Text("現在地を使う") }
-                    )
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = locationTab == LocationSourceTab.ADDRESS,
+                            onClick = {
+                                locationTab = LocationSourceTab.ADDRESS
+                                resolvedLocation = null
+                                locationSearchError = null
+                            },
+                            label = { Text("住所で指定") }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = locationTab == LocationSourceTab.CURRENT,
+                            onClick = {
+                                locationTab = LocationSourceTab.CURRENT
+                                resolvedLocation = null
+                                locationSearchError = null
+                            },
+                            label = { Text("現在地を使う") }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = locationTab == LocationSourceTab.SAVED,
+                            onClick = {
+                                locationTab = LocationSourceTab.SAVED
+                                resolvedLocation = null
+                                locationSearchError = null
+                            },
+                            label = { Text("登録済みから選択") }
+                        )
+                    }
                 }
 
-                if (!useCurrentLocationTab) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = addressInput,
-                            onValueChange = { addressInput = it },
-                            modifier = Modifier.weight(1f),
-                            label = { Text("住所または場所名") },
-                            singleLine = true
-                        )
-                        TextButton(onClick = {
-                            val query = addressInput
-                            coroutineScope.launch {
-                                val result = geocodeAddress(context, query)
-                                if (result != null) {
-                                    resolvedLocation = result
-                                    locationSearchError = null
-                                } else {
-                                    resolvedLocation = null
-                                    locationSearchError = "住所が見つかりませんでした。もう少し詳しい住所を入力してください。"
-                                }
-                            }
-                        }) {
-                            Text("検索")
+                when (locationTab) {
+                    LocationSourceTab.ADDRESS -> LocationPicker(
+                        mode = LocationInputMode.ADDRESS,
+                        addressInput = addressInput,
+                        onAddressInputChange = { addressInput = it },
+                        onResolved = {
+                            resolvedLocation = it
+                            locationSearchError = null
+                        },
+                        onError = {
+                            resolvedLocation = null
+                            locationSearchError = it
                         }
-                    }
-                } else {
-                    TextButton(onClick = {
-                        val hasPermission = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.ACCESS_FINE_LOCATION
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (hasPermission) {
-                            isLocating = true
-                            coroutineScope.launch {
-                                val result = getCurrentLocationResult(context)
-                                isLocating = false
-                                if (result != null) {
-                                    resolvedLocation = result
-                                    locationSearchError = null
-                                } else {
-                                    locationSearchError = "現在地を取得できませんでした"
-                                }
-                            }
-                        } else {
-                            locationPermissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION
-                                )
+                    )
+                    LocationSourceTab.CURRENT -> LocationPicker(
+                        mode = LocationInputMode.CURRENT,
+                        addressInput = addressInput,
+                        onAddressInputChange = { addressInput = it },
+                        onResolved = {
+                            resolvedLocation = it
+                            locationSearchError = null
+                        },
+                        onError = {
+                            locationSearchError = it
+                        }
+                    )
+                    LocationSourceTab.SAVED -> {
+                        if (savedLocations.isEmpty()) {
+                            Text(
+                                text = "登録済みの場所がありません。「場所を編集」から追加できます。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        } else {
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                items(savedLocations, key = { it.id }) { location ->
+                                    FilterChip(
+                                        selected = resolvedLocation?.name == location.name &&
+                                            resolvedLocation?.latitude == location.latitude &&
+                                            resolvedLocation?.longitude == location.longitude,
+                                        onClick = {
+                                            resolvedLocation = GeocodeResult(
+                                                location.name,
+                                                location.latitude,
+                                                location.longitude
+                                            )
+                                            radiusMeters = location.radiusMeters
+                                            locationSearchError = null
+                                        },
+                                        label = { Text(location.name) }
+                                    )
+                                }
+                            }
                         }
-                    }) {
-                        Text(if (isLocating) "取得中…" else "📍 現在地を取得")
                     }
                 }
 
@@ -1277,6 +1557,7 @@ fun EditTaskDialog(
         EditTaskDialog(
             task = nested,
             allTasks = allTasks,
+            savedLocations = savedLocations,
             onConfirm = { t, edits ->
                 onConfirm(t, edits)
                 nestedTask = null
