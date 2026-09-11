@@ -53,6 +53,8 @@ object BackupManager {
                             put("radiusMeters", task.radiusMeters ?: JSONObject.NULL)
                             put("notifyOnArrival", task.notifyOnArrival)
                             put("notifyOnDeparture", task.notifyOnDeparture)
+                            put("url", task.url ?: JSONObject.NULL)
+                            put("memo", task.memo ?: JSONObject.NULL)
                         }
                     }
                 )
@@ -107,7 +109,9 @@ object BackupManager {
                 longitude = if (obj.isNull("longitude")) null else obj.getDouble("longitude"),
                 radiusMeters = if (obj.isNull("radiusMeters")) null else obj.getInt("radiusMeters"),
                 notifyOnArrival = obj.optBoolean("notifyOnArrival", false),
-                notifyOnDeparture = obj.optBoolean("notifyOnDeparture", false)
+                notifyOnDeparture = obj.optBoolean("notifyOnDeparture", false),
+                url = if (obj.isNull("url")) null else obj.getString("url"),
+                memo = if (obj.isNull("memo")) null else obj.getString("memo")
             )
         }
 

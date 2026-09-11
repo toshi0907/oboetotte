@@ -82,7 +82,7 @@ class GeofenceReceiver : BroadcastReceiver() {
                         "から離れました"
                     }
                     Log.d(TAG, "タスク${taskId}の通知を表示します")
-                    showNotification(context, taskId, "${task.title}${suffix}")
+                    showNotification(context, taskId, "${task.title}${suffix}", task.url)
                 }
             } finally {
                 pendingResult.finish()
@@ -90,7 +90,7 @@ class GeofenceReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun showNotification(context: Context, taskId: Long, text: String) {
+    private fun showNotification(context: Context, taskId: Long, text: String, url: String?) {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -114,7 +114,7 @@ class GeofenceReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("位置リマインダー")
             .setContentText(text)
@@ -126,7 +126,14 @@ class GeofenceReceiver : BroadcastReceiver() {
                 "完了",
                 ReminderScheduler.completePendingIntent(context, taskId)
             )
-            .build()
+        if (!url.isNullOrBlank()) {
+            builder.addAction(
+                R.drawable.ic_notification,
+                "リンクを開く",
+                ReminderScheduler.openUrlPendingIntent(context, taskId, url)
+            )
+        }
+        val notification = builder.build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ActivityCompat.checkSelfPermission(

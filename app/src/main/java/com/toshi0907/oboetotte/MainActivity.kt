@@ -278,6 +278,17 @@ private fun repeatRuleLabel(task: Task): String? {
     }
 }
 
+/** スキーマ(http(s)://)が省略された入力(例: "example.com")でも通知から正しく開けるよう補う。 */
+private fun normalizeUrl(input: String): String? {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) return null
+    return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        trimmed
+    } else {
+        "https://$trimmed"
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TaskScreen(
@@ -1171,6 +1182,8 @@ fun EditTaskDialog(
     onDismiss: () -> Unit
 ) {
     var title by remember(task.id) { mutableStateOf(task.title) }
+    var url by remember(task.id) { mutableStateOf(task.url ?: "") }
+    var memo by remember(task.id) { mutableStateOf(task.memo ?: "") }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
     var repeatRule by remember(task.id) { mutableStateOf(task.repeatRule) }
     var selectedDays by remember(task.id) {
@@ -1207,6 +1220,13 @@ fun EditTaskDialog(
                     value = title,
                     onValueChange = { title = it },
                     singleLine = true
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("URL(任意)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1431,6 +1451,14 @@ fun EditTaskDialog(
                     }
                 }
 
+                Text(text = "メモ", style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = memo,
+                    onValueChange = { memo = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+
                 Text(text = "サブタスク", style = MaterialTheme.typography.titleSmall)
                 subtasks.forEach { subtask ->
                     SubtaskTreeRow(
@@ -1486,7 +1514,9 @@ fun EditTaskDialog(
                             longitude = location?.longitude,
                             radiusMeters = if (location != null) radiusMeters else null,
                             notifyOnArrival = location != null && notifyOnArrival,
-                            notifyOnDeparture = location != null && notifyOnDeparture
+                            notifyOnDeparture = location != null && notifyOnDeparture,
+                            url = normalizeUrl(url),
+                            memo = memo.trim().ifBlank { null }
                         )
                     )
                 }

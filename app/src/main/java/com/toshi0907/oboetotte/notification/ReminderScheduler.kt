@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import com.toshi0907.oboetotte.data.Task
 
@@ -133,4 +134,23 @@ object ReminderScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
+
+    /**
+     * 通知の「リンクを開く」ボタン用。タスクの[url]をブラウザ等で開くACTION_VIEWの[PendingIntent]。
+     * リクエストコードは[snoozePendingIntent]([SNOOZE_OPTIONS]は最大5件、インデックス0〜4)と
+     * 衝突しないよう`taskId.toInt() * 10 + 9`を使う。
+     */
+    fun openUrlPendingIntent(context: Context, taskId: Long, url: String): PendingIntent {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        return PendingIntent.getActivity(
+            context,
+            taskId.toInt() * 10 + OPEN_URL_REQUEST_CODE_OFFSET,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private const val OPEN_URL_REQUEST_CODE_OFFSET = 9
 }
