@@ -59,6 +59,9 @@ object LocationReminderManager {
             .setCircularRegion(lat, lng, radius.toFloat())
             .setExpirationDuration(Geofence.NEVER_EXPIRE)
             .setTransitionTypes(transitionTypes)
+            // デフォルトの応答性(数分単位)だとエリア再突入の検知が遅れたり
+            // 漏れたりしやすいため、短めに指定して繰り返しの発火を検知しやすくする。
+            .setNotificationResponsiveness(NOTIFICATION_RESPONSIVENESS_MILLIS)
             .build()
 
         // 到着時通知が有効な場合、登録した時点で既に圏内にいればすぐに通知が届く
@@ -70,9 +73,6 @@ object LocationReminderManager {
         }
         val request = GeofencingRequest.Builder()
             .setInitialTrigger(initialTrigger)
-            // デフォルトの応答性(数分単位)だとエリア再突入の検知が遅れたり
-            // 漏れたりしやすいため、短めに指定して繰り返しの発火を検知しやすくする。
-            .setNotificationResponsiveness(NOTIFICATION_RESPONSIVENESS_MILLIS)
             .addGeofence(geofence)
             .build()
 
