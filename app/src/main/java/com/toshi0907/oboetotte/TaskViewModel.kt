@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.NotificationLog
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
@@ -59,6 +60,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val taskListDao = AppDatabase.getInstance(application).taskListDao()
     private val savedLocationDao = AppDatabase.getInstance(application).savedLocationDao()
     private val taskAttachmentDao = AppDatabase.getInstance(application).taskAttachmentDao()
+    private val notificationLogDao = AppDatabase.getInstance(application).notificationLogDao()
 
     val lists: StateFlow<List<TaskList>> = taskListDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -67,6 +69,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val attachments: StateFlow<List<TaskAttachment>> = taskAttachmentDao.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val notificationLogs: StateFlow<List<NotificationLog>> = notificationLogDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val allTasks: StateFlow<List<Task>> = taskDao.getAll()

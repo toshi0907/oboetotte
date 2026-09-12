@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.toshi0907.oboetotte.MainActivity
 import com.toshi0907.oboetotte.R
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.NotificationLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -29,13 +30,25 @@ class ReminderReceiver : BroadcastReceiver() {
 
         val taskId = intent.getLongExtra(ReminderScheduler.EXTRA_TASK_ID, -1L)
         if (taskId == -1L) return
+        val isSnooze = intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_SNOOZE, false)
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val task = AppDatabase.getInstance(context).taskDao().getById(taskId)
+                val db = AppDatabase.getInstance(context)
+                val task = db.taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
-                    showNotification(context, taskId, task.title, showTaskActions = true, url = task.url)
+                    val posted = showNotification(context, taskId, task.title, showTaskActions = true, url = task.url)
+                    if (posted) {
+                        val condition = if (isSnooze) "スヌーズ経由の再通知" else "期限到達"
+                        db.notificationLogDao().insertAndTrim(
+                            NotificationLog(
+                                triggeredAt = System.currentTimeMillis(),
+                                taskTitle = task.title,
+                                triggerCondition = condition
+                            )
+                        )
+                    }
                 }
             } finally {
                 pendingResult.finish()
@@ -43,13 +56,14 @@ class ReminderReceiver : BroadcastReceiver() {
         }
     }
 
+    /** @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。 */
     private fun showNotification(
         context: Context,
         notificationId: Long,
         title: String,
         showTaskActions: Boolean,
         url: String?
-    ) {
+    ): Boolean {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -109,10 +123,11 @@ class ReminderReceiver : BroadcastReceiver() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            return
+            return false
         }
         NotificationManagerCompat.from(context)
             .notify(ReminderScheduler.NOTIFICATION_TAG_DUE, notificationId.toInt(), notification)
+        return true
     }
 
     companion object {

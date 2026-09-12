@@ -11,6 +11,7 @@ import com.toshi0907.oboetotte.data.Task
 object ReminderScheduler {
     const val EXTRA_TASK_ID = "task_id"
     const val EXTRA_IS_TEST = "is_test"
+    const val EXTRA_IS_SNOOZE = "is_snooze"
     private const val TEST_REQUEST_CODE = -1
     const val TEST_DELAY_SECONDS = 5L
 
@@ -72,7 +73,7 @@ object ReminderScheduler {
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
             System.currentTimeMillis() + minutes * 60_000,
-            pendingIntentFor(context, taskId)
+            pendingIntentFor(context, taskId, isSnooze = true)
         )
         return true
     }
@@ -99,9 +100,16 @@ object ReminderScheduler {
         return true
     }
 
-    private fun pendingIntentFor(context: Context, taskId: Long): PendingIntent {
+    /**
+     * [isSnooze]は[EXTRA_IS_SNOOZE]としてIntentに載せ、[ReminderReceiver]が通知履歴の
+     * トリガ条件を「期限到達」「スヌーズ」のどちらとして記録するかの判定に使う。
+     * [FLAG_UPDATE_CURRENT]により、既存の[PendingIntent](同じtaskId=同じrequestCode)の
+     * extrasもこの値で上書きされる。
+     */
+    private fun pendingIntentFor(context: Context, taskId: Long, isSnooze: Boolean = false): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra(EXTRA_TASK_ID, taskId)
+            putExtra(EXTRA_IS_SNOOZE, isSnooze)
         }
         return PendingIntent.getBroadcast(
             context,
