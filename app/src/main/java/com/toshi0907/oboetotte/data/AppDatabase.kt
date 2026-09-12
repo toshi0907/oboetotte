@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Task::class, TaskList::class, SavedLocation::class, TaskAttachment::class],
-    version = 11,
+    entities = [Task::class, TaskList::class, SavedLocation::class, TaskAttachment::class, NotificationLog::class],
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -17,6 +17,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun taskListDao(): TaskListDao
     abstract fun savedLocationDao(): SavedLocationDao
     abstract fun taskAttachmentDao(): TaskAttachmentDao
+    abstract fun notificationLogDao(): NotificationLogDao
 
     companion object {
         @Volatile
@@ -75,6 +76,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `notification_logs` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`triggeredAt` INTEGER NOT NULL, " +
+                        "`taskTitle` TEXT NOT NULL, " +
+                        "`triggerCondition` TEXT NOT NULL)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -87,7 +100,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_7_8,
                         MIGRATION_8_9,
                         MIGRATION_9_10,
-                        MIGRATION_10_11
+                        MIGRATION_10_11,
+                        MIGRATION_11_12
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }

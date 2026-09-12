@@ -84,6 +84,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.backup.BackupManager
+import com.toshi0907.oboetotte.data.NotificationLog
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
@@ -160,6 +161,7 @@ class MainActivity : ComponentActivity() {
                     val lists by taskViewModel.lists.collectAsState()
                     val savedLocations by taskViewModel.savedLocations.collectAsState()
                     val attachments by taskViewModel.attachments.collectAsState()
+                    val notificationLogs by taskViewModel.notificationLogs.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
@@ -228,6 +230,7 @@ class MainActivity : ComponentActivity() {
                             onUpdateSavedLocation = taskViewModel::updateSavedLocation,
                             onDeleteSavedLocation = taskViewModel::deleteSavedLocation,
                             allTasks = allTasks,
+                            notificationLogs = notificationLogs,
                             onSendTestNotification = {
                                 val scheduled = ReminderScheduler.scheduleTestNotification(context)
                                 val message = if (scheduled) {
@@ -807,6 +810,7 @@ fun SettingsScreen(
     onUpdateSavedLocation: (SavedLocation, String, Int) -> Unit,
     onDeleteSavedLocation: (SavedLocation) -> Unit,
     allTasks: List<Task>,
+    notificationLogs: List<NotificationLog> = emptyList(),
     onSendTestNotification: () -> Unit,
     onExportRequested: () -> Unit,
     onImportRequested: () -> Unit,
@@ -816,6 +820,7 @@ fun SettingsScreen(
     var showManageLists by remember { mutableStateOf(false) }
     var showManageLocations by remember { mutableStateOf(false) }
     var showLocationDebug by remember { mutableStateOf(false) }
+    var showNotificationLogs by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -884,6 +889,9 @@ fun SettingsScreen(
             TextButton(onClick = { showLocationDebug = true }) {
                 Text("位置情報デバッグ")
             }
+            TextButton(onClick = { showNotificationLogs = true }) {
+                Text("通知履歴")
+            }
         }
     }
 
@@ -911,6 +919,13 @@ fun SettingsScreen(
         LocationDebugDialog(
             allTasks = allTasks,
             onDismiss = { showLocationDebug = false }
+        )
+    }
+
+    if (showNotificationLogs) {
+        NotificationLogDialog(
+            logs = notificationLogs,
+            onDismiss = { showNotificationLogs = false }
         )
     }
 }
@@ -1020,6 +1035,49 @@ fun LocationDebugDialog(
                                     }
                                 )
                             }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("閉じる")
+            }
+        }
+    )
+}
+
+/**
+ * デバッグ用に、実際に発火した通知の履歴(発動時刻・対象タスク名・トリガ条件)を新しい順に
+ * 一覧表示する。記録自体は[com.toshi0907.oboetotte.notification.ReminderReceiver]/
+ * [com.toshi0907.oboetotte.notification.GeofenceReceiver]が通知表示時に行っている。
+ */
+@Composable
+fun NotificationLogDialog(
+    logs: List<NotificationLog>,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("通知履歴") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (logs.isEmpty()) {
+                    Text("まだ通知は発火していません", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    logs.forEach { log ->
+                        Column {
+                            Text(formatDueAt(log.triggeredAt), style = MaterialTheme.typography.bodySmall)
+                            Text(log.taskTitle, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                log.triggerCondition,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }

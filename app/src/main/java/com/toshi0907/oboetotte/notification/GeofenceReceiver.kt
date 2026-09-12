@@ -18,6 +18,7 @@ import com.google.android.gms.location.GeofencingEvent
 import com.toshi0907.oboetotte.MainActivity
 import com.toshi0907.oboetotte.R
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.NotificationLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -56,7 +57,8 @@ class GeofenceReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val taskDao = AppDatabase.getInstance(context).taskDao()
+                val db = AppDatabase.getInstance(context)
+                val taskDao = db.taskDao()
                 taskIds.forEach { taskId ->
                     val task = taskDao.getById(taskId)
                     if (task == null) {
@@ -78,6 +80,15 @@ class GeofenceReceiver : BroadcastReceiver() {
                     }
                     Log.d(TAG, "タスク${taskId}の通知を表示します")
                     showNotification(context, taskId, task.title, task.url)
+                    val transitionLabel = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) "到着" else "離脱"
+                    val locationLabel = task.locationName?.let { "$it・" } ?: ""
+                    db.notificationLogDao().insertAndTrim(
+                        NotificationLog(
+                            triggeredAt = System.currentTimeMillis(),
+                            taskTitle = task.title,
+                            triggerCondition = "位置情報$transitionLabel(${locationLabel}半径${task.radiusMeters}m)"
+                        )
+                    )
                 }
             } finally {
                 pendingResult.finish()
