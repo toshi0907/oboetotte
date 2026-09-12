@@ -32,6 +32,16 @@
             android:excludeFromRecents="true"
             android:theme="@style/Theme.Oboetotte.SnoozeDialog" />
 
+        <activity
+            android:name=".widget.TaskWidgetConfigureActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Oboetotte">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
