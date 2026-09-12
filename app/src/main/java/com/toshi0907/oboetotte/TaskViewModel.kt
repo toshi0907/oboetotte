@@ -2,6 +2,7 @@ package com.toshi0907.oboetotte
 
 import android.app.Application
 import android.net.Uri
+import androidx.glance.appwidget.updateAll
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
@@ -14,6 +15,7 @@ import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.widget.TaskWidget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -117,7 +119,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // 「リスト未登録」フィルタ選択中の追加は、実在しないリストID(UNASSIGNED_LIST_ID)
             // ではなくlistId = nullとして登録する。
             val listId = _selectedListId.value.takeUnless { it == UNASSIGNED_LIST_ID }
-            taskDao.insert(Task(title = trimmed, listId = listId))
+            val newTask = Task(
+                title = trimmed,
+                listId = listId,
+                dueAt = System.currentTimeMillis() + DEFAULT_DUE_DELAY_MILLIS
+            )
+            val id = taskDao.insert(newTask)
+            ReminderScheduler.schedule(appContext, newTask.copy(id = id))
+            TaskWidget().updateAll(appContext)
         }
     }
 
@@ -128,7 +137,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 val updated = task.copy(isDone = false)
                 ReminderScheduler.schedule(appContext, updated)
                 LocationReminderManager.register(appContext, updated)
+                TaskWidget().updateAll(appContext)
             } else {
+                // TaskCompletion.completeが自身でウィジェットの再描画までまとめて行う。
                 TaskCompletion.complete(appContext, task)
             }
         }
@@ -156,6 +167,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
             LocationReminderManager.register(appContext, updated)
+            TaskWidget().updateAll(appContext)
         }
     }
 
@@ -169,6 +181,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 attachmentsToDelete.forEach { AttachmentStorage.delete(appContext, it.storedFileName) }
             }
+            TaskWidget().updateAll(appContext)
         }
     }
 
@@ -203,7 +216,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            taskDao.insert(Task(title = trimmed, parentTaskId = parent.id))
+            val newSubtask = Task(
+                title = trimmed,
+                parentTaskId = parent.id,
+                dueAt = System.currentTimeMillis() + DEFAULT_DUE_DELAY_MILLIS
+            )
+            val id = taskDao.insert(newSubtask)
+            ReminderScheduler.schedule(appContext, newSubtask.copy(id = id))
+            TaskWidget().updateAll(appContext)
         }
     }
 
@@ -264,5 +284,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
          * 衝突しない。`null`は引き続き「すべて」を表す。
          */
         const val UNASSIGNED_LIST_ID = -1L
+
+        /** タスク・サブタスク登録時にデフォルトで設定する期限までの猶予(1時間)。 */
+        private const val DEFAULT_DUE_DELAY_MILLIS = 60 * 60 * 1000L
     }
 }

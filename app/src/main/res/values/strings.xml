@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Oboetotte</string>
+    <string name="widget_label">Oboetotte タスク</string>
+    <string name="widget_description">未完了タスクの一覧を表示するウィジェットです。</string>
 </resources>
