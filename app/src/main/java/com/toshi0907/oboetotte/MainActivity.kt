@@ -84,6 +84,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.backup.BackupManager
+import com.toshi0907.oboetotte.data.LocationUpdateLog
+import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.NotificationLog
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
@@ -162,6 +164,7 @@ class MainActivity : ComponentActivity() {
                     val savedLocations by taskViewModel.savedLocations.collectAsState()
                     val attachments by taskViewModel.attachments.collectAsState()
                     val notificationLogs by taskViewModel.notificationLogs.collectAsState()
+                    val locationUpdateLogs by taskViewModel.locationUpdateLogs.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
@@ -231,6 +234,7 @@ class MainActivity : ComponentActivity() {
                             onDeleteSavedLocation = taskViewModel::deleteSavedLocation,
                             allTasks = allTasks,
                             notificationLogs = notificationLogs,
+                            locationUpdateLogs = locationUpdateLogs,
                             onSendTestNotification = {
                                 val scheduled = ReminderScheduler.scheduleTestNotification(context)
                                 val message = if (scheduled) {
@@ -811,6 +815,7 @@ fun SettingsScreen(
     onDeleteSavedLocation: (SavedLocation) -> Unit,
     allTasks: List<Task>,
     notificationLogs: List<NotificationLog> = emptyList(),
+    locationUpdateLogs: List<LocationUpdateLog> = emptyList(),
     onSendTestNotification: () -> Unit,
     onExportRequested: () -> Unit,
     onImportRequested: () -> Unit,
@@ -918,6 +923,7 @@ fun SettingsScreen(
     if (showLocationDebug) {
         LocationDebugDialog(
             allTasks = allTasks,
+            updateLogs = locationUpdateLogs,
             onDismiss = { showLocationDebug = false }
         )
     }
@@ -933,6 +939,7 @@ fun SettingsScreen(
 @Composable
 fun LocationDebugDialog(
     allTasks: List<Task>,
+    updateLogs: List<LocationUpdateLog> = emptyList(),
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -950,7 +957,10 @@ fun LocationDebugDialog(
         onDismissRequest = onDismiss,
         title = { Text("位置情報デバッグ") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(
                     text = "権限: 前面(${if (foregroundGranted) "許可" else "未許可"}) / " +
                         "常に許可(${if (backgroundGranted) "許可" else "未許可"})",
@@ -1038,6 +1048,20 @@ fun LocationDebugDialog(
                         }
                     }
                 }
+
+                Text(
+                    text = "更新履歴(直近6時間)",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                if (updateLogs.isEmpty()) {
+                    Text(
+                        "まだ位置情報の更新は記録されていません",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    updateLogs.forEach { log -> LocationUpdateLogRow(log) }
+                }
             }
         },
         confirmButton = {
@@ -1046,6 +1070,38 @@ fun LocationDebugDialog(
             }
         }
     )
+}
+
+/**
+ * [LocationDebugDialog]の「更新履歴」1行分。[LocationUpdateLog.type]に応じてラベルを出し分け、
+ * 座標が記録されていれば併せて表示する(ジオフェンスイベントは[android.location.Location]を
+ * 取得できない端末・状況もあるためnullになりうる)。
+ */
+@Composable
+private fun LocationUpdateLogRow(log: LocationUpdateLog) {
+    val typeLabel = when (log.type) {
+        LocationUpdateType.ENTER -> "到着"
+        LocationUpdateType.EXIT -> "離脱"
+        LocationUpdateType.PERIODIC -> "定期取得"
+        else -> log.type
+    }
+    Column(modifier = Modifier.padding(top = 4.dp)) {
+        Text(
+            text = "${formatDueAt(log.timestamp)} ・ $typeLabel" + (log.taskTitle?.let { " ・ $it" } ?: ""),
+            style = MaterialTheme.typography.bodyMedium
+        )
+        val coordinateText = if (log.latitude != null && log.longitude != null) {
+            "%.5f, %.5f".format(log.latitude, log.longitude) +
+                (log.accuracy?.let { " (精度%.0fm)".format(it) } ?: "")
+        } else {
+            "座標なし"
+        }
+        Text(
+            text = listOfNotNull(coordinateText, log.detail).joinToString(" ・ "),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 /**

@@ -50,6 +50,9 @@ object LocationReminderManager {
             Log.w(TAG, "位置情報の権限が不足しているためタスク${task.id}のジオフェンス登録をスキップします")
             return
         }
+        // 位置情報デバッグ用の定期的な現在地取得(LocationUpdateWorker)も、
+        // 位置情報タスクが1件以上ある間だけ動作するようここで併せて起動しておく。
+        LocationUpdateScheduler.ensureScheduled(context)
 
         val transitionTypes = (if (task.notifyOnArrival) Geofence.GEOFENCE_TRANSITION_ENTER else 0) or
             (if (task.notifyOnDeparture) Geofence.GEOFENCE_TRANSITION_EXIT else 0)

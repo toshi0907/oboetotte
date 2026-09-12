@@ -8,8 +8,15 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Task::class, TaskList::class, SavedLocation::class, TaskAttachment::class, NotificationLog::class],
-    version = 12,
+    entities = [
+        Task::class,
+        TaskList::class,
+        SavedLocation::class,
+        TaskAttachment::class,
+        NotificationLog::class,
+        LocationUpdateLog::class
+    ],
+    version = 13,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -18,6 +25,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun savedLocationDao(): SavedLocationDao
     abstract fun taskAttachmentDao(): TaskAttachmentDao
     abstract fun notificationLogDao(): NotificationLogDao
+    abstract fun locationUpdateLogDao(): LocationUpdateLogDao
 
     companion object {
         @Volatile
@@ -88,6 +96,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `location_update_logs` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`timestamp` INTEGER NOT NULL, " +
+                        "`type` TEXT NOT NULL, " +
+                        "`taskTitle` TEXT, " +
+                        "`latitude` REAL, " +
+                        "`longitude` REAL, " +
+                        "`accuracy` REAL, " +
+                        "`detail` TEXT)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -101,7 +125,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_8_9,
                         MIGRATION_9_10,
                         MIGRATION_10_11,
-                        MIGRATION_11_12
+                        MIGRATION_11_12,
+                        MIGRATION_12_13
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
