@@ -18,6 +18,8 @@ import com.google.android.gms.location.GeofencingEvent
 import com.toshi0907.oboetotte.MainActivity
 import com.toshi0907.oboetotte.R
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.LocationUpdateLog
+import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.NotificationLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +55,12 @@ class GeofenceReceiver : BroadcastReceiver() {
         }
         val taskIds = event.triggeringGeofences?.mapNotNull { it.requestId.toLongOrNull() }
         if (taskIds.isNullOrEmpty()) return
+        val triggeringLocation = event.triggeringLocation
+        val updateType = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) {
+            LocationUpdateType.ENTER
+        } else {
+            LocationUpdateType.EXIT
+        }
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
@@ -61,36 +69,53 @@ class GeofenceReceiver : BroadcastReceiver() {
                 val taskDao = db.taskDao()
                 taskIds.forEach { taskId ->
                     val task = taskDao.getById(taskId)
+                    val detail: String
                     if (task == null) {
                         Log.w(TAG, "タスク${taskId}が見つからないため通知をスキップします")
-                        return@forEach
-                    }
-                    if (task.isDone) {
+                        detail = "タスクが見つかりません"
+                    } else if (task.isDone) {
                         Log.d(TAG, "タスク${taskId}は完了済みのため通知をスキップします")
-                        return@forEach
+                        detail = "スキップ(完了済み)"
+                    } else {
+                        val matches = when (transition) {
+                            Geofence.GEOFENCE_TRANSITION_ENTER -> task.notifyOnArrival
+                            Geofence.GEOFENCE_TRANSITION_EXIT -> task.notifyOnDeparture
+                            else -> false
+                        }
+                        if (!matches) {
+                            Log.d(TAG, "タスク${taskId}は$transitionName の通知を希望していないためスキップします")
+                            detail = "スキップ(通知タイミング未選択)"
+                        } else {
+                            Log.d(TAG, "タスク${taskId}の通知を表示します")
+                            val posted = showNotification(context, taskId, task.title, task.url)
+                            detail = if (posted) "通知表示" else "スキップ(通知権限なし)"
+                            if (posted) {
+                                val transitionLabel = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) "到着" else "離脱"
+                                val locationLabel = task.locationName?.let { "$it・" } ?: ""
+                                db.notificationLogDao().insertAndTrim(
+                                    NotificationLog(
+                                        triggeredAt = System.currentTimeMillis(),
+                                        taskTitle = task.title,
+                                        triggerCondition = "位置情報$transitionLabel(${locationLabel}半径${task.radiusMeters}m)"
+                                    )
+                                )
+                            }
+                        }
                     }
-                    val matches = when (transition) {
-                        Geofence.GEOFENCE_TRANSITION_ENTER -> task.notifyOnArrival
-                        Geofence.GEOFENCE_TRANSITION_EXIT -> task.notifyOnDeparture
-                        else -> false
-                    }
-                    if (!matches) {
-                        Log.d(TAG, "タスク${taskId}は$transitionName の通知を希望していないためスキップします")
-                        return@forEach
-                    }
-                    Log.d(TAG, "タスク${taskId}の通知を表示します")
-                    val posted = showNotification(context, taskId, task.title, task.url)
-                    if (posted) {
-                        val transitionLabel = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) "到着" else "離脱"
-                        val locationLabel = task.locationName?.let { "$it・" } ?: ""
-                        db.notificationLogDao().insertAndTrim(
-                            NotificationLog(
-                                triggeredAt = System.currentTimeMillis(),
-                                taskTitle = task.title,
-                                triggerCondition = "位置情報$transitionLabel(${locationLabel}半径${task.radiusMeters}m)"
-                            )
+                    // ジオフェンスの受信自体は、通知の表示可否に関わらず位置情報デバッグ用に記録する。
+                    // これにより「イベント自体が来ていないのか」「来ているが条件で弾かれているのか」を
+                    // アプリ内(位置情報デバッグ画面)から切り分けられる。
+                    db.locationUpdateLogDao().insertAndTrim(
+                        LocationUpdateLog(
+                            timestamp = System.currentTimeMillis(),
+                            type = updateType,
+                            taskTitle = task?.title,
+                            latitude = triggeringLocation?.latitude,
+                            longitude = triggeringLocation?.longitude,
+                            accuracy = triggeringLocation?.accuracy,
+                            detail = detail
                         )
-                    }
+                    )
                 }
             } finally {
                 pendingResult.finish()
