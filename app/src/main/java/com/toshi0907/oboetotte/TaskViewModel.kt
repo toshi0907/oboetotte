@@ -75,7 +75,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedListId = MutableStateFlow<Long?>(null)
     val selectedListId: StateFlow<Long?> = _selectedListId
 
-    private val _showCompleted = MutableStateFlow(true)
+    private val _showCompleted = MutableStateFlow(false)
     val showCompleted: StateFlow<Boolean> = _showCompleted
 
     val tasks: StateFlow<List<Task>> = combine(
