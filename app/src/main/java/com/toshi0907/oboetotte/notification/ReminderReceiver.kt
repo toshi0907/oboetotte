@@ -38,15 +38,17 @@ class ReminderReceiver : BroadcastReceiver() {
                 val db = AppDatabase.getInstance(context)
                 val task = db.taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
-                    showNotification(context, taskId, task.title, showTaskActions = true, url = task.url)
-                    val condition = if (isSnooze) "スヌーズ経由の再通知" else "期限到達"
-                    db.notificationLogDao().insertAndTrim(
-                        NotificationLog(
-                            triggeredAt = System.currentTimeMillis(),
-                            taskTitle = task.title,
-                            triggerCondition = condition
+                    val posted = showNotification(context, taskId, task.title, showTaskActions = true, url = task.url)
+                    if (posted) {
+                        val condition = if (isSnooze) "スヌーズ経由の再通知" else "期限到達"
+                        db.notificationLogDao().insertAndTrim(
+                            NotificationLog(
+                                triggeredAt = System.currentTimeMillis(),
+                                taskTitle = task.title,
+                                triggerCondition = condition
+                            )
                         )
-                    )
+                    }
                 }
             } finally {
                 pendingResult.finish()
@@ -54,13 +56,14 @@ class ReminderReceiver : BroadcastReceiver() {
         }
     }
 
+    /** @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。 */
     private fun showNotification(
         context: Context,
         notificationId: Long,
         title: String,
         showTaskActions: Boolean,
         url: String?
-    ) {
+    ): Boolean {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -120,10 +123,11 @@ class ReminderReceiver : BroadcastReceiver() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            return
+            return false
         }
         NotificationManagerCompat.from(context)
             .notify(ReminderScheduler.NOTIFICATION_TAG_DUE, notificationId.toInt(), notification)
+        return true
     }
 
     companion object {

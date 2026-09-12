@@ -79,16 +79,18 @@ class GeofenceReceiver : BroadcastReceiver() {
                         return@forEach
                     }
                     Log.d(TAG, "タスク${taskId}の通知を表示します")
-                    showNotification(context, taskId, task.title, task.url)
-                    val transitionLabel = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) "到着" else "離脱"
-                    val locationLabel = task.locationName?.let { "$it・" } ?: ""
-                    db.notificationLogDao().insertAndTrim(
-                        NotificationLog(
-                            triggeredAt = System.currentTimeMillis(),
-                            taskTitle = task.title,
-                            triggerCondition = "位置情報$transitionLabel(${locationLabel}半径${task.radiusMeters}m)"
+                    val posted = showNotification(context, taskId, task.title, task.url)
+                    if (posted) {
+                        val transitionLabel = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) "到着" else "離脱"
+                        val locationLabel = task.locationName?.let { "$it・" } ?: ""
+                        db.notificationLogDao().insertAndTrim(
+                            NotificationLog(
+                                triggeredAt = System.currentTimeMillis(),
+                                taskTitle = task.title,
+                                triggerCondition = "位置情報$transitionLabel(${locationLabel}半径${task.radiusMeters}m)"
+                            )
                         )
-                    )
+                    }
                 }
             } finally {
                 pendingResult.finish()
@@ -96,7 +98,8 @@ class GeofenceReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun showNotification(context: Context, taskId: Long, title: String, url: String?) {
+    /** @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。 */
+    private fun showNotification(context: Context, taskId: Long, title: String, url: String?): Boolean {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -147,7 +150,7 @@ class GeofenceReceiver : BroadcastReceiver() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            return
+            return false
         }
         // 期限日時通知(ReminderReceiver)と同じ taskId.toInt() をIDに使うため、
         // 「完了」ボタン(CompleteReceiver)からはどちらの通知でも正しく消去できる。
@@ -155,6 +158,7 @@ class GeofenceReceiver : BroadcastReceiver() {
         // 上書きせず別々の通知として表示される。
         NotificationManagerCompat.from(context)
             .notify(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt(), notification)
+        return true
     }
 
     companion object {
