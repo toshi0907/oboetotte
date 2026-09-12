@@ -94,7 +94,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _showCompleted
     ) { tasks, listId, showCompleted ->
         val topLevel = tasks.filter { it.parentTaskId == null }
-        val byList = if (listId == null) topLevel else topLevel.filter { it.listId == listId }
+        val byList = when (listId) {
+            null -> topLevel
+            UNASSIGNED_LIST_ID -> topLevel.filter { it.listId == null }
+            else -> topLevel.filter { it.listId == listId }
+        }
         if (showCompleted) byList else byList.filter { !it.isDone }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -110,7 +114,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            taskDao.insert(Task(title = trimmed, listId = _selectedListId.value))
+            // 「リスト未登録」フィルタ選択中の追加は、実在しないリストID(UNASSIGNED_LIST_ID)
+            // ではなくlistId = nullとして登録する。
+            val listId = _selectedListId.value.takeUnless { it == UNASSIGNED_LIST_ID }
+            taskDao.insert(Task(title = trimmed, listId = listId))
         }
     }
 
@@ -248,5 +255,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             savedLocationDao.delete(location)
         }
+    }
+
+    companion object {
+        /**
+         * [selectedListId]に渡すと「リスト未登録」(`listId == null`のタスクのみ)を表す特別な値。
+         * Roomの`TaskList.id`は`autoGenerate`で1から始まるため、負の値であれば実際のリストIDと
+         * 衝突しない。`null`は引き続き「すべて」を表す。
+         */
+        const val UNASSIGNED_LIST_ID = -1L
     }
 }
