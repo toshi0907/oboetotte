@@ -8,4 +8,5 @@
     android:initialLayout="@layout/glance_default_loading_layout"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
-    android:description="@string/widget_description" />
+    android:description="@string/widget_description"
+    android:configure="com.toshi0907.oboetotte.widget.TaskWidgetConfigureActivity" />
