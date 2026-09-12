@@ -28,16 +28,15 @@ import com.toshi0907.oboetotte.data.AppDatabase
 import kotlinx.coroutines.flow.first
 
 /**
- * ホーム画面ウィジェット。全リスト横断でトップレベルの未完了タスクを、メイン画面と同じ
- * 並び順(期限が近い順。[com.toshi0907.oboetotte.data.TaskDao.getAll]のクエリ順序を
- * そのまま利用)で一覧表示する。タップするとアプリ(MainActivity)を開くのみで、
- * ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに各所から呼ばれる
- * [refreshTaskWidget]で再描画される。
+ * ホーム画面ウィジェット。トップレベルの未完了タスクを、メイン画面と同じ並び順
+ * (期限が近い順。[com.toshi0907.oboetotte.data.TaskDao.getAll]のクエリ順序をそのまま利用)で
+ * 一覧表示する。タップするとアプリ(MainActivity)を開くのみで、ウィジェット上での完了操作は
+ * 行わない。表示内容はDB更新のたびに各所から呼ばれる[refreshTaskWidget]で再描画される。
  *
- * 背景色は[WidgetBackground]から[TaskWidgetConfigureActivity]でウィジェットごとに選択でき、
- * [PreferencesGlanceStateDefinition]によりウィジェットインスタンス単位で永続化される
- * (`stateDefinition`を指定すると、Glanceが[GlanceId]ごとに`Preferences`のDataStoreを
- * 自動的に用意してくれる)。
+ * 背景色([WidgetBackground])・表示するリスト([LIST_FILTER_KEY])は[TaskWidgetConfigureActivity]で
+ * ウィジェットごとに選択でき、[PreferencesGlanceStateDefinition]によりウィジェットインスタンス
+ * 単位で永続化される(`stateDefinition`を指定すると、Glanceが[GlanceId]ごとに`Preferences`の
+ * DataStoreを自動的に用意してくれる)。
  */
 class TaskWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
@@ -51,15 +50,22 @@ class TaskWidget : GlanceAppWidget() {
             val background = WidgetBackground.fromName(prefs[BACKGROUND_KEY])
             val textStyle = background.textColor?.let { TextStyle(color = ColorProvider(it)) } ?: TextStyle()
 
+            val listFilter = prefs[LIST_FILTER_KEY]
+            val filteredTasks = when (listFilter) {
+                null, ALL_LISTS_VALUE -> tasks
+                UNASSIGNED_LIST_VALUE -> tasks.filter { it.listId == null }
+                else -> tasks.filter { it.listId == listFilter.toLongOrNull() }
+            }
+
             var modifier = GlanceModifier.fillMaxSize().padding(8.dp)
             background.color?.let { modifier = modifier.background(it) }
 
             Column(modifier = modifier) {
-                if (tasks.isEmpty()) {
+                if (filteredTasks.isEmpty()) {
                     Text(text = "未完了タスクはありません", style = textStyle)
                 } else {
                     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-                        items(tasks, itemId = { it.id }) { task ->
+                        items(filteredTasks, itemId = { it.id }) { task ->
                             Text(
                                 text = task.title,
                                 style = textStyle,
@@ -78,6 +84,19 @@ class TaskWidget : GlanceAppWidget() {
     companion object {
         /** [WidgetBackground.name]を文字列として保存するPreferencesキー。 */
         val BACKGROUND_KEY = stringPreferencesKey("background")
+
+        /**
+         * 表示するリストの絞り込みを保存するPreferencesキー。値は[ALL_LISTS_VALUE]・
+         * [UNASSIGNED_LIST_VALUE]、またはタスクの`listId`を文字列化したものを取る。
+         * キー未設定(`null`)は[ALL_LISTS_VALUE]と同じ扱い(すべて表示)。
+         */
+        val LIST_FILTER_KEY = stringPreferencesKey("list_filter")
+
+        /** [LIST_FILTER_KEY]で「すべて」(リスト横断)を表す値。 */
+        const val ALL_LISTS_VALUE = "ALL"
+
+        /** [LIST_FILTER_KEY]で「リスト未登録」(`listId == null`のタスクのみ)を表す値。 */
+        const val UNASSIGNED_LIST_VALUE = "UNASSIGNED"
     }
 }
 
