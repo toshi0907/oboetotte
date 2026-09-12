@@ -465,6 +465,13 @@ fun TaskScreen(
                         label = { Text("すべて") }
                     )
                 }
+                item {
+                    FilterChip(
+                        selected = selectedListId == TaskViewModel.UNASSIGNED_LIST_ID,
+                        onClick = { onSelectList(TaskViewModel.UNASSIGNED_LIST_ID) },
+                        label = { Text("リスト未登録") }
+                    )
+                }
                 items(lists, key = { it.id }) { list ->
                     FilterChip(
                         selected = selectedListId == list.id,
