@@ -36,6 +36,19 @@ class LocationUpdateWorker(
         if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_FINE_LOCATION) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            // 権限不足でスキップしたことも記録しておかないと、デバッグ画面から見たときに
+            // 「Workerが動いていない」のか「動いたが権限が無かった」のか区別できない。
+            db.locationUpdateLogDao().insertAndTrim(
+                LocationUpdateLog(
+                    timestamp = System.currentTimeMillis(),
+                    type = LocationUpdateType.PERIODIC,
+                    taskTitle = null,
+                    latitude = null,
+                    longitude = null,
+                    accuracy = null,
+                    detail = "権限不足のためスキップ"
+                )
+            )
             return Result.success()
         }
 

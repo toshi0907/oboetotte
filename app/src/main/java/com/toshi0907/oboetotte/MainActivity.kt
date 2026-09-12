@@ -62,6 +62,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -176,13 +177,26 @@ class MainActivity : ComponentActivity() {
                     var locationPermissionGranted by remember {
                         mutableStateOf(LocationReminderManager.hasLocationPermission(context))
                     }
+                    LaunchedEffect(Unit) {
+                        // アプリ起動のたびに、権限がある位置情報タスクのジオフェンス登録・
+                        // 定期取得ジョブが確実に動いているか確認する(WorkManager自体は再起動を
+                        // 越えて永続化されるが、初回の登録が権限不足でスキップされたまま
+                        // 取り残されているケースの保険)。
+                        LocationReminderManager.reconcileAll(context)
+                    }
                     DisposableEffect(lifecycleOwner) {
                         val observer = LifecycleEventObserver { _, event ->
                             if (event == Lifecycle.Event.ON_RESUME) {
                                 exactAlarmPermissionGranted =
                                     ReminderScheduler.canScheduleExactAlarms(context)
-                                locationPermissionGranted =
+                                val nowLocationPermissionGranted =
                                     LocationReminderManager.hasLocationPermission(context)
+                                if (nowLocationPermissionGranted && !locationPermissionGranted) {
+                                    // 権限が新たに許可された場合、権限不足でスキップされていた
+                                    // ジオフェンス登録・定期取得ジョブの起動をまとめてやり直す。
+                                    LocationReminderManager.reconcileAll(context)
+                                }
+                                locationPermissionGranted = nowLocationPermissionGranted
                             }
                         }
                         lifecycleOwner.lifecycle.addObserver(observer)

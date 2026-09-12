@@ -12,7 +12,11 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
+import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 位置情報リマインダー(ジオフェンス)の登録・解除を担当する。時刻ベースの[ReminderScheduler]と
@@ -95,6 +99,19 @@ object LocationReminderManager {
 
     fun unregister(context: Context, taskId: Long) {
         LocationServices.getGeofencingClient(context).removeGeofences(listOf(taskId.toString()))
+    }
+
+    /**
+     * 位置情報の権限が新たに許可された時・アプリ起動時など、[register]が権限不足で
+     * スキップされていたかもしれないタイミングで呼ぶ。位置情報を使う未完了タスクを
+     * まとめて[register]し直すことで、ジオフェンス登録・[LocationUpdateScheduler]経由の
+     * 定期取得ジョブの起動をやり直す。DBアクセスを伴うため内部で独自にコルーチンを起動する。
+     */
+    fun reconcileAll(context: Context) {
+        CoroutineScope(Dispatchers.IO).launch {
+            AppDatabase.getInstance(context).taskDao().getPendingWithLocation()
+                .forEach { task -> register(context, task) }
+        }
     }
 
     /** アプリ全体で1つのPendingIntentを共有する(発火時のGeofencingEventにどのジオフェンスかが含まれるため)。 */
