@@ -2,7 +2,6 @@ package com.toshi0907.oboetotte
 
 import android.app.Application
 import android.net.Uri
-import androidx.glance.appwidget.updateAll
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
@@ -15,7 +14,7 @@ import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
-import com.toshi0907.oboetotte.widget.TaskWidget
+import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -126,7 +125,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             )
             val id = taskDao.insert(newTask)
             ReminderScheduler.schedule(appContext, newTask.copy(id = id))
-            TaskWidget().updateAll(appContext)
+            refreshTaskWidget(appContext)
         }
     }
 
@@ -137,7 +136,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 val updated = task.copy(isDone = false)
                 ReminderScheduler.schedule(appContext, updated)
                 LocationReminderManager.register(appContext, updated)
-                TaskWidget().updateAll(appContext)
+                refreshTaskWidget(appContext)
             } else {
                 // TaskCompletion.completeが自身でウィジェットの再描画までまとめて行う。
                 TaskCompletion.complete(appContext, task)
@@ -167,7 +166,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
             LocationReminderManager.register(appContext, updated)
-            TaskWidget().updateAll(appContext)
+            refreshTaskWidget(appContext)
         }
     }
 
@@ -181,7 +180,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 attachmentsToDelete.forEach { AttachmentStorage.delete(appContext, it.storedFileName) }
             }
-            TaskWidget().updateAll(appContext)
+            refreshTaskWidget(appContext)
         }
     }
 
@@ -223,7 +222,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             )
             val id = taskDao.insert(newSubtask)
             ReminderScheduler.schedule(appContext, newSubtask.copy(id = id))
-            TaskWidget().updateAll(appContext)
+            refreshTaskWidget(appContext)
         }
     }
 

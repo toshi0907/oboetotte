@@ -32,7 +32,7 @@ import kotlinx.coroutines.flow.first
  * 並び順(期限が近い順。[com.toshi0907.oboetotte.data.TaskDao.getAll]のクエリ順序を
  * そのまま利用)で一覧表示する。タップするとアプリ(MainActivity)を開くのみで、
  * ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに各所から呼ばれる
- * `TaskWidget().updateAll(context)`で再描画される。
+ * [refreshTaskWidget]で再描画される。
  *
  * 背景色は[WidgetBackground]から[TaskWidgetConfigureActivity]でウィジェットごとに選択でき、
  * [PreferencesGlanceStateDefinition]によりウィジェットインスタンス単位で永続化される

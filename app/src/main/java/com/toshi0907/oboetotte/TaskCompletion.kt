@@ -1,12 +1,11 @@
 package com.toshi0907.oboetotte
 
 import android.content.Context
-import androidx.glance.appwidget.updateAll
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
-import com.toshi0907.oboetotte.widget.TaskWidget
+import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import java.time.Instant
 import java.time.ZoneId
 
@@ -34,7 +33,7 @@ object TaskCompletion {
             ReminderScheduler.schedule(context, inserted)
             LocationReminderManager.register(context, inserted)
         }
-        TaskWidget().updateAll(context)
+        refreshTaskWidget(context)
     }
 
     private fun nextDueAt(current: Long, rule: String, daysOfWeek: Set<Int>): Long {
