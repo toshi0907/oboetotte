@@ -13,13 +13,13 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
-import androidx.glance.appwidget.state.PreferencesGlanceStateDefinition
 import androidx.glance.background
 import androidx.glance.currentState
 import androidx.glance.layout.Column
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
@@ -49,7 +49,7 @@ class TaskWidget : GlanceAppWidget() {
         provideContent {
             val prefs = currentState<Preferences>()
             val background = WidgetBackground.fromName(prefs[BACKGROUND_KEY])
-            val textStyle = background.textColor?.let { TextStyle(color = ColorProvider(it)) }
+            val textStyle = background.textColor?.let { TextStyle(color = ColorProvider(it)) } ?: TextStyle()
 
             var modifier = GlanceModifier.fillMaxSize().padding(8.dp)
             background.color?.let { modifier = modifier.background(it) }

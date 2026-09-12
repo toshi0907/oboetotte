@@ -16,7 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
-import androidx.glance.appwidget.update
+import androidx.glance.appwidget.updateAll
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import kotlinx.coroutines.launch
@@ -83,7 +83,7 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
             updateAppWidgetState(this@TaskWidgetConfigureActivity, glanceId) { prefs ->
                 prefs[TaskWidget.BACKGROUND_KEY] = background.name
             }
-            TaskWidget().update(this@TaskWidgetConfigureActivity, glanceId)
+            TaskWidget().updateAll(this@TaskWidgetConfigureActivity)
 
             val resultValue = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
             setResult(RESULT_OK, resultValue)
