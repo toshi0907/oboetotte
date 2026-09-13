@@ -284,7 +284,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
          */
         const val UNASSIGNED_LIST_ID = -1L
 
-        /** タスク・サブタスク登録時にデフォルトで設定する期限までの猶予(1時間)。 */
-        private const val DEFAULT_DUE_DELAY_MILLIS = 60 * 60 * 1000L
+        /**
+         * タスク・サブタスク登録時にデフォルトで設定する期限までの猶予(1時間)。
+         * [com.toshi0907.oboetotte.share.ShareReceiverActivity]も共有によるタスク追加時に
+         * 同じデフォルト値を使うため公開している。
+         */
+        const val DEFAULT_DUE_DELAY_MILLIS = 60 * 60 * 1000L
     }
 }
