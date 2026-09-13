@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.URL
 
 /**
@@ -23,11 +24,20 @@ object AppUpdateInstaller {
     /**
      * [url]からAPKをダウンロードして保存する。ブロッキングI/Oを行うため、呼び出し元が
      * `Dispatchers.IO`上で呼び出すことを想定する(`attachment/AttachmentStorage`と同じ方針)。
+     * 接続が不安定な環境で無期限にブロックしないよう、[AppUpdateChecker.fetch]と同様に
+     * 接続・読み取りタイムアウトを設定する。
      */
     fun download(context: Context, url: String): File {
         val file = File(directory(context), APK_FILE_NAME)
-        URL(url).openStream().use { input ->
-            file.outputStream().use { output -> input.copyTo(output) }
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = 10_000
+        connection.readTimeout = 10_000
+        try {
+            connection.inputStream.use { input ->
+                file.outputStream().use { output -> input.copyTo(output) }
+            }
+        } finally {
+            connection.disconnect()
         }
         return file
     }

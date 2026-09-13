@@ -195,10 +195,16 @@ class MainActivity : ComponentActivity() {
                             return
                         }
                         coroutineScope.launch {
-                            val file = withContext(Dispatchers.IO) {
-                                AppUpdateInstaller.download(context, downloadUrl)
+                            try {
+                                val file = withContext(Dispatchers.IO) {
+                                    AppUpdateInstaller.download(context, downloadUrl)
+                                }
+                                startActivity(AppUpdateInstaller.installIntent(context, file))
+                            } catch (e: Exception) {
+                                // ダウンロード中の通信エラーや、パッケージインストーラーが
+                                // 見つからない端末など、失敗してもアプリ全体をクラッシュさせない。
+                                Toast.makeText(context, "更新のダウンロードに失敗しました", Toast.LENGTH_SHORT).show()
                             }
-                            startActivity(AppUpdateInstaller.installIntent(context, file))
                         }
                     }
                     LaunchedEffect(Unit) {
