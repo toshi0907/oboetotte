@@ -1,34 +1,25 @@
 package com.toshi0907.oboetotte.notification
 
-import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.util.Log
-import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingEvent
-import com.toshi0907.oboetotte.MainActivity
-import com.toshi0907.oboetotte.R
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.LocationUpdateType
-import com.toshi0907.oboetotte.data.NotificationLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * ジオフェンス(到着・離脱)のイベントを受け取り、対象タスクが未完了であれば通知を表示する。
- * 期限日時の[ReminderReceiver]とは別の通知チャンネル("location_reminders")を使うため、
- * ユーザーはシステム設定でそれぞれ個別にオン/オフできる。
+ * ジオフェンス(到着・離脱)のイベントを受け取る。GPS/ネットワーク測位の精度が低いタイミングでは
+ * 実際には動いていなくてもジオフェンスの内外判定が一瞬だけ反転することがあるため、ここでは
+ * 即座に通知せず[GeofenceConfirmWorker.schedule]でデバウンス(既定[GeofenceConfirmWorker.DEBOUNCE_DELAY_MINUTES]分、
+ * その間に別のイベントが来れば置き換わり実行されない)し、実際の通知表示・[com.toshi0907.oboetotte.data.NotificationLog]
+ * への記録は同Workerが確定時に行う。期限日時の[ReminderReceiver]とは別の通知チャンネル
+ * ("location_reminders")を使うため、ユーザーはシステム設定でそれぞれ個別にオン/オフできる。
  */
 class GeofenceReceiver : BroadcastReceiver() {
 
@@ -56,11 +47,8 @@ class GeofenceReceiver : BroadcastReceiver() {
         val taskIds = event.triggeringGeofences?.mapNotNull { it.requestId.toLongOrNull() }
         if (taskIds.isNullOrEmpty()) return
         val triggeringLocation = event.triggeringLocation
-        val updateType = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) {
-            LocationUpdateType.ENTER
-        } else {
-            LocationUpdateType.EXIT
-        }
+        val isEnter = transition == Geofence.GEOFENCE_TRANSITION_ENTER
+        val updateType = if (isEnter) LocationUpdateType.ENTER else LocationUpdateType.EXIT
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
@@ -77,34 +65,23 @@ class GeofenceReceiver : BroadcastReceiver() {
                         Log.d(TAG, "タスク${taskId}は完了済みのため通知をスキップします")
                         detail = "スキップ(完了済み)"
                     } else {
-                        val matches = when (transition) {
-                            Geofence.GEOFENCE_TRANSITION_ENTER -> task.notifyOnArrival
-                            Geofence.GEOFENCE_TRANSITION_EXIT -> task.notifyOnDeparture
-                            else -> false
-                        }
+                        val matches = if (isEnter) task.notifyOnArrival else task.notifyOnDeparture
                         if (!matches) {
                             Log.d(TAG, "タスク${taskId}は$transitionName の通知を希望していないためスキップします")
                             detail = "スキップ(通知タイミング未選択)"
                         } else {
-                            Log.d(TAG, "タスク${taskId}の通知を表示します")
-                            val posted = showNotification(context, taskId, task.title, task.url)
-                            detail = if (posted) "通知表示" else "スキップ(通知権限なし)"
-                            if (posted) {
-                                val transitionLabel = if (transition == Geofence.GEOFENCE_TRANSITION_ENTER) "到着" else "離脱"
-                                val locationLabel = task.locationName?.let { "$it・" } ?: ""
-                                db.notificationLogDao().insertAndTrim(
-                                    NotificationLog(
-                                        triggeredAt = System.currentTimeMillis(),
-                                        taskTitle = task.title,
-                                        triggerCondition = "位置情報$transitionLabel(${locationLabel}半径${task.radiusMeters}m)"
-                                    )
-                                )
-                            }
+                            Log.d(
+                                TAG,
+                                "タスク${taskId}: ${GeofenceConfirmWorker.DEBOUNCE_DELAY_MINUTES}分後も状態が変わらなければ通知します"
+                            )
+                            GeofenceConfirmWorker.schedule(context, taskId, isEnter)
+                            detail = "受信(${GeofenceConfirmWorker.DEBOUNCE_DELAY_MINUTES}分後も継続していれば通知)"
                         }
                     }
                     // ジオフェンスの受信自体は、通知の表示可否に関わらず位置情報デバッグ用に記録する。
                     // これにより「イベント自体が来ていないのか」「来ているが条件で弾かれているのか」を
-                    // アプリ内(位置情報デバッグ画面)から切り分けられる。
+                    // アプリ内(位置情報デバッグ画面)から切り分けられる。実際に通知したかどうかは
+                    // デバウンス確定後にGeofenceConfirmWorkerが通知履歴(NotificationLog)へ記録する。
                     db.locationUpdateLogDao().insertAndTrim(
                         LocationUpdateLog(
                             timestamp = System.currentTimeMillis(),
@@ -123,71 +100,7 @@ class GeofenceReceiver : BroadcastReceiver() {
         }
     }
 
-    /** @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。 */
-    private fun showNotification(context: Context, taskId: Long, title: String, url: String?): Boolean {
-        val notificationManager =
-            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "位置リマインダー",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "登録した場所への到着・離脱の通知"
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
-
-        val openIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val contentIntent = PendingIntent.getActivity(
-            context,
-            taskId.toInt(),
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("位置リマインダー")
-            .setContentText(title)
-            .setAutoCancel(true)
-            .setContentIntent(contentIntent)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .addAction(
-                R.drawable.ic_notification,
-                "完了",
-                ReminderScheduler.completePendingIntent(context, taskId)
-            )
-        if (!url.isNullOrBlank()) {
-            builder.addAction(
-                R.drawable.ic_notification,
-                "リンクを開く",
-                ReminderScheduler.openUrlPendingIntent(context, taskId, url)
-            )
-        }
-        val notification = builder.build()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return false
-        }
-        // 期限日時通知(ReminderReceiver)と同じ taskId.toInt() をIDに使うため、
-        // 「完了」ボタン(CompleteReceiver)からはどちらの通知でも正しく消去できる。
-        // タグは期限日時通知と分けており、両方のリマインダーが発火しても片方がもう片方を
-        // 上書きせず別々の通知として表示される。
-        NotificationManagerCompat.from(context)
-            .notify(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt(), notification)
-        return true
-    }
-
     companion object {
-        const val CHANNEL_ID = "location_reminders"
         private const val TAG = "LocationReminder"
     }
 }
