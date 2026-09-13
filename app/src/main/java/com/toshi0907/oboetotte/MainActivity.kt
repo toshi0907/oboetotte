@@ -97,6 +97,9 @@ import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
+import com.toshi0907.oboetotte.update.AppUpdateChecker
+import com.toshi0907.oboetotte.update.AppUpdateCheckScheduler
+import com.toshi0907.oboetotte.update.AppUpdateInstaller
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -179,12 +182,44 @@ class MainActivity : ComponentActivity() {
                     var locationPermissionGranted by remember {
                         mutableStateOf(LocationReminderManager.hasLocationPermission(context))
                     }
+                    val coroutineScope = rememberCoroutineScope()
+                    var updateCheckResult by remember { mutableStateOf<AppUpdateChecker.Result?>(null) }
+                    fun checkForUpdate() {
+                        coroutineScope.launch {
+                            updateCheckResult = withContext(Dispatchers.IO) { AppUpdateChecker.check() }
+                        }
+                    }
+                    fun downloadAndInstallUpdate(downloadUrl: String) {
+                        if (!AppUpdateInstaller.hasInstallPermission(context)) {
+                            startActivity(AppUpdateInstaller.unknownSourcesSettingsIntent(context))
+                            return
+                        }
+                        coroutineScope.launch {
+                            try {
+                                val file = withContext(Dispatchers.IO) {
+                                    AppUpdateInstaller.download(context, downloadUrl)
+                                }
+                                startActivity(AppUpdateInstaller.installIntent(context, file))
+                            } catch (e: Exception) {
+                                // ダウンロード中の通信エラーや、パッケージインストーラーが
+                                // 見つからない端末など、失敗してもアプリ全体をクラッシュさせない。
+                                Toast.makeText(context, "更新のダウンロードに失敗しました", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                     LaunchedEffect(Unit) {
                         // アプリ起動のたびに、権限がある位置情報タスクのジオフェンス登録・
                         // 定期取得ジョブが確実に動いているか確認する(WorkManager自体は再起動を
                         // 越えて永続化されるが、初回の登録が権限不足でスキップされたまま
                         // 取り残されているケースの保険)。
                         LocationReminderManager.reconcileAll(context)
+                    }
+                    LaunchedEffect(Unit) {
+                        // 起動のたびに新しいビルドが公開されていないか自動チェックする。
+                        checkForUpdate()
+                        // アプリを開いていない間も定期的にチェックできるよう、バックグラウンドの
+                        // 定期実行(AppUpdateCheckWorker)を起動する。既に動作中なら何もしない。
+                        AppUpdateCheckScheduler.ensureScheduled(context)
                     }
                     DisposableEffect(lifecycleOwner) {
                         val observer = LifecycleEventObserver { _, event ->
@@ -236,6 +271,8 @@ class MainActivity : ComponentActivity() {
                                 }
                                 startActivity(intent)
                             },
+                            updateCheckResult = updateCheckResult,
+                            onDownloadUpdate = ::downloadAndInstallUpdate,
                             onOpenSettings = { currentScreen = MainScreen.Settings },
                             modifier = Modifier.padding(innerPadding)
                         )
@@ -273,6 +310,9 @@ class MainActivity : ComponentActivity() {
                                 // 実際の形式判定はBackupManager.import側でマジックナンバーを見て行う。
                                 importBackupLauncher.launch(arrayOf("*/*"))
                             },
+                            updateCheckResult = updateCheckResult,
+                            onCheckForUpdate = ::checkForUpdate,
+                            onDownloadUpdate = ::downloadAndInstallUpdate,
                             onBack = { currentScreen = MainScreen.Tasks },
                             modifier = Modifier.padding(innerPadding)
                         )
@@ -410,6 +450,8 @@ fun TaskScreen(
     onRequestExactAlarmPermission: () -> Unit = {},
     locationPermissionGranted: Boolean = true,
     onRequestLocationSettings: () -> Unit = {},
+    updateCheckResult: AppUpdateChecker.Result? = null,
+    onDownloadUpdate: (String) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -466,6 +508,27 @@ fun TaskScreen(
                         )
                         TextButton(onClick = onRequestLocationSettings) {
                             Text("設定を開く")
+                        }
+                    }
+                }
+            }
+
+            if (updateCheckResult is AppUpdateChecker.Result.UpdateAvailable) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "新しいバージョンが利用可能です。",
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        TextButton(onClick = { onDownloadUpdate(updateCheckResult.downloadUrl) }) {
+                            Text("更新する")
                         }
                     }
                 }
@@ -865,6 +928,9 @@ fun SettingsScreen(
     onSendTestNotification: () -> Unit,
     onExportRequested: () -> Unit,
     onImportRequested: () -> Unit,
+    updateCheckResult: AppUpdateChecker.Result? = null,
+    onCheckForUpdate: () -> Unit = {},
+    onDownloadUpdate: (String) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -927,6 +993,40 @@ fun SettingsScreen(
                 TextButton(onClick = onImportRequested) {
                     Text("インポート")
                 }
+            }
+
+            Text(
+                text = "アップデート",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                text = "現在のビルド: ${BuildConfig.GIT_COMMIT_SHA.take(7)}",
+                style = MaterialTheme.typography.bodySmall
+            )
+            when (updateCheckResult) {
+                is AppUpdateChecker.Result.UpdateAvailable -> {
+                    Text(
+                        text = "新しいバージョンが利用可能です。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    TextButton(onClick = { onDownloadUpdate(updateCheckResult.downloadUrl) }) {
+                        Text("ダウンロードしてインストール")
+                    }
+                }
+                AppUpdateChecker.Result.UpToDate -> Text(
+                    text = "最新版です。",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                AppUpdateChecker.Result.CheckFailed -> Text(
+                    text = "確認できませんでした。通信環境を確認してください。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                null -> {}
+            }
+            TextButton(onClick = onCheckForUpdate) {
+                Text("更新を確認")
             }
 
             Text(

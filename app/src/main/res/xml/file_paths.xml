@@ -2,4 +2,6 @@
 <paths>
     <!-- AttachmentStorage.DIR_NAME("attachments")と対応。filesDir/attachments/配下を公開する。 -->
     <files-path name="attachments" path="attachments/" />
+    <!-- AppUpdateInstaller.UPDATES_DIR_NAME("updates")と対応。filesDir/updates/配下を公開する。 -->
+    <files-path name="updates" path="updates/" />
 </paths>

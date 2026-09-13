@@ -46,5 +46,6 @@ jobs:
           body: |
             pushのたびに自動更新される最新のデバッグ用APKです。
             コミット: ${{ github.sha }}
+            ビルド番号: ${{ github.run_number }}
           prerelease: true
           files: app/build/outputs/apk/debug/app-debug.apk

@@ -5,6 +5,32 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// 設定画面に「現在のビルド」として表示するためのgitコミットSHA(新旧判定には使わない。
+// 判定には下のresolveBuildNumber()を使う)。GitHub Actions上のビルドでは環境変数
+// GITHUB_SHAが自動的に設定されるためそれを使い、それが無いローカル/その他の環境では
+// `git rev-parse HEAD`にフォールバックする。いずれも取得できない場合は"unknown"とする。
+fun resolveGitCommitSha(): String {
+    System.getenv("GITHUB_SHA")?.takeIf { it.isNotBlank() }?.let { return it }
+    return try {
+        val process = ProcessBuilder("git", "rev-parse", "HEAD")
+            .directory(rootDir)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText().trim()
+        if (process.waitFor() == 0 && output.isNotBlank()) output else "unknown"
+    } catch (e: Exception) {
+        "unknown"
+    }
+}
+
+// アプリ内アップデート機能が「新しいビルドかどうか」を判定するための単調増加する番号。
+// コミットSHAには順序が無く新旧を比較できないため、GitHub Actions上のビルドでは
+// 実行のたびに増加するGITHUB_RUN_NUMBER(.github/workflows/android-build.ymlの
+// リリース本文にも同じ値を"ビルド番号: "として埋め込む)を使う。ローカルビルド等
+// GITHUB_RUN_NUMBERが無い環境では0とし、AppUpdateChecker側は0以下を「判定不能」として扱う。
+fun resolveBuildNumber(): Int =
+    System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
+
 android {
     namespace = "com.toshi0907.oboetotte"
     compileSdk = 35
@@ -15,6 +41,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "GIT_COMMIT_SHA", "\"${resolveGitCommitSha()}\"")
+        buildConfigField("int", "BUILD_NUMBER", resolveBuildNumber().toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -49,6 +77,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
