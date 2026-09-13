@@ -94,6 +94,7 @@ import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
@@ -707,7 +708,7 @@ fun TaskDetailDialog(
     var editing by remember(task.id) { mutableStateOf(false) }
     var nestedViewTask by remember { mutableStateOf<Task?>(null) }
     val subtasks = allTasks.filter { it.parentTaskId == current.id }
-    val attachments = allAttachments.filter { it.taskId == current.id }
+    val attachments = allAttachments.filter { it.taskId == current.attachmentGroupId() }
     val listName = lists.find { it.id == current.listId }?.name
 
     AlertDialog(
@@ -1586,7 +1587,7 @@ fun EditTaskDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val attachments = allAttachments.filter { it.taskId == task.id }
+    val attachments = allAttachments.filter { it.taskId == task.attachmentGroupId() }
     val attachmentPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> uris.forEach { onAddAttachment(task, it) } }

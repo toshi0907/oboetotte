@@ -36,6 +36,14 @@ interface TaskDao {
     @Query("UPDATE tasks SET listId = NULL WHERE listId = :listId")
     suspend fun clearListId(listId: Long)
 
+    /**
+     * [groupId]をattachmentGroupId()(=seriesId ?: id)として持つタスクの件数。
+     * タスク削除時、同じ繰り返しシリーズの他のインスタンスがまだ残っているかどうかを判定し、
+     * 共有中の添付ファイルを誤って削除しないために使う。
+     */
+    @Query("SELECT COUNT(*) FROM tasks WHERE seriesId = :groupId OR (seriesId IS NULL AND id = :groupId)")
+    suspend fun countByAttachmentGroup(groupId: Long): Int
+
     @Delete
     suspend fun delete(task: Task)
 

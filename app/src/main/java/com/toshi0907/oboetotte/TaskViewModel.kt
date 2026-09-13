@@ -12,6 +12,7 @@ import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
@@ -172,19 +173,27 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteTask(task: Task) {
         viewModelScope.launch {
-            val attachmentsToDelete = taskAttachmentDao.getForTask(task.id)
+            val groupId = task.attachmentGroupId()
             taskDao.delete(task)
-            taskAttachmentDao.deleteForTask(task.id)
             ReminderScheduler.cancel(appContext, task.id)
             LocationReminderManager.unregister(appContext, task.id)
-            withContext(Dispatchers.IO) {
-                attachmentsToDelete.forEach { AttachmentStorage.delete(appContext, it.storedFileName) }
+            // 添付ファイルは繰り返しシリーズ全体で共有しているため、同じシリーズの他のインスタンスが
+            // まだ残っている場合は削除しない(まだ参照されているため)。
+            if (taskDao.countByAttachmentGroup(groupId) == 0) {
+                val attachmentsToDelete = taskAttachmentDao.getForTask(groupId)
+                taskAttachmentDao.deleteForTask(groupId)
+                withContext(Dispatchers.IO) {
+                    attachmentsToDelete.forEach { AttachmentStorage.delete(appContext, it.storedFileName) }
+                }
             }
             refreshTaskWidget(appContext)
         }
     }
 
-    /** [uri]の内容を端末内にコピーし、[task]の添付ファイルとして登録する。 */
+    /**
+     * [uri]の内容を端末内にコピーし、[task]の添付ファイルとして登録する。繰り返しタスクの場合、
+     * [Task.attachmentGroupId]を使って同じ繰り返しシリーズの全インスタンスと共有する。
+     */
     fun addAttachment(task: Task, uri: Uri) {
         viewModelScope.launch {
             val copied = withContext(Dispatchers.IO) {
@@ -192,7 +201,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             } ?: return@launch
             taskAttachmentDao.insert(
                 TaskAttachment(
-                    taskId = task.id,
+                    taskId = task.attachmentGroupId(),
                     fileName = copied.fileName,
                     storedFileName = copied.storedFileName,
                     mimeType = copied.mimeType,
