@@ -18,24 +18,30 @@ import com.toshi0907.oboetotte.R
 /**
  * バックグラウンドの定期チェック([AppUpdateCheckWorker])が新しいビルドを見つけた際に表示する
  * 通知チャンネル・通知の組み立てを担う(`notification/LocationReminderNotifier`と同様の構成)。
- * 同じコミット(=同じビルド)に対しては1度だけ通知し、定期チェックのたびに同じ内容で
- * 繰り返し通知しないよう、最後に通知したコミットSHAをSharedPreferencesに記録する。
+ * 同じビルド番号に対しては1度だけ通知し、定期チェックのたびに同じ内容で
+ * 繰り返し通知しないよう、最後に通知したビルド番号をSharedPreferencesに記録する。
  */
 object AppUpdateNotifier {
     const val CHANNEL_ID = "app_updates"
     private const val NOTIFICATION_ID = 1
     private const val PREFS_NAME = "app_update_notifier"
-    private const val KEY_LAST_NOTIFIED_COMMIT_SHA = "last_notified_commit_sha"
+    private const val KEY_LAST_NOTIFIED_BUILD_NUMBER = "last_notified_build_number"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    /** [commitSha]について既に通知済みなら`false`。呼び出し元([AppUpdateCheckWorker])はこの場合通知をスキップする。 */
-    fun shouldNotify(context: Context, commitSha: String): Boolean =
-        prefs(context).getString(KEY_LAST_NOTIFIED_COMMIT_SHA, null) != commitSha
+    /** [buildNumber]について既に通知済みなら`false`。呼び出し元([AppUpdateCheckWorker])はこの場合通知をスキップする。 */
+    fun shouldNotify(context: Context, buildNumber: Int): Boolean =
+        prefs(context).getInt(KEY_LAST_NOTIFIED_BUILD_NUMBER, 0) != buildNumber
 
-    /** @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。 */
-    fun showNotification(context: Context, commitSha: String): Boolean {
+    /**
+     * @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか。アプリ通知が
+     * OS設定またはチャンネル単位で無効化されている場合、および投稿権限(API 33+)が
+     * 無い場合は`false`を返し、[KEY_LAST_NOTIFIED_BUILD_NUMBER]も更新しない
+     * (通知がブロックされている間はスキップした扱いのままにし、後で有効化された際に
+     * 同じビルドについて改めて通知できるようにするため)。
+     */
+    fun showNotification(context: Context, buildNumber: Int): Boolean {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -76,8 +82,15 @@ object AppUpdateNotifier {
         ) {
             return false
         }
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
-        prefs(context).edit().putString(KEY_LAST_NOTIFIED_COMMIT_SHA, commitSha).apply()
+
+        val notifier = NotificationManagerCompat.from(context)
+        val channelBlocked =
+            notificationManager.getNotificationChannel(CHANNEL_ID)?.importance ==
+                NotificationManager.IMPORTANCE_NONE
+        if (!notifier.areNotificationsEnabled() || channelBlocked) return false
+
+        notifier.notify(NOTIFICATION_ID, notification)
+        prefs(context).edit().putInt(KEY_LAST_NOTIFIED_BUILD_NUMBER, buildNumber).apply()
         return true
     }
 }
