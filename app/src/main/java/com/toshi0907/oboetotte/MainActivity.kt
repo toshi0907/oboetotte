@@ -351,8 +351,8 @@ private fun repeatRuleLabel(task: Task): String? {
     }
 }
 
-/** スキーマ(http(s)://)が省略された入力(例: "example.com")でも通知から正しく開けるよう補う。 */
-private fun normalizeUrl(input: String): String? {
+/** スキーマ(http(s)://)が省略された入力(例: "example.com")でも通知から正しく開けるよう補う。共有機能からも利用するため公開。 */
+fun normalizeUrl(input: String): String? {
     val trimmed = input.trim()
     if (trimmed.isEmpty()) return null
     return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {

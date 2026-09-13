@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
@@ -12,6 +13,7 @@ import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
+import com.toshi0907.oboetotte.normalizeUrl
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
@@ -25,8 +27,10 @@ import java.time.format.DateTimeFormatter
  * 受け取り、確認画面を挟まず「タスク(yyyy/MM/dd HH:mm)」という名前の新規タスクを即座に作成する。
  * 共有されたファイルは複数選択されていても1つのタスクにまとめて添付ファイルとして保存する
  * ([com.toshi0907.oboetotte.attachment.AttachmentStorage]経由で端末内にコピー、他の添付ファイル
- * 追加と同じ扱い)。期限は他のタスク登録と同様デフォルトで1時間後
- * ([TaskViewModel.DEFAULT_DUE_DELAY_MILLIS])を設定する。画面には何も表示せず
+ * 追加と同じ扱い)。共有内容にテキスト(`EXTRA_TEXT`)が含まれる場合、trim後の文字列全体が
+ * [Patterns.WEB_URL]に完全一致すればURL共有とみなし[Task.url]に、それ以外はテキスト共有とみなし
+ * [Task.memo]に格納する(ファイル添付と同時に指定されていても両方保存する)。期限は他のタスク登録と
+ * 同様デフォルトで1時間後([TaskViewModel.DEFAULT_DUE_DELAY_MILLIS])を設定する。画面には何も表示せず
  * (`Theme.Oboetotte.SnoozeDialog`の透過テーマを流用)、処理完了後にToastで結果を通知してfinishする。
  */
 class ShareReceiverActivity : ComponentActivity() {
@@ -34,10 +38,12 @@ class ShareReceiverActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val uris = extractUris(intent)
-        if (uris.isEmpty()) {
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.takeIf { it.isNotEmpty() }
+        if (uris.isEmpty() && sharedText == null) {
             finish()
             return
         }
+        val isSharedUrl = sharedText != null && Patterns.WEB_URL.matcher(sharedText).matches()
 
         lifecycleScope.launch {
             val database = AppDatabase.getInstance(applicationContext)
@@ -47,7 +53,9 @@ class ShareReceiverActivity : ComponentActivity() {
             val title = "タスク(${TITLE_DATE_FORMAT.format(LocalDateTime.now())})"
             val task = Task(
                 title = title,
-                dueAt = System.currentTimeMillis() + TaskViewModel.DEFAULT_DUE_DELAY_MILLIS
+                dueAt = System.currentTimeMillis() + TaskViewModel.DEFAULT_DUE_DELAY_MILLIS,
+                url = if (isSharedUrl) normalizeUrl(sharedText!!) else null,
+                memo = if (!isSharedUrl) sharedText else null
             )
             val taskId = taskDao.insert(task)
             ReminderScheduler.schedule(applicationContext, task.copy(id = taskId))
@@ -70,9 +78,13 @@ class ShareReceiverActivity : ComponentActivity() {
             }
             refreshTaskWidget(applicationContext)
 
+            val resultParts = mutableListOf<String>()
+            if (attachedCount > 0) resultParts.add("添付${attachedCount}件")
+            if (isSharedUrl) resultParts.add("URL") else if (sharedText != null) resultParts.add("メモ")
+            val suffix = if (resultParts.isEmpty()) "" else "(${resultParts.joinToString("、")})"
             Toast.makeText(
                 applicationContext,
-                "「$title」を追加しました(添付${attachedCount}件)",
+                "「$title」を追加しました$suffix",
                 Toast.LENGTH_LONG
             ).show()
             finish()
