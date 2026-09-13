@@ -311,14 +311,29 @@ private fun formatDueAt(millis: Long): String {
 
 private val WEEKDAY_LABELS = listOf(1 to "月", 2 to "火", 3 to "水", 4 to "木", 5 to "金", 6 to "土", 7 to "日")
 
-/** [EditTaskDialog]の期限クイック選択チップ用。ラベルと現在時刻からの分数のペア。 */
-private val DUE_QUICK_OPTIONS = listOf(
-    "5分後" to 5L,
-    "15分後" to 15L,
-    "30分後" to 30L,
-    "1時間後" to 60L,
-    "3時間後" to 180L,
-    "6時間後" to 360L
+/** タップ時点の現在時刻(epoch millis)から分数を加算した期限を返す。[DUE_QUICK_OPTIONS]用。 */
+private fun addMinutes(minutes: Long): (Long) -> Long = { now -> now + minutes * 60_000 }
+
+/** タップ時点の現在時刻(epoch millis)からカレンダー月単位で加算した期限を返す。[DUE_QUICK_OPTIONS]用。 */
+private fun addMonths(months: Long): (Long) -> Long = { now ->
+    Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).plusMonths(months).toInstant().toEpochMilli()
+}
+
+/**
+ * [EditTaskDialog]の期限クイック選択チップ用。ラベルと、タップ時点の現在時刻(epoch millis)から
+ * 期限(epoch millis)を計算する関数のペア。日・週は固定長のため分加算、月はカレンダー月単位で
+ * 加算する([TaskCompletion.nextDueAt]の繰り返しタスクの月加算と同じ考え方)。
+ */
+private val DUE_QUICK_OPTIONS: List<Pair<String, (Long) -> Long>> = listOf(
+    "5分後" to addMinutes(5),
+    "15分後" to addMinutes(15),
+    "30分後" to addMinutes(30),
+    "1時間後" to addMinutes(60),
+    "3時間後" to addMinutes(180),
+    "6時間後" to addMinutes(360),
+    "1日後" to addMinutes(1440),
+    "1週間後" to addMinutes(10080),
+    "1ヶ月後" to addMonths(1)
 )
 
 private fun radiusLabel(meters: Int): String =
@@ -1673,9 +1688,9 @@ fun EditTaskDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(DUE_QUICK_OPTIONS) { (label, minutes) ->
+                    items(DUE_QUICK_OPTIONS) { (label, computeDueAt) ->
                         AssistChip(
-                            onClick = { dueAt = System.currentTimeMillis() + minutes * 60_000 },
+                            onClick = { dueAt = computeDueAt(System.currentTimeMillis()) },
                             label = { Text(label) }
                         )
                     }
