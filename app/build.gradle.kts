@@ -5,6 +5,26 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// アプリ内アップデート機能(update/AppUpdateChecker)が、ビルド時のコミットと
+// `latest-debug`リリース本文に含まれるコミット(.github/workflows/android-build.ymlの
+// ${{ github.sha }})を比較するために使う。GitHub Actions上のビルドでは環境変数
+// GITHUB_SHAが自動的に設定されるためそれを使い、それが無いローカル/その他の環境では
+// `git rev-parse HEAD`にフォールバックする。いずれも取得できない場合は"unknown"とし、
+// その場合AppUpdateChecker側は更新の有無を判定できないものとして扱う。
+fun resolveGitCommitSha(): String {
+    System.getenv("GITHUB_SHA")?.takeIf { it.isNotBlank() }?.let { return it }
+    return try {
+        val process = ProcessBuilder("git", "rev-parse", "HEAD")
+            .directory(rootDir)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText().trim()
+        if (process.waitFor() == 0 && output.isNotBlank()) output else "unknown"
+    } catch (e: Exception) {
+        "unknown"
+    }
+}
+
 android {
     namespace = "com.toshi0907.oboetotte"
     compileSdk = 35
@@ -15,6 +35,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "GIT_COMMIT_SHA", "\"${resolveGitCommitSha()}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -49,6 +70,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
