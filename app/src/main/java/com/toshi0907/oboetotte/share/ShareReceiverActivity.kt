@@ -43,9 +43,13 @@ class ShareReceiverActivity : ComponentActivity() {
             finish()
             return
         }
-        val isSharedUrl = sharedText != null && Patterns.WEB_URL.matcher(sharedText).matches()
 
         lifecycleScope.launch {
+            // Patterns.WEB_URLの正規表現マッチングは巨大な入力で重くなりうるため、メインスレッドを避ける。
+            val isSharedUrl = sharedText != null && withContext(Dispatchers.Default) {
+                Patterns.WEB_URL.matcher(sharedText).matches()
+            }
+
             val database = AppDatabase.getInstance(applicationContext)
             val taskDao = database.taskDao()
             val taskAttachmentDao = database.taskAttachmentDao()
