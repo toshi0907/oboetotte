@@ -3,6 +3,7 @@ package com.toshi0907.oboetotte
 import android.content.Context
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
@@ -27,7 +28,14 @@ object TaskCompletion {
         val dueAt = task.dueAt
         val daysOfWeek = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek)
         if (rule != null && dueAt != null && (rule != RepeatRule.WEEKLY_DAYS || daysOfWeek.isNotEmpty())) {
-            val nextTask = task.copy(id = 0, isDone = false, dueAt = nextDueAt(dueAt, rule, daysOfWeek))
+            // seriesIdを引き継ぐことで、次回分のタスクも同じattachmentGroupId()を持ち、
+            // 添付ファイルが繰り返しシリーズ全体で共有され続ける(完了時に消えない)。
+            val nextTask = task.copy(
+                id = 0,
+                isDone = false,
+                dueAt = nextDueAt(dueAt, rule, daysOfWeek),
+                seriesId = task.attachmentGroupId()
+            )
             val newId = taskDao.insert(nextTask)
             val inserted = nextTask.copy(id = newId)
             ReminderScheduler.schedule(context, inserted)

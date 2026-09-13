@@ -21,5 +21,15 @@ data class Task(
     val notifyOnArrival: Boolean = false,
     val notifyOnDeparture: Boolean = false,
     val url: String? = null,
-    val memo: String? = null
+    val memo: String? = null,
+    val seriesId: Long? = null
 )
+
+/**
+ * 添付ファイルの紐付け先ID。繰り返しタスクが完了して次回分が生成されても添付ファイルが
+ * 引き継がれ、かつ同じ繰り返しシリーズの全インスタンス(過去の完了済み分を含む)で
+ * 追加・削除が連動するよう、[TaskAttachment.taskId]にはタスク自身の[Task.id]ではなく
+ * この値を使う。[seriesId]が未設定(単発タスク、またはまだ一度も完了していない繰り返し
+ * タスクの初回インスタンス)であれば自分自身の[Task.id]がそのままシリーズの識別子になる。
+ */
+fun Task.attachmentGroupId(): Long = seriesId ?: id

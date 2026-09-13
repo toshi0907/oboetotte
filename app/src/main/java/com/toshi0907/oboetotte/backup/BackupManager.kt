@@ -79,6 +79,7 @@ object BackupManager {
                             put("notifyOnDeparture", task.notifyOnDeparture)
                             put("url", task.url ?: JSONObject.NULL)
                             put("memo", task.memo ?: JSONObject.NULL)
+                            put("seriesId", task.seriesId ?: JSONObject.NULL)
                         }
                     }
                 )
@@ -190,7 +191,8 @@ object BackupManager {
                 notifyOnArrival = obj.optBoolean("notifyOnArrival", false),
                 notifyOnDeparture = obj.optBoolean("notifyOnDeparture", false),
                 url = if (obj.isNull("url")) null else obj.getString("url"),
-                memo = if (obj.isNull("memo")) null else obj.getString("memo")
+                memo = if (obj.isNull("memo")) null else obj.getString("memo"),
+                seriesId = if (obj.isNull("seriesId")) null else obj.getLong("seriesId")
             )
         }
 
