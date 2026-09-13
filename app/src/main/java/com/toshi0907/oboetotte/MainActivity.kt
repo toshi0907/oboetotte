@@ -25,6 +25,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +73,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -2146,7 +2148,9 @@ private fun AttachmentThumbnail(attachment: TaskAttachment) {
 /**
  * [attachment]が画像またはPDFであれば、確認画面にインラインでプレビュー表示する。
  * それ以外の形式はプレビュー非対応のため何も表示しない([AttachmentRow]のタップで
- * 外部アプリを開く導線のみとなる)。
+ * 外部アプリを開く導線のみとなる)。プレビューの背景は常に白で固定する(ダークテーマ上で
+ * 透過部分のあるPDF・画像をプレビューすると、透過部分に暗い背景色が透けて文字等が
+ * 読めなくなることがあるため)。
  */
 @Composable
 private fun AttachmentPreview(attachment: TaskAttachment) {
@@ -2162,7 +2166,9 @@ private fun AttachmentPreview(attachment: TaskAttachment) {
                 Image(
                     bitmap = it.asImageBitmap(),
                     contentDescription = attachment.fileName,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White)
                 )
             }
         }
@@ -2177,7 +2183,9 @@ private fun AttachmentPreview(attachment: TaskAttachment) {
                     Image(
                         bitmap = page.asImageBitmap(),
                         contentDescription = attachment.fileName,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White)
                     )
                 }
             }
