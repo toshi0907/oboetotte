@@ -351,11 +351,19 @@ private fun repeatRuleLabel(task: Task): String? {
     }
 }
 
-/** スキーマ(http(s)://)が省略された入力(例: "example.com")でも通知から正しく開けるよう補う。共有機能からも利用するため公開。 */
+private val URL_SCHEME_PREFIX = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
+
+/**
+ * スキーマ(http(s)://)が省略された入力(例: "example.com")でも通知から正しく開けるよう補う。
+ * 共有機能からも利用するため公開。共有テキストは`Patterns.WEB_URL`(大文字小文字を区別せず、
+ * rtsp等のスキームも許容)で判定しているため、スキーム自体は大文字小文字を問わず既存のものを
+ * そのまま保持し、無い場合のみ`https://`を補う(例: "Http://example.com"を
+ * "https://Http://example.com"にしてしまわないため)。
+ */
 fun normalizeUrl(input: String): String? {
     val trimmed = input.trim()
     if (trimmed.isEmpty()) return null
-    return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return if (URL_SCHEME_PREFIX.containsMatchIn(trimmed)) {
         trimmed
     } else {
         "https://$trimmed"
