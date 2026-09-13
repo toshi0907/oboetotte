@@ -21,7 +21,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * 他のアプリからの共有(ACTION_SEND/ACTION_SEND_MULTIPLE、mimeTypeは`*​/*`で何でも受け付ける)を
+ * 他のアプリからの共有(ACTION_SEND/ACTION_SEND_MULTIPLE、mimeTypeはワイルドカード指定で何でも受け付ける)を
  * 受け取り、確認画面を挟まず「タスク(yyyy/MM/dd HH:mm)」という名前の新規タスクを即座に作成する。
  * 共有されたファイルは複数選択されていても1つのタスクにまとめて添付ファイルとして保存する
  * ([com.toshi0907.oboetotte.attachment.AttachmentStorage]経由で端末内にコピー、他の添付ファイル
