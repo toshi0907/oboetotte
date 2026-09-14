@@ -27,6 +27,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -96,6 +97,8 @@ import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.ui.theme.Green40
+import com.toshi0907.oboetotte.ui.theme.Green80
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import com.toshi0907.oboetotte.update.AppUpdateChecker
 import com.toshi0907.oboetotte.update.AppUpdateCheckScheduler
@@ -675,6 +678,11 @@ fun TaskTreeRow(
     val isOverdue = task.dueAt != null &&
         !task.isDone &&
         task.dueAt < System.currentTimeMillis()
+    val isDueToday = task.dueAt != null &&
+        !task.isDone &&
+        !isOverdue &&
+        Instant.ofEpochMilli(task.dueAt).atZone(ZoneId.systemDefault()).toLocalDate() ==
+            LocalDate.now(ZoneId.systemDefault())
 
     Column {
         Row(
@@ -710,10 +718,10 @@ fun TaskTreeRow(
                             locationLabel(task)
                         ).joinToString(" ・ "),
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (isOverdue) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                        color = when {
+                            isOverdue -> MaterialTheme.colorScheme.error
+                            isDueToday -> if (isSystemInDarkTheme()) Green80 else Green40
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
                 }
