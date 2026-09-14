@@ -110,6 +110,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -621,12 +622,22 @@ fun TaskScreen(
                 }
             }
 
+            // isOverdue/isDueTodayの判定基準となる「現在時刻」。タスク一覧を開いたままにしていても
+            // 期限切れ・当日期限の色分けが更新されるよう、1分おきに再コンポーズをトリガーする。
+            val nowMillis by produceState(initialValue = System.currentTimeMillis()) {
+                while (true) {
+                    delay(60_000L)
+                    value = System.currentTimeMillis()
+                }
+            }
+
             LazyColumn {
                 items(tasks, key = { it.id }) { task ->
                     TaskTreeRow(
                         task = task,
                         allTasks = allTasks,
                         depth = 0,
+                        nowMillis = nowMillis,
                         onToggleDone = onToggleDone,
                         onViewTask = { viewingTask = it },
                         onDeleteTask = { deletingTask = it }
@@ -670,6 +681,7 @@ fun TaskTreeRow(
     task: Task,
     allTasks: List<Task>,
     depth: Int,
+    nowMillis: Long,
     onToggleDone: (Task) -> Unit,
     onViewTask: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit
@@ -677,12 +689,12 @@ fun TaskTreeRow(
     val children = allTasks.filter { it.parentTaskId == task.id }
     val isOverdue = task.dueAt != null &&
         !task.isDone &&
-        task.dueAt < System.currentTimeMillis()
+        task.dueAt < nowMillis
     val isDueToday = task.dueAt != null &&
         !task.isDone &&
         !isOverdue &&
         Instant.ofEpochMilli(task.dueAt).atZone(ZoneId.systemDefault()).toLocalDate() ==
-            LocalDate.now(ZoneId.systemDefault())
+            Instant.ofEpochMilli(nowMillis).atZone(ZoneId.systemDefault()).toLocalDate()
 
     Column {
         Row(
@@ -739,6 +751,7 @@ fun TaskTreeRow(
                 task = child,
                 allTasks = allTasks,
                 depth = depth + 1,
+                nowMillis = nowMillis,
                 onToggleDone = onToggleDone,
                 onViewTask = onViewTask,
                 onDeleteTask = onDeleteTask
