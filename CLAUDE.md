@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## CI/ビルドパイプライン
 
-`.github/workflows/android-build.yml` は、全ブランチへのpushとPR、および手動の`workflow_dispatch`で実行されます。`ubuntu-latest`上で`./gradlew assembleDebug`を実行し、`app/build/outputs/apk/debug/app-debug.apk`を`app-debug`という名前のArtifactとしてアップロードします。加えて、pushイベントの場合は`latest-debug`タグのGitHub Release(prerelease)を`softprops/action-gh-release`で自動更新し、同じAPKを添付しています。リポジトリはpublicなので、`https://github.com/toshi0907/oboetotte/releases/tag/latest-debug` は認証なしで常に最新のデバッグAPKを指す固定URLとして使えます。Claude Codeのセッションが`mcp__github__get_latest_release`等でこのReleaseのAsset URLを取得し、`SendUserFile`でチャットに直接APKを送ることもできます。Artifactは90日で失効しますが、Releaseは失効しないため、こちらが端末にAPKを持っていく主な手段です。
+`.github/workflows/android-build.yml` は、全ブランチへのpushとPR、および手動の`workflow_dispatch`で実行されます。`ubuntu-latest`上で`./gradlew assembleDebug`を実行し、`app/build/outputs/apk/debug/app-debug.apk`を`app-debug`という名前のArtifactとしてアップロードします。加えて、pushイベントの場合は`latest-debug`タグのGitHub Release(prerelease)を`softprops/action-gh-release`で自動更新し、同じAPKを添付しています。リポジトリはpublicなので、`https://github.com/toshi0907/oboetotte/releases/tag/latest-debug` は認証なしで常に最新のデバッグAPKを指す固定URLとして使えます。**アプリ内アップデート機能(後述)が端末側でこのReleaseを見に行きインストールできるため、Claude Codeのセッションが`SendUserFile`でチャットにAPKを送付する運用は行いません**(開発フロー参照)。Artifactは90日で失効しますが、Releaseは失効しないため、アプリ内アップデートが参照する主な手段になっています。
 
 **デバッグ署名鍵は固定(`app/debug.keystore`)。** Android Gradle Pluginのデフォルトでは`~/.android/debug.keystore`を使いますが、GitHub Actionsのrunnerは毎回まっさらなVMのため、ビルドごとに異なる鍵で自動生成されてしまいます。署名が変わると、既に端末にインストール済みのAPKの上に新しいAPKを重ねてインストールできず「アプリがインストールされていません」というエラーになります。これを避けるため、リポジトリに`app/debug.keystore`(alias: `androiddebugkey`, storepass/keypass: `android`)をコミットし、`app/build.gradle.kts`の`signingConfigs.debug`で明示的に指定しています。中身は公開されても問題ないデバッグ専用鍵なので、コミットして構いません。
 
@@ -30,7 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 作業用ブランチはPRがマージされたら削除してください。マージ済みブランチを残さず、リポジトリをブランチが整理された状態に保ちます。
 
-## 開発フロー(PR作成からAPK配布まで)
+## 開発フロー(PR作成からマージまで)
 
 実装作業は以下の流れで進めてください。
 
@@ -42,8 +42,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - ユーザーから「レビュー不要」などの指示があった場合は、セルフレビュー(前項)は行った上で、CodeRabbitへの依頼・結果待ちのみ省略してよい。
 5. CodeRabbitのレビュー結果を確認し、指摘事項があれば対応する(修正してpush、またはレビュー内容への返信)。
 6. CIが green であることを再確認した上でPRをマージする。
-7. マージ後、mainブランチのCIビルドが完了するのを待つ。
-8. mainのビルドが成功したら、`latest-debug`リリースの最新APKを取得し、`SendUserFile`でチャットに送付してユーザーにビルド完了を通知する。
+7. マージ後、mainブランチのCIビルドが成功することを確認する。
+
+**APKの配布(`SendUserFile`でのチャット送付)は行わない。** アプリ内アップデート機能(前述)により、端末側で`latest-debug`リリースの更新を自動/手動チェックしてインストールできるため、mainのビルド確認をもって完了とする。
 
 この後、ブランチ運用(前項)・GitHub Issue対応(次項)の後片付けも忘れずに行ってください。
 
