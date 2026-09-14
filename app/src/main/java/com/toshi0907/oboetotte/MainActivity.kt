@@ -27,6 +27,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -96,6 +97,8 @@ import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.ui.theme.Green40
+import com.toshi0907.oboetotte.ui.theme.Green80
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import com.toshi0907.oboetotte.update.AppUpdateChecker
 import com.toshi0907.oboetotte.update.AppUpdateCheckScheduler
@@ -107,6 +110,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -618,12 +622,22 @@ fun TaskScreen(
                 }
             }
 
+            // isOverdue/isDueTodayの判定基準となる「現在時刻」。タスク一覧を開いたままにしていても
+            // 期限切れ・当日期限の色分けが更新されるよう、1分おきに再コンポーズをトリガーする。
+            val nowMillis by produceState(initialValue = System.currentTimeMillis()) {
+                while (true) {
+                    delay(60_000L)
+                    value = System.currentTimeMillis()
+                }
+            }
+
             LazyColumn {
                 items(tasks, key = { it.id }) { task ->
                     TaskTreeRow(
                         task = task,
                         allTasks = allTasks,
                         depth = 0,
+                        nowMillis = nowMillis,
                         onToggleDone = onToggleDone,
                         onViewTask = { viewingTask = it },
                         onDeleteTask = { deletingTask = it }
@@ -667,6 +681,7 @@ fun TaskTreeRow(
     task: Task,
     allTasks: List<Task>,
     depth: Int,
+    nowMillis: Long,
     onToggleDone: (Task) -> Unit,
     onViewTask: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit
@@ -674,7 +689,12 @@ fun TaskTreeRow(
     val children = allTasks.filter { it.parentTaskId == task.id }
     val isOverdue = task.dueAt != null &&
         !task.isDone &&
-        task.dueAt < System.currentTimeMillis()
+        task.dueAt < nowMillis
+    val isDueToday = task.dueAt != null &&
+        !task.isDone &&
+        !isOverdue &&
+        Instant.ofEpochMilli(task.dueAt).atZone(ZoneId.systemDefault()).toLocalDate() ==
+            Instant.ofEpochMilli(nowMillis).atZone(ZoneId.systemDefault()).toLocalDate()
 
     Column {
         Row(
@@ -710,10 +730,10 @@ fun TaskTreeRow(
                             locationLabel(task)
                         ).joinToString(" ・ "),
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (isOverdue) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                        color = when {
+                            isOverdue -> MaterialTheme.colorScheme.error
+                            isDueToday -> if (isSystemInDarkTheme()) Green80 else Green40
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
                 }
@@ -731,6 +751,7 @@ fun TaskTreeRow(
                 task = child,
                 allTasks = allTasks,
                 depth = depth + 1,
+                nowMillis = nowMillis,
                 onToggleDone = onToggleDone,
                 onViewTask = onViewTask,
                 onDeleteTask = onDeleteTask
