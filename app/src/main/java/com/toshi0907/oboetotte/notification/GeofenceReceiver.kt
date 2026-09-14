@@ -3,12 +3,15 @@ package com.toshi0907.oboetotte.notification
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.location.Location
 import android.util.Log
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingEvent
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.LocationUpdateType
+import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.metersBetween
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,6 +85,8 @@ class GeofenceReceiver : BroadcastReceiver() {
                     // これにより「イベント自体が来ていないのか」「来ているが条件で弾かれているのか」を
                     // アプリ内(位置情報デバッグ画面)から切り分けられる。実際に通知したかどうかは
                     // デバウンス確定後にGeofenceConfirmWorkerが通知履歴(NotificationLog)へ記録する。
+                    // distanceMeters/radiusMetersも併せて記録することで、例えば「距離8m/半径15m」の
+                    // EXITのように、実際には圏内のままGPS誤差で誤検知されたケースを後から直接判別できる。
                     db.locationUpdateLogDao().insertAndTrim(
                         LocationUpdateLog(
                             timestamp = System.currentTimeMillis(),
@@ -90,7 +95,9 @@ class GeofenceReceiver : BroadcastReceiver() {
                             latitude = triggeringLocation?.latitude,
                             longitude = triggeringLocation?.longitude,
                             accuracy = triggeringLocation?.accuracy,
-                            detail = detail
+                            detail = detail,
+                            distanceMeters = distanceToTask(triggeringLocation, task),
+                            radiusMeters = task?.radiusMeters
                         )
                     )
                 }
@@ -98,6 +105,14 @@ class GeofenceReceiver : BroadcastReceiver() {
                 pendingResult.finish()
             }
         }
+    }
+
+    /** [triggeringLocation]から[task]に登録された座標までの距離(メートル)。いずれかが無ければnull。 */
+    private fun distanceToTask(triggeringLocation: Location?, task: Task?): Float? {
+        val lat = task?.latitude
+        val lng = task?.longitude
+        if (triggeringLocation == null || lat == null || lng == null) return null
+        return metersBetween(triggeringLocation.latitude, triggeringLocation.longitude, lat, lng)
     }
 
     companion object {

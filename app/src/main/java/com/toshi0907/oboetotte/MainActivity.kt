@@ -8,7 +8,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
-import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -1178,12 +1177,13 @@ fun LocationDebugDialog(
                                 style = MaterialTheme.typography.bodySmall
                             )
                             currentLocation?.let { current ->
-                                val results = FloatArray(1)
-                                Location.distanceBetween(current.latitude, current.longitude, lat, lng, results)
-                                val distance = results[0]
+                                val distance = metersBetween(current.latitude, current.longitude, lat, lng)
                                 val inside = distance <= radius
                                 Text(
-                                    text = "現在地からの距離: ${distance.toInt()}m (${if (inside) "圏内" else "圏外"})",
+                                    text = "現在地からの距離: %.1fm (%s)".format(
+                                        distance,
+                                        if (inside) "圏内" else "圏外"
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (inside) {
                                         MaterialTheme.colorScheme.primary
@@ -1222,7 +1222,9 @@ fun LocationDebugDialog(
 /**
  * [LocationDebugDialog]の「更新履歴」1行分。[LocationUpdateLog.type]に応じてラベルを出し分け、
  * 座標が記録されていれば併せて表示する(ジオフェンスイベントは[android.location.Location]を
- * 取得できない端末・状況もあるためnullになりうる)。
+ * 取得できない端末・状況もあるためnullになりうる)。ENTER/EXITで[LocationUpdateLog.distanceMeters]・
+ * [LocationUpdateLog.radiusMeters]が記録されていれば、例えば「距離8m/半径15m」のように
+ * 表示し、実際には圏内のままGPS誤差でEXITが誤検知されたようなケースを直接判別できるようにする。
  */
 @Composable
 private fun LocationUpdateLogRow(log: LocationUpdateLog) {
@@ -1243,8 +1245,14 @@ private fun LocationUpdateLogRow(log: LocationUpdateLog) {
         } else {
             "座標なし"
         }
+        val distanceText = if (log.distanceMeters != null && log.radiusMeters != null) {
+            val inside = log.distanceMeters <= log.radiusMeters
+            "距離%.1fm/半径%dm (%s)".format(log.distanceMeters, log.radiusMeters, if (inside) "圏内" else "圏外")
+        } else {
+            null
+        }
         Text(
-            text = listOfNotNull(coordinateText, log.detail).joinToString(" ・ "),
+            text = listOfNotNull(coordinateText, distanceText, log.detail).joinToString(" ・ "),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

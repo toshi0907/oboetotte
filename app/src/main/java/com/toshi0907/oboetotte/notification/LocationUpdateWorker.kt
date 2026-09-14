@@ -18,9 +18,13 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
- * 位置情報デバッグ用に、位置情報を使う未完了タスクがある間だけ[LocationUpdateScheduler]から
- * 15分間隔で起動され、現在地を1回取得して[LocationUpdateLog]に記録する。タスクが1件も無い
- * 場合は取得を行わず、[LocationUpdateScheduler.cancel]で自身の定期実行を停止する。
+ * 位置情報デバッグ用に、位置情報を使う未完了タスクがある間だけ[LocationUpdateScheduler]経由で
+ * 5分間隔で起動され、現在地を1回取得して[LocationUpdateLog]に記録する。実行後は
+ * [LocationUpdateScheduler.scheduleNext]で自分自身の次回分を予約する自己連鎖のため、
+ * タスクが1件も無い場合はここで予約せずに終わることで連鎖が自然に停止する。逆に言うと
+ * タスクが残っている間は、途中で例外が発生した場合でも(`PeriodicWorkRequest`と異なり
+ * WorkManagerが自動的に再実行してくれるわけではないため)`finally`で必ず次回分を予約し、
+ * 連鎖が意図せず途切れないようにしている。
  */
 class LocationUpdateWorker(
     context: Context,
@@ -28,43 +32,50 @@ class LocationUpdateWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        val db = AppDatabase.getInstance(applicationContext)
-        if (db.taskDao().getPendingWithLocation().isEmpty()) {
-            LocationUpdateScheduler.cancel(applicationContext)
-            return Result.success()
-        }
-        if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_FINE_LOCATION) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            // 権限不足でスキップしたことも記録しておかないと、デバッグ画面から見たときに
-            // 「Workerが動いていない」のか「動いたが権限が無かった」のか区別できない。
+        var shouldScheduleNext = true
+        try {
+            val db = AppDatabase.getInstance(applicationContext)
+            if (db.taskDao().getPendingWithLocation().isEmpty()) {
+                shouldScheduleNext = false
+                return Result.success()
+            }
+            if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_FINE_LOCATION) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                // 権限不足でスキップしたことも記録しておかないと、デバッグ画面から見たときに
+                // 「Workerが動いていない」のか「動いたが権限が無かった」のか区別できない。
+                db.locationUpdateLogDao().insertAndTrim(
+                    LocationUpdateLog(
+                        timestamp = System.currentTimeMillis(),
+                        type = LocationUpdateType.PERIODIC,
+                        taskTitle = null,
+                        latitude = null,
+                        longitude = null,
+                        accuracy = null,
+                        detail = "権限不足のためスキップ"
+                    )
+                )
+                return Result.success()
+            }
+
+            val location = fetchCurrentLocation()
             db.locationUpdateLogDao().insertAndTrim(
                 LocationUpdateLog(
                     timestamp = System.currentTimeMillis(),
                     type = LocationUpdateType.PERIODIC,
                     taskTitle = null,
-                    latitude = null,
-                    longitude = null,
-                    accuracy = null,
-                    detail = "権限不足のためスキップ"
+                    latitude = location?.latitude,
+                    longitude = location?.longitude,
+                    accuracy = location?.accuracy,
+                    detail = if (location == null) "取得失敗" else null
                 )
             )
             return Result.success()
+        } finally {
+            if (shouldScheduleNext) {
+                LocationUpdateScheduler.scheduleNext(applicationContext)
+            }
         }
-
-        val location = fetchCurrentLocation()
-        db.locationUpdateLogDao().insertAndTrim(
-            LocationUpdateLog(
-                timestamp = System.currentTimeMillis(),
-                type = LocationUpdateType.PERIODIC,
-                taskTitle = null,
-                latitude = location?.latitude,
-                longitude = location?.longitude,
-                accuracy = location?.accuracy,
-                detail = if (location == null) "取得失敗" else null
-            )
-        )
-        return Result.success()
     }
 
     @SuppressLint("MissingPermission")

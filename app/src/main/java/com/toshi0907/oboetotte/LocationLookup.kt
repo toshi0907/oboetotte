@@ -3,6 +3,7 @@ package com.toshi0907.oboetotte
 import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Geocoder
+import android.location.Location
 import android.os.Build
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -14,6 +15,13 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 data class GeocodeResult(val name: String, val latitude: Double, val longitude: Double)
+
+/** 2点間の距離(メートル)。位置情報デバッグ画面・ジオフェンスの誤検知判定ログの両方から共通で使う。 */
+fun metersBetween(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Float {
+    val results = FloatArray(1)
+    Location.distanceBetween(lat1, lng1, lat2, lng2, results)
+    return results[0]
+}
 
 /** 入力された住所・場所名を[Geocoder]で座標に変換する。見つからなければnull。 */
 suspend fun geocodeAddress(context: Context, query: String): GeocodeResult? {
