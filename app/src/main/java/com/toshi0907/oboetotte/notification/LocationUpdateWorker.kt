@@ -32,11 +32,13 @@ class LocationUpdateWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        val db = AppDatabase.getInstance(applicationContext)
-        if (db.taskDao().getPendingWithLocation().isEmpty()) {
-            return Result.success()
-        }
+        var shouldScheduleNext = true
         try {
+            val db = AppDatabase.getInstance(applicationContext)
+            if (db.taskDao().getPendingWithLocation().isEmpty()) {
+                shouldScheduleNext = false
+                return Result.success()
+            }
             if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_FINE_LOCATION) !=
                 PackageManager.PERMISSION_GRANTED
             ) {
@@ -70,7 +72,9 @@ class LocationUpdateWorker(
             )
             return Result.success()
         } finally {
-            LocationUpdateScheduler.scheduleNext(applicationContext)
+            if (shouldScheduleNext) {
+                LocationUpdateScheduler.scheduleNext(applicationContext)
+            }
         }
     }
 

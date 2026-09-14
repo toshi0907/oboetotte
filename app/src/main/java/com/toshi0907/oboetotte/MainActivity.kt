@@ -1180,7 +1180,10 @@ fun LocationDebugDialog(
                                 val distance = metersBetween(current.latitude, current.longitude, lat, lng)
                                 val inside = distance <= radius
                                 Text(
-                                    text = "現在地からの距離: ${distance.toInt()}m (${if (inside) "圏内" else "圏外"})",
+                                    text = "現在地からの距離: %.1fm (%s)".format(
+                                        distance,
+                                        if (inside) "圏内" else "圏外"
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (inside) {
                                         MaterialTheme.colorScheme.primary
@@ -1244,7 +1247,7 @@ private fun LocationUpdateLogRow(log: LocationUpdateLog) {
         }
         val distanceText = if (log.distanceMeters != null && log.radiusMeters != null) {
             val inside = log.distanceMeters <= log.radiusMeters
-            "距離${log.distanceMeters.toInt()}m/半径${log.radiusMeters}m (${if (inside) "圏内" else "圏外"})"
+            "距離%.1fm/半径%dm (%s)".format(log.distanceMeters, log.radiusMeters, if (inside) "圏内" else "圏外")
         } else {
             null
         }
