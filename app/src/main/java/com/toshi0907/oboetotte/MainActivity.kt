@@ -8,7 +8,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
-import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -1178,9 +1177,7 @@ fun LocationDebugDialog(
                                 style = MaterialTheme.typography.bodySmall
                             )
                             currentLocation?.let { current ->
-                                val results = FloatArray(1)
-                                Location.distanceBetween(current.latitude, current.longitude, lat, lng, results)
-                                val distance = results[0]
+                                val distance = metersBetween(current.latitude, current.longitude, lat, lng)
                                 val inside = distance <= radius
                                 Text(
                                     text = "現在地からの距離: ${distance.toInt()}m (${if (inside) "圏内" else "圏外"})",

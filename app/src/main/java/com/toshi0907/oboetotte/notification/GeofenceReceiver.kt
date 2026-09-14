@@ -11,6 +11,7 @@ import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.metersBetween
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -111,9 +112,7 @@ class GeofenceReceiver : BroadcastReceiver() {
         val lat = task?.latitude
         val lng = task?.longitude
         if (triggeringLocation == null || lat == null || lng == null) return null
-        val results = FloatArray(1)
-        Location.distanceBetween(triggeringLocation.latitude, triggeringLocation.longitude, lat, lng, results)
-        return results[0]
+        return metersBetween(triggeringLocation.latitude, triggeringLocation.longitude, lat, lng)
     }
 
     companion object {
