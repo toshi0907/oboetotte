@@ -18,9 +18,10 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
- * 位置情報デバッグ用に、位置情報を使う未完了タスクがある間だけ[LocationUpdateScheduler]から
- * 15分間隔で起動され、現在地を1回取得して[LocationUpdateLog]に記録する。タスクが1件も無い
- * 場合は取得を行わず、[LocationUpdateScheduler.cancel]で自身の定期実行を停止する。
+ * 位置情報デバッグ用に、位置情報を使う未完了タスクがある間だけ[LocationUpdateScheduler]経由で
+ * 5分間隔で起動され、現在地を1回取得して[LocationUpdateLog]に記録する。実行後は
+ * [LocationUpdateScheduler.scheduleNext]で自分自身の次回分を予約する自己連鎖のため、
+ * タスクが1件も無い場合はここで予約せずに終わることで連鎖が自然に停止する。
  */
 class LocationUpdateWorker(
     context: Context,
@@ -30,7 +31,6 @@ class LocationUpdateWorker(
     override suspend fun doWork(): Result {
         val db = AppDatabase.getInstance(applicationContext)
         if (db.taskDao().getPendingWithLocation().isEmpty()) {
-            LocationUpdateScheduler.cancel(applicationContext)
             return Result.success()
         }
         if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_FINE_LOCATION) !=
@@ -49,6 +49,7 @@ class LocationUpdateWorker(
                     detail = "権限不足のためスキップ"
                 )
             )
+            LocationUpdateScheduler.scheduleNext(applicationContext)
             return Result.success()
         }
 
@@ -64,6 +65,7 @@ class LocationUpdateWorker(
                 detail = if (location == null) "取得失敗" else null
             )
         )
+        LocationUpdateScheduler.scheduleNext(applicationContext)
         return Result.success()
     }
 

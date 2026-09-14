@@ -1222,7 +1222,9 @@ fun LocationDebugDialog(
 /**
  * [LocationDebugDialog]の「更新履歴」1行分。[LocationUpdateLog.type]に応じてラベルを出し分け、
  * 座標が記録されていれば併せて表示する(ジオフェンスイベントは[android.location.Location]を
- * 取得できない端末・状況もあるためnullになりうる)。
+ * 取得できない端末・状況もあるためnullになりうる)。ENTER/EXITで[LocationUpdateLog.distanceMeters]・
+ * [LocationUpdateLog.radiusMeters]が記録されていれば、例えば「距離8m/半径15m」のように
+ * 表示し、実際には圏内のままGPS誤差でEXITが誤検知されたようなケースを直接判別できるようにする。
  */
 @Composable
 private fun LocationUpdateLogRow(log: LocationUpdateLog) {
@@ -1243,8 +1245,14 @@ private fun LocationUpdateLogRow(log: LocationUpdateLog) {
         } else {
             "座標なし"
         }
+        val distanceText = if (log.distanceMeters != null && log.radiusMeters != null) {
+            val inside = log.distanceMeters <= log.radiusMeters
+            "距離${log.distanceMeters.toInt()}m/半径${log.radiusMeters}m (${if (inside) "圏内" else "圏外"})"
+        } else {
+            null
+        }
         Text(
-            text = listOfNotNull(coordinateText, log.detail).joinToString(" ・ "),
+            text = listOfNotNull(coordinateText, distanceText, log.detail).joinToString(" ・ "),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

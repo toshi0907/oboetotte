@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 object AppUpdateCheckScheduler {
     private const val WORK_NAME = "app_update_check_periodic"
 
-    // 更新チェックは時間的な緊急性が無いため、位置情報の定期取得(15分間隔)ほど頻繁には行わず、
+    // 更新チェックは時間的な緊急性が無いため、位置情報の定期取得(5分間隔)ほど頻繁には行わず、
     // 通信・バッテリー消費を抑えて6時間間隔とする。
     private const val INTERVAL_HOURS = 6L
 
