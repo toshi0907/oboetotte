@@ -35,6 +35,7 @@ import com.toshi0907.oboetotte.data.LocationUpdateLogDao
 import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.metersBetween
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -87,7 +88,18 @@ class LocationTrackingService : Service() {
         // 呼び出しのタイミングに関わらず常に正しく完了を検知できる。
         consumerJob = scope.launch {
             for (location in locationChannel) {
-                handleLocation(location.latitude, location.longitude, location.accuracy)
+                // handleLocation内(Room操作・GeofenceConfirmWorker.schedule等)が
+                // CancellationException以外の例外を投げてこのループを抜けてしまうと、
+                // SupervisorJobで親scopeは無事でもこのコンシューマー自身は終了し、以後
+                // 受信する位置情報が一切評価されなくなる。1件の評価失敗でコンシューマー全体を
+                // 道連れにしないよう、ここで捕捉してログに残し次の位置情報の処理を続ける。
+                try {
+                    handleLocation(location.latitude, location.longitude, location.accuracy)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "連続追跡の位置情報評価に失敗しました", e)
+                }
             }
         }
     }
@@ -324,12 +336,18 @@ class LocationTrackingService : Service() {
          * 保護しているため中断されない。ここで早期にキャンセルされてしまうと、コンシューマー
          * コルーチンがまだ稼働中のまま`lifecycleMutex`が解放され、後続のライフサイクル操作
          * (`register`等)と評価中の書き込みが重なって停止完了バリアの意味が失われるため。
+         * `context.stopService()`の戻り値(`wasRunning`)は「サービスが元々動作していたか」しか
+         * 示さず、そのタイミングでは判定しない。既に別経路(システムによる終了等)でサービスの
+         * 停止処理が始まっていると`stopService()`が`false`を返す一方、`consumerJob`自体は
+         * `handleLocation`の途中でまだ実行中のことがあり、ここで`join()`を省略すると
+         * `evaluateTask()`が`GeofenceStateDao.upsert()`する前に呼び出し元(`switchMode`)が
+         * `deleteAll()`してしまい、削除したはずの状態が復活する。そのため`wasRunning`の値に
+         * 関わらず、保持している`consumerJob`が非nullなら必ず`join()`する。
          */
         suspend fun stopAndAwaitCompletion(context: Context): Unit = withContext(NonCancellable) {
             val job = consumerJob
-            val wasRunning = context.stopService(Intent(context, LocationTrackingService::class.java))
-            if (!wasRunning || job == null) return@withContext
-            job.join()
+            context.stopService(Intent(context, LocationTrackingService::class.java))
+            job?.join()
         }
 
         /** サービスが未起動なら起動し、既に起動済みなら位置情報の購読はそのまま維持する。 */
