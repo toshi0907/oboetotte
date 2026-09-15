@@ -36,9 +36,11 @@ import com.toshi0907.oboetotte.metersBetween
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 位置情報の確認方式が[LocationTrackingMode.CONTINUOUS_TRACKING]の場合にのみ動作するフォアグラウンド
@@ -70,13 +72,18 @@ class LocationTrackingService : Service() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         // コンシューマーコルーチン1つだけがlocationChannelを消費する。onDestroyでchannelがcloseされ、
-        // キュー済みの最後の要素(CONFLATEDのため高々1件)まで処理し終えるとfor文を抜けるため、
-        // その直後にstopCompletionを完了させれば「評価中の処理も含めて完全に停止した」ことを
-        // stopAndAwaitCompletion()の呼び出し元へ伝えられる。
+        // キュー済みの最後の要素(CONFLATEDのため高々1件)まで処理し終えるとfor文を抜けて正常終了する。
+        // stopCompletionの完了はfor文の直後ではなくinvokeOnCompletionで行う。handleLocation内で
+        // 例外が発生した場合、このコルーチン(SupervisorJobの子)はfor文の直後まで到達せずに
+        // 異常終了してしまうため、直後に書くだけでは「評価中だったstopAndAwaitCompletion()の
+        // 呼び出し元がcompletion.await()で永久に待ち続けてしまう」不具合になる。invokeOnCompletion
+        // は正常終了・異常終了・キャンセルのいずれでもJobの終了時に必ず1回呼ばれるため、
+        // どの終わり方でも確実にstopCompletionを完了させられる。
         scope.launch {
             for (location in locationChannel) {
                 handleLocation(location.latitude, location.longitude, location.accuracy)
             }
+        }.invokeOnCompletion {
             stopCompletion?.complete(Unit)
             stopCompletion = null
         }
@@ -293,15 +300,20 @@ class LocationTrackingService : Service() {
          * 競合して評価中・キュー済みだった書き込みが削除より後に発生し復活してしまう問題を防ぐ。
          * サービスが既に停止している場合は[Context.stopService]がfalseを返すため、
          * (onDestroyが呼ばれずstopCompletionが完了しないまま待ち続けることを避けるため)
-         * 即座に戻る。
+         * 即座に戻る。呼び出し元([LocationReminderManager.switchMode]、ひいては
+         * `TaskViewModel.viewModelScope`)が待機中にキャンセルされても、この停止要求と
+         * 待ち合わせ自体は[NonCancellable]で保護しているため中断されない。ここで早期に
+         * キャンセルされてしまうと、コンシューマーコルーチンがまだ稼働中のまま
+         * `lifecycleMutex`が解放され、後続のライフサイクル操作(`register`等)と評価中の
+         * 書き込みが重なって停止完了バリアの意味が失われるため。
          */
-        suspend fun stopAndAwaitCompletion(context: Context) {
+        suspend fun stopAndAwaitCompletion(context: Context): Unit = withContext(NonCancellable) {
             val completion = CompletableDeferred<Unit>()
             stopCompletion = completion
             val wasRunning = context.stopService(Intent(context, LocationTrackingService::class.java))
             if (!wasRunning) {
                 stopCompletion = null
-                return
+                return@withContext
             }
             completion.await()
         }
