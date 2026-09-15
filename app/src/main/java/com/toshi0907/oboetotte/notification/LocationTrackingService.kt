@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -35,6 +36,7 @@ import com.toshi0907.oboetotte.metersBetween
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -54,16 +56,24 @@ class LocationTrackingService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var locationCallback: LocationCallback? = null
 
-    // onLocationResultのたびにscope.launchで新しいコルーチンを起動するため、位置情報の取得が
-    // 短時間に連続すると複数のhandleLocation呼び出しが並行に走りうる。並行実行のままだと
-    // GeofenceStateDao.get/upsertの読み書き順序やGeofenceConfirmWorker.schedule(ExistingWorkPolicy.REPLACE)
-    // の呼び出し順序がコールバックの到着順と入れ替わり、古いイベントの状態が新しいイベントの結果を
-    // 上書きしてしまいうる。このMutexで1件ずつ到着順に処理する。
-    private val evaluationMutex = Mutex()
+    // onLocationResultのたびに新しいコルーチンをlaunchして評価すると、位置情報の取得が短時間に
+    // 連続した場合にコルーチンの開始順序(=ロックの取得順序)がコールバックの到着順と入れ替わる
+    // ことがある(scope.launch自体は即座に実行されるわけではないため)。Channelは送信順序を
+    // 保持したまま単一のコンシューマーで順に取り出せるため、onLocationResult側は同期的な
+    // trySend()で送るだけにし、実際の評価(handleLocation)は下記のコンシューマーコルーチン
+    // (onCreateで起動)1つだけが順番に処理することで、到着順の処理を保証する。
+    private val locationChannel = Channel<Location>(Channel.UNLIMITED)
 
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        scope.launch {
+            for (location in locationChannel) {
+                evaluationMutex.withLock {
+                    handleLocation(location.latitude, location.longitude, location.accuracy)
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -100,6 +110,7 @@ class LocationTrackingService : Service() {
 
     override fun onDestroy() {
         stopLocationUpdates()
+        locationChannel.close()
         job.cancel()
         super.onDestroy()
     }
@@ -119,11 +130,10 @@ class LocationTrackingService : Service() {
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val location = result.lastLocation ?: return
-                scope.launch {
-                    evaluationMutex.withLock {
-                        handleLocation(location.latitude, location.longitude, location.accuracy)
-                    }
-                }
+                // trySendは非suspendで即座に列へ積むだけなので、この同期コールバック内から
+                // 安全に呼べる(コールバック自体はメインスレッドで順番に呼ばれるため、
+                // 送信順序=コールバックの到着順になる)。
+                locationChannel.trySend(location)
             }
         }
         locationCallback = callback
@@ -255,6 +265,22 @@ class LocationTrackingService : Service() {
         private const val CHANNEL_ID = "location_tracking_service"
         private const val NOTIFICATION_ID = 2
         private const val EXTRA_FORCE_RESTART = "force_restart"
+
+        // handleLocation呼び出し中だけ保持するロック。他インスタンスからの二重取得の防止用ではなく、
+        // awaitIdle()が「現在評価中の処理が無い」ことを検知するための合図として使う。
+        private val evaluationMutex = Mutex()
+
+        /**
+         * 進行中の評価(handleLocation)が完了するまで中断して待つ。[LocationReminderManager.switchMode]
+         * が連続追跡方式から離れる際、[stop]呼び出し後・[com.toshi0907.oboetotte.data.GeofenceStateDao.deleteAll]
+         * 呼び出し前に挟むことで、評価中だった書き込みが削除より後に完了して復活してしまう競合を
+         * 大きく減らせる。ただし[stop]自体([Context.stopService])は非同期で、実際に
+         * [onDestroy]が呼ばれ位置情報の購読が止まるまでの短い猶予があるため、これは完全な排他では
+         * なくベストエフォートの軽減策であることに注意。
+         */
+        suspend fun awaitIdle() {
+            evaluationMutex.withLock { }
+        }
 
         /** サービスが未起動なら起動し、既に起動済みなら位置情報の購読はそのまま維持する。 */
         fun start(context: Context) {

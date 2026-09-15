@@ -15,9 +15,11 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.tasks.Task as GmsTask
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
 /**
@@ -193,6 +195,10 @@ object LocationReminderManager {
             }
             LocationTrackingMode.CONTINUOUS_TRACKING -> {
                 LocationTrackingService.stop(context)
+                // stop()自体(Context.stopService)は非同期のため、呼び出した直後もまだ評価中の
+                // handleLocationが残っている可能性がある。awaitIdle()でその完了を待ってから
+                // deleteAll()することで、削除後に古い評価結果が書き戻されてしまう競合を減らす。
+                LocationTrackingService.awaitIdle()
                 AppDatabase.getInstance(context).geofenceStateDao().deleteAll()
             }
         }
@@ -228,9 +234,16 @@ object LocationReminderManager {
             .forEach { task -> registerLocked(context, task) }
     }
 
-    /** Play servicesの[GmsTask]が完了(成功/失敗/キャンセルのいずれか)するまで、ブロッキングせずに中断する。 */
-    private suspend fun awaitCompletion(gmsTask: GmsTask<*>) {
-        if (gmsTask.isComplete) return
+    /**
+     * Play servicesの[GmsTask]が完了(成功/失敗/キャンセルのいずれか)するまで、ブロッキングせずに中断する。
+     * 呼び出し元([TaskViewModel.viewModelScope]・`MainActivity`の`rememberCoroutineScope`など)が
+     * 途中でキャンセルされても、既に発行済みの`addGeofences`/`removeGeofences`自体は取り消せないため、
+     * [NonCancellable]でラップしてこの待ち合わせ(=lifecycleMutexの保持)だけはキャンセルの影響を
+     * 受けないようにする。ここで早期にキャンセルされてロックが解放されると、まだ実行中のPlay services
+     * 側の処理と後続のロック内操作が重なってしまい、直列化の意味が失われるため。
+     */
+    private suspend fun awaitCompletion(gmsTask: GmsTask<*>): Unit = withContext(NonCancellable) {
+        if (gmsTask.isComplete) return@withContext
         suspendCancellableCoroutine { cont ->
             gmsTask.addOnCompleteListener {
                 if (cont.isActive) cont.resume(Unit)
