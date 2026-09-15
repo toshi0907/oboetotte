@@ -35,9 +35,9 @@ import com.toshi0907.oboetotte.data.LocationUpdateLogDao
 import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.metersBetween
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
@@ -75,19 +75,20 @@ class LocationTrackingService : Service() {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         // コンシューマーコルーチン1つだけがlocationChannelを消費する。onDestroyでchannelがcloseされ、
         // キュー済みの最後の要素(CONFLATEDのため高々1件)まで処理し終えるとfor文を抜けて正常終了する。
-        // stopCompletionの完了はfor文の直後ではなくinvokeOnCompletionで行う。handleLocation内で
-        // 例外が発生した場合、このコルーチン(SupervisorJobの子)はfor文の直後まで到達せずに
-        // 異常終了してしまうため、直後に書くだけでは「評価中だったstopAndAwaitCompletion()の
-        // 呼び出し元がcompletion.await()で永久に待ち続けてしまう」不具合になる。invokeOnCompletion
-        // は正常終了・異常終了・キャンセルのいずれでもJobの終了時に必ず1回呼ばれるため、
-        // どの終わり方でも確実にstopCompletionを完了させられる。
-        scope.launch {
+        // このJob自体をcompanionのconsumerJobへ保持しておき、stopAndAwaitCompletion()から直接
+        // join()する(Jobの終了状態を保持しているJob.join()自体はコルーチンの正常終了・異常終了・
+        // キャンセルのいずれでも、既に終了済みかどうかに関わらず即座または完了時に戻るため)。
+        // 以前はCompletableDeferred+invokeOnCompletionで完了を通知する方式だったが、
+        // stopAndAwaitCompletion()が呼ばれる前にhandleLocation内の例外でこのコルーチンが
+        // 先に異常終了していた場合、invokeOnCompletionが発火した時点ではまだ誰も待っておらず、
+        // 後から呼ばれたstopAndAwaitCompletion()が新しいCompletableDeferredを設定しても
+        // (既に終了したJobからは二度とinvokeOnCompletionが呼ばれないため)永久に完了せず
+        // completion.await()がハングする不具合があった。Job自体を直接join()する方式なら、
+        // 呼び出しのタイミングに関わらず常に正しく完了を検知できる。
+        consumerJob = scope.launch {
             for (location in locationChannel) {
                 handleLocation(location.latitude, location.longitude, location.accuracy)
             }
-        }.invokeOnCompletion {
-            stopCompletion?.complete(Unit)
-            stopCompletion = null
         }
     }
 
@@ -138,8 +139,7 @@ class LocationTrackingService : Service() {
         // コルーチン(onCreateで起動)がまだキュー済みの最後の要素を評価している途中でも
         // 強制終了してしまい、stopAndAwaitCompletion()が「停止完了」を待つ意味が無くなる。
         // そのためjobのcancelは行わず、コンシューマーコルーチンが自然にfor文を抜けて完了する
-        // (そのままstopCompletionを完了させる)のに任せる。以後locationChannelへ新たな
-        // イベントが送られることは無いため、参照が残っていてもリークにはならない。
+        // のに任せる(stopAndAwaitCompletion()はそのJob自体をjoin()で待ち合わせる)。
         stopLocationUpdates()
         locationChannel.close()
         super.onDestroy()
@@ -296,12 +296,14 @@ class LocationTrackingService : Service() {
         private const val NOTIFICATION_ID = 2
         private const val EXTRA_FORCE_RESTART = "force_restart"
 
-        // stopAndAwaitCompletion()呼び出し中に、そのサービスインスタンスの停止完了(onDestroyで
-        // コンシューマーコルーチンがキュー済みの最後の要素まで処理し終えたこと)を通知するための
-        // 待ち合わせ。呼び出しは[LocationReminderManager]の[lifecycleMutex]で直列化されているため、
-        // 同時に複数のstopAndAwaitCompletion()呼び出しが競合することはない。
+        // 現在動作中のサービスインスタンスのコンシューマーコルーチン(onCreateで起動、
+        // locationChannelを消費してhandleLocationを順に呼ぶJob)への参照。stopAndAwaitCompletion()
+        // がこのJob自体をjoin()で待ち合わせることで、「停止完了(位置情報の受信停止・キュー済みの
+        // 評価まで含めたコンシューマーコルーチンの終了)」を検知する。呼び出しは
+        // [LocationReminderManager]の[lifecycleMutex]で直列化されているため、同時に複数の
+        // stopAndAwaitCompletion()呼び出しが競合することはない。
         @Volatile
-        private var stopCompletion: CompletableDeferred<Unit>? = null
+        private var consumerJob: Job? = null
 
         /**
          * サービスの停止を要求し、停止完了(位置情報の受信停止・キュー済みの評価まで含めた
@@ -309,24 +311,25 @@ class LocationTrackingService : Service() {
          * [LocationReminderManager.switchMode]が連続追跡方式から離れる際、この完了を待ってから
          * [com.toshi0907.oboetotte.data.GeofenceStateDao.deleteAll]を呼ぶことで、停止処理と
          * 競合して評価中・キュー済みだった書き込みが削除より後に発生し復活してしまう問題を防ぐ。
-         * サービスが既に停止している場合は[Context.stopService]がfalseを返すため、
-         * (onDestroyが呼ばれずstopCompletionが完了しないまま待ち続けることを避けるため)
-         * 即座に戻る。呼び出し元([LocationReminderManager.switchMode]、ひいては
-         * `TaskViewModel.viewModelScope`)が待機中にキャンセルされても、この停止要求と
-         * 待ち合わせ自体は[NonCancellable]で保護しているため中断されない。ここで早期に
-         * キャンセルされてしまうと、コンシューマーコルーチンがまだ稼働中のまま
-         * `lifecycleMutex`が解放され、後続のライフサイクル操作(`register`等)と評価中の
-         * 書き込みが重なって停止完了バリアの意味が失われるため。
+         * `Job.join()`は対象のJobが既に終了済み(正常・異常・キャンセルいずれの場合も)であれば
+         * 即座に戻り、まだ実行中であれば終了まで中断して待つため、`stopAndAwaitCompletion()`が
+         * 呼ばれるより前に`handleLocation`内の例外でコンシューマーコルーチンが先に異常終了して
+         * いた場合でも取りこぼさず正しく完了を検知できる(以前は`CompletableDeferred`+
+         * `invokeOnCompletion`方式だったが、`stopAndAwaitCompletion()`呼び出し前にJobが既に
+         * 終了していると、後から設定した`CompletableDeferred`はJobから二度と`invokeOnCompletion`
+         * が呼ばれず永久に完了しない不具合があった)。サービスが既に停止している場合は
+         * [Context.stopService]がfalseを返すため即座に戻る。呼び出し元
+         * ([LocationReminderManager.switchMode]、ひいては`TaskViewModel.viewModelScope`)が
+         * 待機中にキャンセルされても、この停止要求と待ち合わせ自体は[NonCancellable]で
+         * 保護しているため中断されない。ここで早期にキャンセルされてしまうと、コンシューマー
+         * コルーチンがまだ稼働中のまま`lifecycleMutex`が解放され、後続のライフサイクル操作
+         * (`register`等)と評価中の書き込みが重なって停止完了バリアの意味が失われるため。
          */
         suspend fun stopAndAwaitCompletion(context: Context): Unit = withContext(NonCancellable) {
-            val completion = CompletableDeferred<Unit>()
-            stopCompletion = completion
+            val job = consumerJob
             val wasRunning = context.stopService(Intent(context, LocationTrackingService::class.java))
-            if (!wasRunning) {
-                stopCompletion = null
-                return@withContext
-            }
-            completion.await()
+            if (!wasRunning || job == null) return@withContext
+            job.join()
         }
 
         /** サービスが未起動なら起動し、既に起動済みなら位置情報の購読はそのまま維持する。 */
