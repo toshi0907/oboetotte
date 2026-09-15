@@ -133,6 +133,9 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `geofence_states` (" +
                         "`taskId` INTEGER NOT NULL, " +
                         "`isInside` INTEGER NOT NULL, " +
+                        "`latitude` REAL NOT NULL, " +
+                        "`longitude` REAL NOT NULL, " +
+                        "`radiusMeters` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`taskId`))"
                 )
             }

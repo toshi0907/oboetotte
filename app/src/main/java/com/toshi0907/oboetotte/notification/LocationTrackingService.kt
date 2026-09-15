@@ -155,8 +155,14 @@ class LocationTrackingService : Service() {
         val radius = task.radiusMeters ?: return
         val distance = metersBetween(latitude, longitude, lat, lng)
         val isInside = distance <= radius
-        val previous = geofenceStateDao.get(task.id)
-        geofenceStateDao.upsert(GeofenceState(taskId = task.id, isInside = isInside))
+        val stored = geofenceStateDao.get(task.id)
+        // storedの位置・半径が現在のタスクの設定と一致する場合のみ、直前の圏内/圏外の基準値として使える。
+        // LocationReminderManager.registerは位置・半径が変わった場合に基準値を削除するが、念のため
+        // ここでも不一致なら初回評価扱いにする(万一削除されずに残っていた場合の保険)。
+        val previous = stored?.takeIf { it.latitude == lat && it.longitude == lng && it.radiusMeters == radius }
+        geofenceStateDao.upsert(
+            GeofenceState(taskId = task.id, isInside = isInside, latitude = lat, longitude = lng, radiusMeters = radius)
+        )
 
         if (previous == null) {
             // 初回評価。Geofencing APIのINITIAL_TRIGGER_ENTERと同様、到着通知を希望していて

@@ -242,7 +242,7 @@ class MainActivity : ComponentActivity() {
                                 if (nowLocationPermissionGranted && !locationPermissionGranted) {
                                     // 権限が新たに許可された場合、権限不足でスキップされていた
                                     // ジオフェンス登録・定期取得ジョブの起動をまとめてやり直す。
-                                    LocationReminderManager.reconcileAll(context)
+                                    coroutineScope.launch { LocationReminderManager.reconcileAll(context) }
                                 }
                                 locationPermissionGranted = nowLocationPermissionGranted
                             }
