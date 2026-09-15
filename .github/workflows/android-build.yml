@@ -38,13 +38,13 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
 
       - name: Update latest debug release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-debug
           name: "最新デバッグビルド"
           body: |
-            pushのたびに自動更新される最新のデバッグ用APKです。
+            mainブランチへのpushのたびに自動更新される最新(マージ済み)のデバッグ用APKです。
             コミット: ${{ github.sha }}
             ビルド番号: ${{ github.run_number }}
           prerelease: true
