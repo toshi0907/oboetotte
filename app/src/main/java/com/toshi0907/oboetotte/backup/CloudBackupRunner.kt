@@ -19,7 +19,12 @@ import kotlinx.coroutines.withContext
  */
 object CloudBackupRunner {
     private const val TAG = "CloudBackup"
-    private const val BACKUP_FILE_PREFIX = "oboetotte_backup_"
+
+    // ローカルの手動エクスポート(MainActivity)は"oboetotte_backup_"というプレフィックスの
+    // 同形式のファイル名を使う。ユーザーが手動エクスポートの保存先としてクラウド自動バック
+    // アップと同じフォルダを選んだ場合、両者を区別できないとpruneOldBackupsが手動エクスポート
+    // したファイルまで削除しかねないため、クラウド自動バックアップ専用のプレフィックスにする。
+    private const val BACKUP_FILE_PREFIX = "oboetotte_cloud_backup_"
 
     // 手動実行(今すぐバックアップ)と定期実行(CloudBackupWorker)が同時に走ると、片方が
     // 作成したばかりのバックアップをもう片方のpruneOldBackupsが削除してしまい、それでも
