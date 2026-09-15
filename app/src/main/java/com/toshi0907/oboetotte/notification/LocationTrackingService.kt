@@ -58,6 +58,15 @@ class LocationTrackingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Android 14以降、FOREGROUND_SERVICE_TYPE_LOCATIONを指定したstartForegroundは
+        // 位置情報の権限が無い状態で呼ぶとSecurityExceptionでクラッシュする。START_STICKYによる
+        // プロセス再生成やrestart()はLocationReminderManager.registerの権限確認を経ずに
+        // ここへ到達しうるため、startForegroundより前に必ず自前で確認する。
+        if (!LocationReminderManager.hasLocationPermission(this)) {
+            Log.w(TAG, "連続追跡: 位置情報の権限が無いため開始せず停止します")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
@@ -241,10 +250,18 @@ class LocationTrackingService : Service() {
         private fun startInternal(context: Context, forceRestart: Boolean) {
             val intent = Intent(context, LocationTrackingService::class.java)
                 .putExtra(EXTRA_FORCE_RESTART, forceRestart)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: IllegalStateException) {
+                // Android 12以降、アプリがバックグラウンドにいる間はForegroundServiceStartNotAllowedException
+                // (IllegalStateExceptionのサブクラス)でサービスの起動自体が拒否されることがある。
+                // register/reconcileAll/updateContinuousTrackingIntervalはいずれも独立したコルーチンから
+                // 呼ばれうるため、ここで捕捉せず伝播させるとプロセスをクラッシュさせかねない。
+                Log.w(TAG, "連続追跡サービスの開始に失敗しました", e)
             }
         }
 

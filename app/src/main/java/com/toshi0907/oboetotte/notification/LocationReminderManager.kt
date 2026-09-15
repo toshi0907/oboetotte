@@ -45,7 +45,7 @@ object LocationReminderManager {
         hasForegroundPermission(context) && hasBackgroundPermission(context)
 
     @SuppressLint("MissingPermission")
-    fun register(context: Context, task: Task) {
+    suspend fun register(context: Context, task: Task) {
         val lat = task.latitude
         val lng = task.longitude
         val radius = task.radiusMeters
@@ -64,7 +64,14 @@ object LocationReminderManager {
 
         when (LocationTrackingSettings.getMode(context)) {
             LocationTrackingMode.GEOFENCING_API -> registerGeofencingApi(context, task, lat, lng, radius)
-            LocationTrackingMode.CONTINUOUS_TRACKING -> LocationTrackingService.start(context)
+            LocationTrackingMode.CONTINUOUS_TRACKING -> {
+                // 位置・半径を変更した既存タスクの再登録でも、古い圏内/圏外の基準値が残ったままだと
+                // 実際には移動していないのに新しい設定との比較で誤って遷移が検知されてしまう。
+                // Geofencing APIモードでの再登録がINITIAL_TRIGGER_ENTERとして扱われるのと同じ考え方で、
+                // 再登録のたびに基準値をリセットし、次回評価を初回評価として扱わせる。
+                AppDatabase.getInstance(context).geofenceStateDao().delete(task.id)
+                LocationTrackingService.start(context)
+            }
         }
     }
 
