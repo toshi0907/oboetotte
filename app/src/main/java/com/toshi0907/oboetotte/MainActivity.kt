@@ -167,8 +167,13 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) {
-            taskViewModel.setCloudBackupFolder(uri)
-            Toast.makeText(this, "バックアップ先フォルダを設定しました", Toast.LENGTH_SHORT).show()
+            val success = taskViewModel.setCloudBackupFolder(uri)
+            val message = if (success) {
+                "バックアップ先フォルダを設定しました"
+            } else {
+                "バックアップ先フォルダの設定に失敗しました"
+            }
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
     }
 
