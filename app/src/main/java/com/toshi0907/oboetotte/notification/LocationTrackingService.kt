@@ -36,6 +36,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 位置情報の確認方式が[LocationTrackingMode.CONTINUOUS_TRACKING]の場合にのみ動作するフォアグラウンド
@@ -51,6 +53,13 @@ class LocationTrackingService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO + job)
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var locationCallback: LocationCallback? = null
+
+    // onLocationResultのたびにscope.launchで新しいコルーチンを起動するため、位置情報の取得が
+    // 短時間に連続すると複数のhandleLocation呼び出しが並行に走りうる。並行実行のままだと
+    // GeofenceStateDao.get/upsertの読み書き順序やGeofenceConfirmWorker.schedule(ExistingWorkPolicy.REPLACE)
+    // の呼び出し順序がコールバックの到着順と入れ替わり、古いイベントの状態が新しいイベントの結果を
+    // 上書きしてしまいうる。このMutexで1件ずつ到着順に処理する。
+    private val evaluationMutex = Mutex()
 
     override fun onCreate() {
         super.onCreate()
@@ -110,7 +119,11 @@ class LocationTrackingService : Service() {
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val location = result.lastLocation ?: return
-                scope.launch { handleLocation(location.latitude, location.longitude, location.accuracy) }
+                scope.launch {
+                    evaluationMutex.withLock {
+                        handleLocation(location.latitude, location.longitude, location.accuracy)
+                    }
+                }
             }
         }
         locationCallback = callback

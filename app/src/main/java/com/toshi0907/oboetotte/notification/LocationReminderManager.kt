@@ -12,10 +12,13 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.tasks.Task as GmsTask
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.resume
 
 /**
  * 位置情報リマインダー(ジオフェンス)の登録・解除を担当する。時刻ベースの[ReminderScheduler]と
@@ -95,7 +98,7 @@ object LocationReminderManager {
     }
 
     @SuppressLint("MissingPermission")
-    private fun registerGeofencingApi(context: Context, task: Task, lat: Double, lng: Double, radius: Int) {
+    private suspend fun registerGeofencingApi(context: Context, task: Task, lat: Double, lng: Double, radius: Int) {
         val transitionTypes = (if (task.notifyOnArrival) Geofence.GEOFENCE_TRANSITION_ENTER else 0) or
             (if (task.notifyOnDeparture) Geofence.GEOFENCE_TRANSITION_EXIT else 0)
 
@@ -122,14 +125,21 @@ object LocationReminderManager {
             .build()
 
         try {
-            LocationServices.getGeofencingClient(context)
+            val addGeofencesTask = LocationServices.getGeofencingClient(context)
                 .addGeofences(request, geofencePendingIntent(context))
+            addGeofencesTask
                 .addOnSuccessListener {
                     Log.d(TAG, "タスク${task.id}のジオフェンスを登録しました")
                 }
                 .addOnFailureListener { e ->
                     Log.e(TAG, "タスク${task.id}のジオフェンス登録に失敗しました", e)
                 }
+            // Play servicesのTaskは非同期のため、完了を待たずに次のロック内操作(reconcileAllの
+            // 次タスク登録や、別の切り替え操作)へ進むと、短時間に連続して呼ばれた場合に完了順序が
+            // 呼び出し順と入れ替わりうる(例えばモードを短時間で往復させると、後から登録した
+            // ジオフェンスを先の解除処理が後から削除してしまう)。lifecycleMutexで直列化している
+            // 意味を保つため、ここで完了を待ってからロックを解放させる。
+            awaitCompletion(addGeofencesTask)
         } catch (e: SecurityException) {
             Log.e(TAG, "タスク${task.id}のジオフェンス登録で権限エラーが発生しました", e)
         }
@@ -142,7 +152,9 @@ object LocationReminderManager {
     private suspend fun unregisterLocked(context: Context, taskId: Long) {
         when (LocationTrackingSettings.getMode(context)) {
             LocationTrackingMode.GEOFENCING_API -> {
-                LocationServices.getGeofencingClient(context).removeGeofences(listOf(taskId.toString()))
+                awaitCompletion(
+                    LocationServices.getGeofencingClient(context).removeGeofences(listOf(taskId.toString()))
+                )
             }
             LocationTrackingMode.CONTINUOUS_TRACKING -> {
                 AppDatabase.getInstance(context).geofenceStateDao().delete(taskId)
@@ -165,14 +177,19 @@ object LocationReminderManager {
             LocationTrackingMode.GEOFENCING_API -> {
                 // 個々のrequestIdが分からなくても、共有しているPendingIntent単位で
                 // 登録済みの全ジオフェンスをまとめて解除できる。
-                LocationServices.getGeofencingClient(context)
+                val removeTask = LocationServices.getGeofencingClient(context)
                     .removeGeofences(geofencePendingIntent(context))
+                removeTask
                     .addOnSuccessListener {
                         Log.d(TAG, "確認方式の切り替えに伴いジオフェンスを一括解除しました")
                     }
                     .addOnFailureListener { e ->
                         Log.e(TAG, "確認方式の切り替えに伴うジオフェンス一括解除に失敗しました", e)
                     }
+                // この解除の完了を待たずに新方式のreconcileAllLocked(下記)へ進むと、
+                // GEOFENCING_API→CONTINUOUS_TRACKING→GEOFENCING_APIと短時間で往復させた場合に
+                // 解除の完了が後の再登録より遅れ、せっかく再登録したジオフェンスを消してしまいうる。
+                awaitCompletion(removeTask)
             }
             LocationTrackingMode.CONTINUOUS_TRACKING -> {
                 LocationTrackingService.stop(context)
@@ -209,6 +226,16 @@ object LocationReminderManager {
     private suspend fun reconcileAllLocked(context: Context) {
         AppDatabase.getInstance(context).taskDao().getPendingWithLocation()
             .forEach { task -> registerLocked(context, task) }
+    }
+
+    /** Play servicesの[GmsTask]が完了(成功/失敗/キャンセルのいずれか)するまで、ブロッキングせずに中断する。 */
+    private suspend fun awaitCompletion(gmsTask: GmsTask<*>) {
+        if (gmsTask.isComplete) return
+        suspendCancellableCoroutine { cont ->
+            gmsTask.addOnCompleteListener {
+                if (cont.isActive) cont.resume(Unit)
+            }
+        }
     }
 
     /** アプリ全体で1つのPendingIntentを共有する(発火時のGeofencingEventにどのジオフェンスかが含まれるため)。 */
