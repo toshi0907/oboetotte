@@ -78,15 +78,20 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.backup.BackupManager
+import com.toshi0907.oboetotte.backup.CloudBackupResult
+import com.toshi0907.oboetotte.backup.CloudBackupScheduler
+import com.toshi0907.oboetotte.backup.CloudBackupSettings
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.NotificationLog
@@ -154,6 +159,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // クラウド自動バックアップの保存先フォルダ選択。Dropbox等、SAFのドキュメントプロバイダを
+    // 公開しているクラウドストレージアプリがインストールされていれば、その中のフォルダも
+    // 選択肢に表示される(アプリ固有のAPIキー・OAuth認証は不要)。
+    private val selectCloudBackupFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            taskViewModel.setCloudBackupFolder(uri)
+            Toast.makeText(this, "バックアップ先フォルダを設定しました", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -175,6 +192,11 @@ class MainActivity : ComponentActivity() {
                     val attachments by taskViewModel.attachments.collectAsState()
                     val notificationLogs by taskViewModel.notificationLogs.collectAsState()
                     val locationUpdateLogs by taskViewModel.locationUpdateLogs.collectAsState()
+                    val cloudBackupEnabled by taskViewModel.cloudBackupEnabled.collectAsState()
+                    val cloudBackupFolderUri by taskViewModel.cloudBackupFolderUri.collectAsState()
+                    val cloudBackupRetentionCount by taskViewModel.cloudBackupRetentionCount.collectAsState()
+                    val cloudBackupLastBackupAt by taskViewModel.cloudBackupLastBackupAt.collectAsState()
+                    val cloudBackupLastResult by taskViewModel.cloudBackupLastResult.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
@@ -224,6 +246,14 @@ class MainActivity : ComponentActivity() {
                         // アプリを開いていない間も定期的にチェックできるよう、バックグラウンドの
                         // 定期実行(AppUpdateCheckWorker)を起動する。既に動作中なら何もしない。
                         AppUpdateCheckScheduler.ensureScheduled(context)
+                    }
+                    LaunchedEffect(Unit) {
+                        // クラウド自動バックアップが有効なら、定期実行(CloudBackupWorker)が
+                        // 確実に動いているか毎回確認する(WorkManager自体は再起動を越えて
+                        // 永続化されるが、念のための保険)。
+                        if (CloudBackupSettings.isEnabled(context) && CloudBackupSettings.getFolderUri(context) != null) {
+                            CloudBackupScheduler.ensureScheduled(context)
+                        }
                     }
                     DisposableEffect(lifecycleOwner) {
                         val observer = LifecycleEventObserver { _, event ->
@@ -313,6 +343,20 @@ class MainActivity : ComponentActivity() {
                                 // ZIP(添付あり)・旧形式のプレーンJSON(添付なし)の両方を受け付ける。
                                 // 実際の形式判定はBackupManager.import側でマジックナンバーを見て行う。
                                 importBackupLauncher.launch(arrayOf("*/*"))
+                            },
+                            cloudBackupEnabled = cloudBackupEnabled,
+                            onSetCloudBackupEnabled = taskViewModel::setCloudBackupEnabled,
+                            cloudBackupFolderUri = cloudBackupFolderUri,
+                            onSelectCloudBackupFolder = { selectCloudBackupFolderLauncher.launch(null) },
+                            cloudBackupRetentionCount = cloudBackupRetentionCount,
+                            onSetCloudBackupRetentionCount = taskViewModel::setCloudBackupRetentionCount,
+                            cloudBackupLastBackupAt = cloudBackupLastBackupAt,
+                            cloudBackupLastResult = cloudBackupLastResult,
+                            onRunCloudBackupNow = {
+                                taskViewModel.runCloudBackupNow { success ->
+                                    val message = if (success) "バックアップしました" else "バックアップに失敗しました"
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                }
                             },
                             updateCheckResult = updateCheckResult,
                             onCheckForUpdate = ::checkForUpdate,
@@ -949,6 +993,15 @@ fun SettingsScreen(
     onSendTestNotification: () -> Unit,
     onExportRequested: () -> Unit,
     onImportRequested: () -> Unit,
+    cloudBackupEnabled: Boolean = false,
+    onSetCloudBackupEnabled: (Boolean) -> Unit = {},
+    cloudBackupFolderUri: Uri? = null,
+    onSelectCloudBackupFolder: () -> Unit = {},
+    cloudBackupRetentionCount: Int = CloudBackupSettings.DEFAULT_RETENTION_COUNT,
+    onSetCloudBackupRetentionCount: (Int) -> Unit = {},
+    cloudBackupLastBackupAt: Long? = null,
+    cloudBackupLastResult: CloudBackupResult? = null,
+    onRunCloudBackupNow: () -> Unit = {},
     updateCheckResult: AppUpdateChecker.Result? = null,
     onCheckForUpdate: () -> Unit = {},
     onDownloadUpdate: (String) -> Unit = {},
@@ -1013,6 +1066,91 @@ fun SettingsScreen(
                 }
                 TextButton(onClick = onImportRequested) {
                     Text("インポート")
+                }
+            }
+
+            Text(
+                text = "クラウド自動バックアップ",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                text = "Dropbox等、フォルダ選択ダイアログから選べるクラウドストレージアプリがあれば、" +
+                    "そのアプリ内のフォルダを保存先にして毎日自動でバックアップできます" +
+                    "(内容は上記のエクスポートと同じZIPファイルです)。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            TextButton(onClick = onSelectCloudBackupFolder) {
+                Text(if (cloudBackupFolderUri == null) "保存先フォルダを選択" else "保存先フォルダを変更")
+            }
+            if (cloudBackupFolderUri != null) {
+                val context = LocalContext.current
+                val folderLabel = remember(cloudBackupFolderUri) {
+                    DocumentFile.fromTreeUri(context, cloudBackupFolderUri)?.name ?: cloudBackupFolderUri.toString()
+                }
+                Text(
+                    text = "保存先: $folderLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FilterChip(
+                    selected = cloudBackupEnabled,
+                    onClick = { onSetCloudBackupEnabled(!cloudBackupEnabled) },
+                    label = { Text("自動バックアップ(毎日1回)") }
+                )
+                var retentionInput by remember(cloudBackupRetentionCount) {
+                    mutableStateOf(cloudBackupRetentionCount.toString())
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    OutlinedTextField(
+                        value = retentionInput,
+                        onValueChange = { retentionInput = it.filter { c -> c.isDigit() } },
+                        label = { Text("保持件数") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.width(140.dp)
+                    )
+                    TextButton(onClick = {
+                        val count = retentionInput.toIntOrNull()?.coerceIn(
+                            CloudBackupSettings.MIN_RETENTION_COUNT,
+                            CloudBackupSettings.MAX_RETENTION_COUNT
+                        )
+                        if (count != null) {
+                            onSetCloudBackupRetentionCount(count)
+                        }
+                    }) {
+                        Text("保存")
+                    }
+                }
+                Text(
+                    text = "${CloudBackupSettings.MIN_RETENTION_COUNT}〜" +
+                        "${CloudBackupSettings.MAX_RETENTION_COUNT}件の範囲で指定できます。" +
+                        "超えた分は古い順に自動削除されます。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = onRunCloudBackupNow) {
+                    Text("今すぐバックアップ")
+                }
+                if (cloudBackupLastBackupAt != null) {
+                    val resultLabel = when (cloudBackupLastResult) {
+                        CloudBackupResult.SUCCESS -> "成功"
+                        CloudBackupResult.FAILURE -> "失敗"
+                        null -> ""
+                    }
+                    Text(
+                        text = "最終実行: ${formatDueAt(cloudBackupLastBackupAt)}($resultLabel)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (cloudBackupLastResult == CloudBackupResult.FAILURE) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
                 }
             }
 
