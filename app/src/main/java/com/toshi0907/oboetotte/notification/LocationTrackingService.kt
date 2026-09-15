@@ -11,12 +11,14 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.location.LocationManagerCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -96,6 +98,15 @@ class LocationTrackingService : Service() {
         // ここへ到達しうるため、startForegroundより前に必ず自前で確認する。
         if (!LocationReminderManager.hasLocationPermission(this)) {
             Log.w(TAG, "連続追跡: 位置情報の権限が無いため開始せず停止します")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // 権限があっても端末側の位置情報サービス自体(設定アプリの「位置情報」トグル)が
+        // オフの場合、Android 14以降はforegroundServiceType="location"のstartForegroundが
+        // SecurityExceptionを投げる。権限確認だけでは検知できないため別途確認する。
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (!LocationManagerCompat.isLocationEnabled(locationManager)) {
+            Log.w(TAG, "連続追跡: 位置情報サービスが無効なため開始せず停止します")
             stopSelf()
             return START_NOT_STICKY
         }

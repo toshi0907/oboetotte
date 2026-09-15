@@ -173,37 +173,45 @@ object LocationReminderManager {
      * 解除してから、新しい方式で位置情報を使う未完了タスクを[reconcileAll]で登録し直す。
      */
     suspend fun switchMode(context: Context, newMode: LocationTrackingMode): Unit = lifecycleMutex.withLock {
-        val oldMode = LocationTrackingSettings.getMode(context)
-        if (oldMode == newMode) return@withLock
-        when (oldMode) {
-            LocationTrackingMode.GEOFENCING_API -> {
-                // 個々のrequestIdが分からなくても、共有しているPendingIntent単位で
-                // 登録済みの全ジオフェンスをまとめて解除できる。
-                val removeTask = LocationServices.getGeofencingClient(context)
-                    .removeGeofences(geofencePendingIntent(context))
-                removeTask
-                    .addOnSuccessListener {
-                        Log.d(TAG, "確認方式の切り替えに伴いジオフェンスを一括解除しました")
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e(TAG, "確認方式の切り替えに伴うジオフェンス一括解除に失敗しました", e)
-                    }
-                // この解除の完了を待たずに新方式のreconcileAllLocked(下記)へ進むと、
-                // GEOFENCING_API→CONTINUOUS_TRACKING→GEOFENCING_APIと短時間で往復させた場合に
-                // 解除の完了が後の再登録より遅れ、せっかく再登録したジオフェンスを消してしまいうる。
-                awaitCompletion(removeTask)
+        // 切り替え処理全体(旧方式のリソース解除〜setMode〜reconcileAllLocked)をNonCancellableで
+        // 包む。stopAndAwaitCompletion()/awaitCompletion()自体は個別にNonCancellableで保護済みだが、
+        // それらの呼び出しが完了した直後・setMode()やreconcileAllLocked()の実行中に呼び出し元の
+        // コルーチン(TaskViewModel.viewModelScope等)がキャンセルされると、旧方式のリソースは
+        // 解除済みなのに新方式への切り替え(setMode・再登録)が完了しないまま処理が中断され、
+        // どちらの方式でも位置情報が正しく機能しない不整合な状態が残ってしまう。
+        withContext(NonCancellable) {
+            val oldMode = LocationTrackingSettings.getMode(context)
+            if (oldMode == newMode) return@withContext
+            when (oldMode) {
+                LocationTrackingMode.GEOFENCING_API -> {
+                    // 個々のrequestIdが分からなくても、共有しているPendingIntent単位で
+                    // 登録済みの全ジオフェンスをまとめて解除できる。
+                    val removeTask = LocationServices.getGeofencingClient(context)
+                        .removeGeofences(geofencePendingIntent(context))
+                    removeTask
+                        .addOnSuccessListener {
+                            Log.d(TAG, "確認方式の切り替えに伴いジオフェンスを一括解除しました")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e(TAG, "確認方式の切り替えに伴うジオフェンス一括解除に失敗しました", e)
+                        }
+                    // この解除の完了を待たずに新方式のreconcileAllLocked(下記)へ進むと、
+                    // GEOFENCING_API→CONTINUOUS_TRACKING→GEOFENCING_APIと短時間で往復させた場合に
+                    // 解除の完了が後の再登録より遅れ、せっかく再登録したジオフェンスを消してしまいうる。
+                    awaitCompletion(removeTask)
+                }
+                LocationTrackingMode.CONTINUOUS_TRACKING -> {
+                    // stopAndAwaitCompletion()は「新しい位置の受信停止・キュー済みの評価を含めた
+                    // コンシューマーコルーチンの終了」まで待つ停止完了バリアなので、これの完了後に
+                    // deleteAll()すれば、停止処理と競合して評価中・キュー済みだった書き込みが
+                    // 削除より後に発生し復活してしまう問題は起こらない。
+                    LocationTrackingService.stopAndAwaitCompletion(context)
+                    AppDatabase.getInstance(context).geofenceStateDao().deleteAll()
+                }
             }
-            LocationTrackingMode.CONTINUOUS_TRACKING -> {
-                // stopAndAwaitCompletion()は「新しい位置の受信停止・キュー済みの評価を含めた
-                // コンシューマーコルーチンの終了」まで待つ停止完了バリアなので、これの完了後に
-                // deleteAll()すれば、停止処理と競合して評価中・キュー済みだった書き込みが
-                // 削除より後に発生し復活してしまう問題は起こらない。
-                LocationTrackingService.stopAndAwaitCompletion(context)
-                AppDatabase.getInstance(context).geofenceStateDao().deleteAll()
-            }
+            LocationTrackingSettings.setMode(context, newMode)
+            reconcileAllLocked(context)
         }
-        LocationTrackingSettings.setMode(context, newMode)
-        reconcileAllLocked(context)
     }
 
     /**
