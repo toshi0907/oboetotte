@@ -1020,6 +1020,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {

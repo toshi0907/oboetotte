@@ -313,11 +313,20 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
      * しておく。
      */
     fun setCloudBackupFolder(uri: Uri) {
-        // 以前選択していたフォルダの権限を持ったままにすると、保存先を切り替えるたびに
-        // 永続化されたURI権限が増え続け、Android側の上限(端末により異なるが歴史的に128件)に
-        // 達すると以降のtakePersistableUriPermissionがSecurityExceptionで失敗するようになる。
-        // 新しい権限を取得する前に、古いURIの権限を(取得済みであれば)解放しておく。
         val previousUri = CloudBackupSettings.getFolderUri(appContext)
+        // 先に新しいURIの権限を取得・保存する。takePersistableUriPermissionがSecurityException等で
+        // 失敗した場合はここで例外が伝播し、以降の設定保存・旧URIの権限解放は行われないため、
+        // 失敗時も既存の保存先(previousUri)は使える状態のまま保たれる。
+        appContext.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+        CloudBackupSettings.setFolderUri(appContext, uri)
+        _cloudBackupFolderUri.value = uri
+        // 新しい権限の取得・保存が成功した後にのみ、以前選択していたフォルダの権限を解放する。
+        // 解放せずに保存先を切り替え続けると、永続化されたURI権限が増え続け、Android側の上限
+        // (端末により異なるが歴史的に128件)に達して以降のtakePersistableUriPermissionが
+        // SecurityExceptionで失敗するようになるため。
         if (previousUri != null && previousUri != uri) {
             try {
                 appContext.contentResolver.releasePersistableUriPermission(
@@ -328,12 +337,6 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 // 既に解放済み・提供元アプリのアンインストール等で権限が残っていない場合。
             }
         }
-        appContext.contentResolver.takePersistableUriPermission(
-            uri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        )
-        CloudBackupSettings.setFolderUri(appContext, uri)
-        _cloudBackupFolderUri.value = uri
     }
 
     /** クラウド自動バックアップの有効/無効を切り替える。保存先フォルダが未設定の場合は有効化できない。 */
