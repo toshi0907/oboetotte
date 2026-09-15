@@ -69,4 +69,25 @@ object CloudBackupSettings {
             .putString(KEY_LAST_BACKUP_RESULT, result.name)
             .apply()
     }
+
+    /**
+     * [recordResult]による変更をリッスンする。定期実行(CloudBackupWorker)による結果更新は
+     * アプリのプロセスが生きている間、呼び出し元(TaskViewModel)の同期処理を経由しないため、
+     * SharedPreferences側の変更を直接購読してStateFlowに反映する用途で使う。
+     * SharedPreferencesは内部でリスナーをWeakReferenceとしてしか保持しないため、
+     * 呼び出し元は[listener]自体を(ラムダをその場で渡すのではなく)フィールド等で保持し続けること。
+     */
+    fun addLastResultChangeListener(
+        context: Context,
+        listener: SharedPreferences.OnSharedPreferenceChangeListener
+    ) {
+        prefs(context).registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun removeLastResultChangeListener(
+        context: Context,
+        listener: SharedPreferences.OnSharedPreferenceChangeListener
+    ) {
+        prefs(context).unregisterOnSharedPreferenceChangeListener(listener)
+    }
 }

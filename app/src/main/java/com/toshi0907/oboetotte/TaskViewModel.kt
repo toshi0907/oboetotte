@@ -2,6 +2,7 @@ package com.toshi0907.oboetotte
 
 import android.app.Application
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -101,6 +102,26 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _cloudBackupLastResult = MutableStateFlow(CloudBackupSettings.getLastBackupResult(application))
     val cloudBackupLastResult: StateFlow<CloudBackupResult?> = _cloudBackupLastResult
+
+    // CloudBackupWorker(定期実行)がrecordResultでSharedPreferencesを更新しても、
+    // アプリのプロセスが生きている間はcloudBackupLastBackupAt/cloudBackupLastResultの
+    // StateFlowがそれだけでは更新されない(runCloudBackupNowによる明示的な再読込でのみ
+    // 更新される)ため、SharedPreferences側の変更を直接購読して同期する。SharedPreferences
+    // はリスナーをWeakReferenceでしか保持しないため、フィールドとして保持し続ける必要があり、
+    // initブロックで登録・onClearedで解除する。
+    private val cloudBackupPrefsListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            _cloudBackupLastBackupAt.value = CloudBackupSettings.getLastBackupAt(appContext)
+            _cloudBackupLastResult.value = CloudBackupSettings.getLastBackupResult(appContext)
+        }
+
+    init {
+        CloudBackupSettings.addLastResultChangeListener(appContext, cloudBackupPrefsListener)
+    }
+
+    override fun onCleared() {
+        CloudBackupSettings.removeLastResultChangeListener(appContext, cloudBackupPrefsListener)
+    }
 
     val allTasks: StateFlow<List<Task>> = taskDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -367,12 +388,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _cloudBackupRetentionCount.value = CloudBackupSettings.getRetentionCount(appContext)
     }
 
-    /** 設定画面の「今すぐバックアップ」ボタンから呼ぶ。定期実行([CloudBackupWorker])と同じ処理を即座に1回行う。 */
+    /**
+     * 設定画面の「今すぐバックアップ」ボタンから呼ぶ。定期実行([CloudBackupWorker])と同じ処理を
+     * 即座に1回行う。実行結果の[cloudBackupLastBackupAt]/[cloudBackupLastResult]への反映は
+     * [cloudBackupPrefsListener]がSharedPreferencesの変更を検知して自動的に行う。
+     */
     fun runCloudBackupNow(onResult: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
             val success = CloudBackupRunner.run(appContext)
-            _cloudBackupLastBackupAt.value = CloudBackupSettings.getLastBackupAt(appContext)
-            _cloudBackupLastResult.value = CloudBackupSettings.getLastBackupResult(appContext)
             onResult(success)
         }
     }
