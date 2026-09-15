@@ -33,13 +33,12 @@ import com.toshi0907.oboetotte.data.LocationUpdateLogDao
 import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.metersBetween
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * 位置情報の確認方式が[LocationTrackingMode.CONTINUOUS_TRACKING]の場合にのみ動作するフォアグラウンド
@@ -57,22 +56,29 @@ class LocationTrackingService : Service() {
     private var locationCallback: LocationCallback? = null
 
     // onLocationResultのたびに新しいコルーチンをlaunchして評価すると、位置情報の取得が短時間に
-    // 連続した場合にコルーチンの開始順序(=ロックの取得順序)がコールバックの到着順と入れ替わる
-    // ことがある(scope.launch自体は即座に実行されるわけではないため)。Channelは送信順序を
-    // 保持したまま単一のコンシューマーで順に取り出せるため、onLocationResult側は同期的な
-    // trySend()で送るだけにし、実際の評価(handleLocation)は下記のコンシューマーコルーチン
-    // (onCreateで起動)1つだけが順番に処理することで、到着順の処理を保証する。
-    private val locationChannel = Channel<Location>(Channel.UNLIMITED)
+    // 連続した場合にコルーチンの開始順序がコールバックの到着順と入れ替わることがある
+    // (scope.launch自体は即座に実行されるわけではないため)。Channelは送信順序を保持したまま
+    // 単一のコンシューマーで順に取り出せるため、onLocationResult側は同期的なtrySend()で送る
+    // だけにし、実際の評価(handleLocation)は下記のコンシューマーコルーチン(onCreateで起動)
+    // 1つだけが順番に処理することで、到着順の処理を保証する。容量はCONFLATED(最新の1件のみ
+    // 保持)にしており、評価(Room読み書き・ワーカー予約・ログ書き込みを含む)が設定間隔より
+    // 時間がかかってコンシューマーが遅れても、未処理の位置情報が無制限に溜まり続けることはない。
+    // 古い位置情報は破棄され、次に評価するのは常に最新の位置になる。
+    private val locationChannel = Channel<Location>(Channel.CONFLATED)
 
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        // コンシューマーコルーチン1つだけがlocationChannelを消費する。onDestroyでchannelがcloseされ、
+        // キュー済みの最後の要素(CONFLATEDのため高々1件)まで処理し終えるとfor文を抜けるため、
+        // その直後にstopCompletionを完了させれば「評価中の処理も含めて完全に停止した」ことを
+        // stopAndAwaitCompletion()の呼び出し元へ伝えられる。
         scope.launch {
             for (location in locationChannel) {
-                evaluationMutex.withLock {
-                    handleLocation(location.latitude, location.longitude, location.accuracy)
-                }
+                handleLocation(location.latitude, location.longitude, location.accuracy)
             }
+            stopCompletion?.complete(Unit)
+            stopCompletion = null
         }
     }
 
@@ -109,9 +115,15 @@ class LocationTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        // stopLocationUpdatesで新規の位置情報受信を止め、locationChannel.close()でこれ以上
+        // trySend()が積まれないようにする。ここでjobをcancelしてしまうと、コンシューマー
+        // コルーチン(onCreateで起動)がまだキュー済みの最後の要素を評価している途中でも
+        // 強制終了してしまい、stopAndAwaitCompletion()が「停止完了」を待つ意味が無くなる。
+        // そのためjobのcancelは行わず、コンシューマーコルーチンが自然にfor文を抜けて完了する
+        // (そのままstopCompletionを完了させる)のに任せる。以後locationChannelへ新たな
+        // イベントが送られることは無いため、参照が残っていてもリークにはならない。
         stopLocationUpdates()
         locationChannel.close()
-        job.cancel()
         super.onDestroy()
     }
 
@@ -266,20 +278,32 @@ class LocationTrackingService : Service() {
         private const val NOTIFICATION_ID = 2
         private const val EXTRA_FORCE_RESTART = "force_restart"
 
-        // handleLocation呼び出し中だけ保持するロック。他インスタンスからの二重取得の防止用ではなく、
-        // awaitIdle()が「現在評価中の処理が無い」ことを検知するための合図として使う。
-        private val evaluationMutex = Mutex()
+        // stopAndAwaitCompletion()呼び出し中に、そのサービスインスタンスの停止完了(onDestroyで
+        // コンシューマーコルーチンがキュー済みの最後の要素まで処理し終えたこと)を通知するための
+        // 待ち合わせ。呼び出しは[LocationReminderManager]の[lifecycleMutex]で直列化されているため、
+        // 同時に複数のstopAndAwaitCompletion()呼び出しが競合することはない。
+        @Volatile
+        private var stopCompletion: CompletableDeferred<Unit>? = null
 
         /**
-         * 進行中の評価(handleLocation)が完了するまで中断して待つ。[LocationReminderManager.switchMode]
-         * が連続追跡方式から離れる際、[stop]呼び出し後・[com.toshi0907.oboetotte.data.GeofenceStateDao.deleteAll]
-         * 呼び出し前に挟むことで、評価中だった書き込みが削除より後に完了して復活してしまう競合を
-         * 大きく減らせる。ただし[stop]自体([Context.stopService])は非同期で、実際に
-         * [onDestroy]が呼ばれ位置情報の購読が止まるまでの短い猶予があるため、これは完全な排他では
-         * なくベストエフォートの軽減策であることに注意。
+         * サービスの停止を要求し、停止完了(位置情報の受信停止・キュー済みの評価まで含めた
+         * コンシューマーコルーチンの終了)まで中断して待つ「停止完了バリア」。
+         * [LocationReminderManager.switchMode]が連続追跡方式から離れる際、この完了を待ってから
+         * [com.toshi0907.oboetotte.data.GeofenceStateDao.deleteAll]を呼ぶことで、停止処理と
+         * 競合して評価中・キュー済みだった書き込みが削除より後に発生し復活してしまう問題を防ぐ。
+         * サービスが既に停止している場合は[Context.stopService]がfalseを返すため、
+         * (onDestroyが呼ばれずstopCompletionが完了しないまま待ち続けることを避けるため)
+         * 即座に戻る。
          */
-        suspend fun awaitIdle() {
-            evaluationMutex.withLock { }
+        suspend fun stopAndAwaitCompletion(context: Context) {
+            val completion = CompletableDeferred<Unit>()
+            stopCompletion = completion
+            val wasRunning = context.stopService(Intent(context, LocationTrackingService::class.java))
+            if (!wasRunning) {
+                stopCompletion = null
+                return
+            }
+            completion.await()
         }
 
         /** サービスが未起動なら起動し、既に起動済みなら位置情報の購読はそのまま維持する。 */

@@ -194,11 +194,11 @@ object LocationReminderManager {
                 awaitCompletion(removeTask)
             }
             LocationTrackingMode.CONTINUOUS_TRACKING -> {
-                LocationTrackingService.stop(context)
-                // stop()自体(Context.stopService)は非同期のため、呼び出した直後もまだ評価中の
-                // handleLocationが残っている可能性がある。awaitIdle()でその完了を待ってから
-                // deleteAll()することで、削除後に古い評価結果が書き戻されてしまう競合を減らす。
-                LocationTrackingService.awaitIdle()
+                // stopAndAwaitCompletion()は「新しい位置の受信停止・キュー済みの評価を含めた
+                // コンシューマーコルーチンの終了」まで待つ停止完了バリアなので、これの完了後に
+                // deleteAll()すれば、停止処理と競合して評価中・キュー済みだった書き込みが
+                // 削除より後に発生し復活してしまう問題は起こらない。
+                LocationTrackingService.stopAndAwaitCompletion(context)
                 AppDatabase.getInstance(context).geofenceStateDao().deleteAll()
             }
         }
