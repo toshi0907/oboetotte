@@ -12,18 +12,33 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.tasks.Task as GmsTask
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 /**
  * 位置情報リマインダー(ジオフェンス)の登録・解除を担当する。時刻ベースの[ReminderScheduler]と
  * 同じ考え方で、TaskViewModel・TaskCompletion・BootReceiverの各操作から呼び出される。
- * ジオフェンスのrequestIdにはタスクIDの文字列表現をそのまま使う。
+ * [LocationTrackingSettings.getMode]が[LocationTrackingMode.GEOFENCING_API]ならGoogle Play services
+ * のGeofencing APIへ登録し(ジオフェンスのrequestIdにはタスクIDの文字列表現をそのまま使う)、
+ * [LocationTrackingMode.CONTINUOUS_TRACKING]なら[LocationTrackingService]を起動して自前の
+ * 連続追跡に切り替える。どちらの方式でも、遷移を検知した後の処理([GeofenceConfirmWorker]による
+ * 3分デバウンス)は共通。
+ *
+ * [register]/[unregister]/[switchMode]/[reconcileAll]/[updateContinuousTrackingInterval]はいずれも
+ * [lifecycleMutex]で直列化している。これらを別々の非同期コルーチンから並行に呼ぶと、例えば確認方式を
+ * 連続追跡→Geofencing APIへ切り替えている最中に古い[updateContinuousTrackingInterval]の呼び出しが
+ * 完了して連続追跡サービスを再起動してしまう、といった順序崩れが起こりうるため。
  */
 object LocationReminderManager {
+
+    private val lifecycleMutex = Mutex()
 
     fun hasForegroundPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -40,24 +55,52 @@ object LocationReminderManager {
     fun hasLocationPermission(context: Context): Boolean =
         hasForegroundPermission(context) && hasBackgroundPermission(context)
 
+    suspend fun register(context: Context, task: Task) = lifecycleMutex.withLock {
+        registerLocked(context, task)
+    }
+
     @SuppressLint("MissingPermission")
-    fun register(context: Context, task: Task) {
+    private suspend fun registerLocked(context: Context, task: Task) {
         val lat = task.latitude
         val lng = task.longitude
         val radius = task.radiusMeters
         val wantsTrigger = task.notifyOnArrival || task.notifyOnDeparture
         if (task.isDone || lat == null || lng == null || radius == null || !wantsTrigger) {
-            unregister(context, task.id)
+            unregisterLocked(context, task.id)
             return
         }
         if (!hasLocationPermission(context)) {
-            Log.w(TAG, "位置情報の権限が不足しているためタスク${task.id}のジオフェンス登録をスキップします")
+            Log.w(TAG, "位置情報の権限が不足しているためタスク${task.id}の位置情報リマインダー登録をスキップします")
             return
         }
         // 位置情報デバッグ用の定期的な現在地取得(LocationUpdateWorker)も、
         // 位置情報タスクが1件以上ある間だけ動作するようここで併せて起動しておく。
         LocationUpdateScheduler.ensureScheduled(context)
 
+        when (LocationTrackingSettings.getMode(context)) {
+            LocationTrackingMode.GEOFENCING_API -> registerGeofencingApi(context, task, lat, lng, radius)
+            LocationTrackingMode.CONTINUOUS_TRACKING -> {
+                // 位置・半径を変更した既存タスクの再登録では、古い圏内/圏外の基準値が残ったままだと
+                // 実際には移動していないのに新しい設定との比較で誤って遷移が検知されてしまうため、
+                // 基準値をリセットする(Geofencing APIモードでの再登録がINITIAL_TRIGGER_ENTERとして
+                // 扱われるのと同じ考え方)。一方、タイトルなど位置と無関係な項目だけの編集や、
+                // 起動時・権限許可時の再確認([reconcileAll])では毎回呼ばれるため、記録済みの
+                // ジオフェンス定義(位置・半径)がタスクの現在の設定と一致する場合は基準値をそのまま
+                // 保持し、無駄な初回評価扱い(既に圏内なら到着通知の再スケジュール)を避ける。
+                val geofenceStateDao = AppDatabase.getInstance(context).geofenceStateDao()
+                val existing = geofenceStateDao.get(task.id)
+                val definitionChanged = existing == null ||
+                    existing.latitude != lat || existing.longitude != lng || existing.radiusMeters != radius
+                if (definitionChanged) {
+                    geofenceStateDao.delete(task.id)
+                }
+                LocationTrackingService.start(context)
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun registerGeofencingApi(context: Context, task: Task, lat: Double, lng: Double, radius: Int) {
         val transitionTypes = (if (task.notifyOnArrival) Geofence.GEOFENCE_TRANSITION_ENTER else 0) or
             (if (task.notifyOnDeparture) Geofence.GEOFENCE_TRANSITION_EXIT else 0)
 
@@ -84,33 +127,135 @@ object LocationReminderManager {
             .build()
 
         try {
-            LocationServices.getGeofencingClient(context)
+            val addGeofencesTask = LocationServices.getGeofencingClient(context)
                 .addGeofences(request, geofencePendingIntent(context))
+            addGeofencesTask
                 .addOnSuccessListener {
                     Log.d(TAG, "タスク${task.id}のジオフェンスを登録しました")
                 }
                 .addOnFailureListener { e ->
                     Log.e(TAG, "タスク${task.id}のジオフェンス登録に失敗しました", e)
                 }
+            // Play servicesのTaskは非同期のため、完了を待たずに次のロック内操作(reconcileAllの
+            // 次タスク登録や、別の切り替え操作)へ進むと、短時間に連続して呼ばれた場合に完了順序が
+            // 呼び出し順と入れ替わりうる(例えばモードを短時間で往復させると、後から登録した
+            // ジオフェンスを先の解除処理が後から削除してしまう)。lifecycleMutexで直列化している
+            // 意味を保つため、ここで完了を待ってからロックを解放させる。
+            awaitCompletion(addGeofencesTask)
         } catch (e: SecurityException) {
             Log.e(TAG, "タスク${task.id}のジオフェンス登録で権限エラーが発生しました", e)
         }
     }
 
-    fun unregister(context: Context, taskId: Long) {
-        LocationServices.getGeofencingClient(context).removeGeofences(listOf(taskId.toString()))
+    suspend fun unregister(context: Context, taskId: Long) = lifecycleMutex.withLock {
+        unregisterLocked(context, taskId)
+    }
+
+    private suspend fun unregisterLocked(context: Context, taskId: Long) {
+        when (LocationTrackingSettings.getMode(context)) {
+            LocationTrackingMode.GEOFENCING_API -> {
+                awaitCompletion(
+                    LocationServices.getGeofencingClient(context).removeGeofences(listOf(taskId.toString()))
+                )
+            }
+            LocationTrackingMode.CONTINUOUS_TRACKING -> {
+                AppDatabase.getInstance(context).geofenceStateDao().delete(taskId)
+                if (AppDatabase.getInstance(context).taskDao().getPendingWithLocation().isEmpty()) {
+                    LocationTrackingService.stop(context)
+                }
+            }
+        }
+    }
+
+    /**
+     * 確認方式([LocationTrackingMode])を切り替える際に呼ぶ。切り替え前の方式で使っていたリソース
+     * (Geofencing APIへの登録、または連続追跡サービス・保持していた圏内/圏外の基準値)をすべて
+     * 解除してから、新しい方式で位置情報を使う未完了タスクを[reconcileAll]で登録し直す。
+     */
+    suspend fun switchMode(context: Context, newMode: LocationTrackingMode): Unit = lifecycleMutex.withLock {
+        // 切り替え処理全体(旧方式のリソース解除〜setMode〜reconcileAllLocked)をNonCancellableで
+        // 包む。stopAndAwaitCompletion()/awaitCompletion()自体は個別にNonCancellableで保護済みだが、
+        // それらの呼び出しが完了した直後・setMode()やreconcileAllLocked()の実行中に呼び出し元の
+        // コルーチン(TaskViewModel.viewModelScope等)がキャンセルされると、旧方式のリソースは
+        // 解除済みなのに新方式への切り替え(setMode・再登録)が完了しないまま処理が中断され、
+        // どちらの方式でも位置情報が正しく機能しない不整合な状態が残ってしまう。
+        withContext(NonCancellable) {
+            val oldMode = LocationTrackingSettings.getMode(context)
+            if (oldMode == newMode) return@withContext
+            when (oldMode) {
+                LocationTrackingMode.GEOFENCING_API -> {
+                    // 個々のrequestIdが分からなくても、共有しているPendingIntent単位で
+                    // 登録済みの全ジオフェンスをまとめて解除できる。
+                    val removeTask = LocationServices.getGeofencingClient(context)
+                        .removeGeofences(geofencePendingIntent(context))
+                    removeTask
+                        .addOnSuccessListener {
+                            Log.d(TAG, "確認方式の切り替えに伴いジオフェンスを一括解除しました")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e(TAG, "確認方式の切り替えに伴うジオフェンス一括解除に失敗しました", e)
+                        }
+                    // この解除の完了を待たずに新方式のreconcileAllLocked(下記)へ進むと、
+                    // GEOFENCING_API→CONTINUOUS_TRACKING→GEOFENCING_APIと短時間で往復させた場合に
+                    // 解除の完了が後の再登録より遅れ、せっかく再登録したジオフェンスを消してしまいうる。
+                    awaitCompletion(removeTask)
+                }
+                LocationTrackingMode.CONTINUOUS_TRACKING -> {
+                    // stopAndAwaitCompletion()は「新しい位置の受信停止・キュー済みの評価を含めた
+                    // コンシューマーコルーチンの終了」まで待つ停止完了バリアなので、これの完了後に
+                    // deleteAll()すれば、停止処理と競合して評価中・キュー済みだった書き込みが
+                    // 削除より後に発生し復活してしまう問題は起こらない。
+                    LocationTrackingService.stopAndAwaitCompletion(context)
+                    AppDatabase.getInstance(context).geofenceStateDao().deleteAll()
+                }
+            }
+            LocationTrackingSettings.setMode(context, newMode)
+            reconcileAllLocked(context)
+        }
+    }
+
+    /**
+     * 連続追跡方式の更新頻度を変更する。既にサービスが動作中であれば再起動し、
+     * 新しい間隔での位置情報リクエストにすぐ切り替える。位置情報を使う未完了タスクが
+     * 無い場合は([register]と同様に)サービスを起動しない。
+     */
+    suspend fun updateContinuousTrackingInterval(context: Context, minutes: Int): Unit = lifecycleMutex.withLock {
+        LocationTrackingSettings.setIntervalMinutes(context, minutes)
+        if (LocationTrackingSettings.getMode(context) != LocationTrackingMode.CONTINUOUS_TRACKING) return@withLock
+        if (AppDatabase.getInstance(context).taskDao().getPendingWithLocation().isNotEmpty()) {
+            LocationTrackingService.restart(context)
+        }
     }
 
     /**
      * 位置情報の権限が新たに許可された時・アプリ起動時など、[register]が権限不足で
      * スキップされていたかもしれないタイミングで呼ぶ。位置情報を使う未完了タスクを
      * まとめて[register]し直すことで、ジオフェンス登録・[LocationUpdateScheduler]経由の
-     * 定期取得ジョブの起動をやり直す。DBアクセスを伴うため内部で独自にコルーチンを起動する。
+     * 定期取得ジョブの起動をやり直す。
      */
-    fun reconcileAll(context: Context) {
-        CoroutineScope(Dispatchers.IO).launch {
-            AppDatabase.getInstance(context).taskDao().getPendingWithLocation()
-                .forEach { task -> register(context, task) }
+    suspend fun reconcileAll(context: Context) = lifecycleMutex.withLock {
+        reconcileAllLocked(context)
+    }
+
+    private suspend fun reconcileAllLocked(context: Context) {
+        AppDatabase.getInstance(context).taskDao().getPendingWithLocation()
+            .forEach { task -> registerLocked(context, task) }
+    }
+
+    /**
+     * Play servicesの[GmsTask]が完了(成功/失敗/キャンセルのいずれか)するまで、ブロッキングせずに中断する。
+     * 呼び出し元([TaskViewModel.viewModelScope]・`MainActivity`の`rememberCoroutineScope`など)が
+     * 途中でキャンセルされても、既に発行済みの`addGeofences`/`removeGeofences`自体は取り消せないため、
+     * [NonCancellable]でラップしてこの待ち合わせ(=lifecycleMutexの保持)だけはキャンセルの影響を
+     * 受けないようにする。ここで早期にキャンセルされてロックが解放されると、まだ実行中のPlay services
+     * 側の処理と後続のロック内操作が重なってしまい、直列化の意味が失われるため。
+     */
+    private suspend fun awaitCompletion(gmsTask: GmsTask<*>): Unit = withContext(NonCancellable) {
+        if (gmsTask.isComplete) return@withContext
+        suspendCancellableCoroutine { cont ->
+            gmsTask.addOnCompleteListener {
+                if (cont.isActive) cont.resume(Unit)
+            }
         }
     }
 

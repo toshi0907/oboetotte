@@ -20,6 +20,8 @@ import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
+import com.toshi0907.oboetotte.notification.LocationTrackingMode
+import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +88,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     val locationUpdateLogs: StateFlow<List<LocationUpdateLog>> = locationUpdateLogDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _locationTrackingMode =
+        MutableStateFlow(LocationTrackingSettings.getMode(application))
+    val locationTrackingMode: StateFlow<LocationTrackingMode> = _locationTrackingMode
+
+    private val _locationTrackingIntervalMinutes =
+        MutableStateFlow(LocationTrackingSettings.getIntervalMinutes(application))
+    val locationTrackingIntervalMinutes: StateFlow<Int> = _locationTrackingIntervalMinutes
 
     private val _cloudBackupEnabled = MutableStateFlow(CloudBackupSettings.isEnabled(application))
     val cloudBackupEnabled: StateFlow<Boolean> = _cloudBackupEnabled
@@ -327,12 +337,22 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * SAFのフォルダ選択ダイアログ([androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree])
-     * で選んだフォルダをクラウド自動バックアップの保存先として登録する。以後もアプリの再起動・
-     * 端末の再起動を越えて書き込めるよう、権限を永続化([android.content.ContentResolver.takePersistableUriPermission])
-     * しておく。
-     */
+    /** 位置情報リマインダーの確認方式を切り替える(Geofencing API/連続追跡方式)。 */
+    fun setLocationTrackingMode(mode: LocationTrackingMode) {
+        viewModelScope.launch {
+            LocationReminderManager.switchMode(appContext, mode)
+            _locationTrackingMode.value = mode
+        }
+    }
+
+    /** 連続追跡方式の更新頻度(分)を変更する。1〜60分の範囲に丸められる。 */
+    fun setLocationTrackingIntervalMinutes(minutes: Int) {
+        viewModelScope.launch {
+            LocationReminderManager.updateContinuousTrackingInterval(appContext, minutes)
+            _locationTrackingIntervalMinutes.value = LocationTrackingSettings.getIntervalMinutes(appContext)
+        }
+    }
+
     /**
      * クラウド自動バックアップの保存先フォルダを設定する。takePersistableUriPermissionは
      * SAFプロバイダが永続権限を提供しない場合等にSecurityExceptionを送出しうるため、ここで
