@@ -3,7 +3,7 @@
 スマートフォンのみで開発するAndroid向けTodoアプリです。
 
 - 実装: Kotlin + Jetpack Compose
-- データ保存: 端末内(Room / SQLite)のみ。クラウド同期・共同編集は非対応
+- データ保存: 主データは端末内(Room / SQLite)のみ。共同編集は非対応。バックアップコピーはローカル・クラウド(SAFフォルダ)へZIP形式で書き出し可能
 - ビルド: GitHub Actions
 - 開発フロー: GitHubでコード管理 → Claude Codeで実装 → GitHub ActionsでAPKビルド → 端末にインストールして動作確認
 
