@@ -1,10 +1,16 @@
 package com.toshi0907.oboetotte
 
 import android.app.Application
+import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
+import com.toshi0907.oboetotte.backup.CloudBackupResult
+import com.toshi0907.oboetotte.backup.CloudBackupRunner
+import com.toshi0907.oboetotte.backup.CloudBackupScheduler
+import com.toshi0907.oboetotte.backup.CloudBackupSettings
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.NotificationLog
@@ -90,6 +96,42 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _locationTrackingIntervalMinutes =
         MutableStateFlow(LocationTrackingSettings.getIntervalMinutes(application))
     val locationTrackingIntervalMinutes: StateFlow<Int> = _locationTrackingIntervalMinutes
+
+    private val _cloudBackupEnabled = MutableStateFlow(CloudBackupSettings.isEnabled(application))
+    val cloudBackupEnabled: StateFlow<Boolean> = _cloudBackupEnabled
+
+    private val _cloudBackupFolderUri = MutableStateFlow(CloudBackupSettings.getFolderUri(application))
+    val cloudBackupFolderUri: StateFlow<Uri?> = _cloudBackupFolderUri
+
+    private val _cloudBackupRetentionCount =
+        MutableStateFlow(CloudBackupSettings.getRetentionCount(application))
+    val cloudBackupRetentionCount: StateFlow<Int> = _cloudBackupRetentionCount
+
+    private val _cloudBackupLastBackupAt = MutableStateFlow(CloudBackupSettings.getLastBackupAt(application))
+    val cloudBackupLastBackupAt: StateFlow<Long?> = _cloudBackupLastBackupAt
+
+    private val _cloudBackupLastResult = MutableStateFlow(CloudBackupSettings.getLastBackupResult(application))
+    val cloudBackupLastResult: StateFlow<CloudBackupResult?> = _cloudBackupLastResult
+
+    // CloudBackupWorker(定期実行)がrecordResultでSharedPreferencesを更新しても、
+    // アプリのプロセスが生きている間はcloudBackupLastBackupAt/cloudBackupLastResultの
+    // StateFlowがそれだけでは更新されない(runCloudBackupNowによる明示的な再読込でのみ
+    // 更新される)ため、SharedPreferences側の変更を直接購読して同期する。SharedPreferences
+    // はリスナーをWeakReferenceでしか保持しないため、フィールドとして保持し続ける必要があり、
+    // initブロックで登録・onClearedで解除する。
+    private val cloudBackupPrefsListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            _cloudBackupLastBackupAt.value = CloudBackupSettings.getLastBackupAt(appContext)
+            _cloudBackupLastResult.value = CloudBackupSettings.getLastBackupResult(appContext)
+        }
+
+    init {
+        CloudBackupSettings.addLastResultChangeListener(appContext, cloudBackupPrefsListener)
+    }
+
+    override fun onCleared() {
+        CloudBackupSettings.removeLastResultChangeListener(appContext, cloudBackupPrefsListener)
+    }
 
     val allTasks: StateFlow<List<Task>> = taskDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -308,6 +350,73 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             LocationReminderManager.updateContinuousTrackingInterval(appContext, minutes)
             _locationTrackingIntervalMinutes.value = LocationTrackingSettings.getIntervalMinutes(appContext)
+        }
+    }
+
+    /**
+     * クラウド自動バックアップの保存先フォルダを設定する。takePersistableUriPermissionは
+     * SAFプロバイダが永続権限を提供しない場合等にSecurityExceptionを送出しうるため、ここで
+     * 捕捉し戻り値のfalseで呼び出し元(UI)に伝える。例外を外へ伝播させたままだと、フォルダ選択
+     * 結果のコールバックからそのままアプリがクラッシュしてしまうため。
+     */
+    fun setCloudBackupFolder(uri: Uri): Boolean {
+        val previousUri = CloudBackupSettings.getFolderUri(appContext)
+        // 先に新しいURIの権限を取得・保存する。失敗した場合は以降の設定保存・旧URIの権限解放は
+        // 行わず、既存の保存先(previousUri)は使える状態のまま保たれる。
+        try {
+            appContext.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (e: SecurityException) {
+            return false
+        }
+        CloudBackupSettings.setFolderUri(appContext, uri)
+        _cloudBackupFolderUri.value = uri
+        // 新しい権限の取得・保存が成功した後にのみ、以前選択していたフォルダの権限を解放する。
+        // 解放せずに保存先を切り替え続けると、永続化されたURI権限が増え続け、Android側の上限
+        // (端末により異なるが歴史的に128件)に達して以降のtakePersistableUriPermissionが
+        // SecurityExceptionで失敗するようになるため。
+        if (previousUri != null && previousUri != uri) {
+            try {
+                appContext.contentResolver.releasePersistableUriPermission(
+                    previousUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                // 既に解放済み・提供元アプリのアンインストール等で権限が残っていない場合。
+            }
+        }
+        return true
+    }
+
+    /** クラウド自動バックアップの有効/無効を切り替える。保存先フォルダが未設定の場合は有効化できない。 */
+    fun setCloudBackupEnabled(enabled: Boolean) {
+        if (enabled && CloudBackupSettings.getFolderUri(appContext) == null) return
+        CloudBackupSettings.setEnabled(appContext, enabled)
+        _cloudBackupEnabled.value = enabled
+        if (enabled) {
+            CloudBackupScheduler.ensureScheduled(appContext)
+        } else {
+            CloudBackupScheduler.cancel(appContext)
+        }
+    }
+
+    /** クラウド自動バックアップの保持件数を変更する。1〜90件の範囲に丸められる。 */
+    fun setCloudBackupRetentionCount(count: Int) {
+        CloudBackupSettings.setRetentionCount(appContext, count)
+        _cloudBackupRetentionCount.value = CloudBackupSettings.getRetentionCount(appContext)
+    }
+
+    /**
+     * 設定画面の「今すぐバックアップ」ボタンから呼ぶ。定期実行([CloudBackupWorker])と同じ処理を
+     * 即座に1回行う。実行結果の[cloudBackupLastBackupAt]/[cloudBackupLastResult]への反映は
+     * [cloudBackupPrefsListener]がSharedPreferencesの変更を検知して自動的に行う。
+     */
+    fun runCloudBackupNow(onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val success = CloudBackupRunner.run(appContext)
+            onResult(success)
         }
     }
 
