@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -78,6 +79,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -96,6 +98,8 @@ import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
+import com.toshi0907.oboetotte.notification.LocationTrackingMode
+import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.ui.theme.Green40
 import com.toshi0907.oboetotte.ui.theme.Green80
@@ -175,6 +179,9 @@ class MainActivity : ComponentActivity() {
                     val attachments by taskViewModel.attachments.collectAsState()
                     val notificationLogs by taskViewModel.notificationLogs.collectAsState()
                     val locationUpdateLogs by taskViewModel.locationUpdateLogs.collectAsState()
+                    val locationTrackingMode by taskViewModel.locationTrackingMode.collectAsState()
+                    val locationTrackingIntervalMinutes by
+                        taskViewModel.locationTrackingIntervalMinutes.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
@@ -292,6 +299,10 @@ class MainActivity : ComponentActivity() {
                             allTasks = allTasks,
                             notificationLogs = notificationLogs,
                             locationUpdateLogs = locationUpdateLogs,
+                            locationTrackingMode = locationTrackingMode,
+                            onSetLocationTrackingMode = taskViewModel::setLocationTrackingMode,
+                            locationTrackingIntervalMinutes = locationTrackingIntervalMinutes,
+                            onSetLocationTrackingIntervalMinutes = taskViewModel::setLocationTrackingIntervalMinutes,
                             onSendTestNotification = {
                                 val scheduled = ReminderScheduler.scheduleTestNotification(context)
                                 val message = if (scheduled) {
@@ -946,6 +957,10 @@ fun SettingsScreen(
     allTasks: List<Task>,
     notificationLogs: List<NotificationLog> = emptyList(),
     locationUpdateLogs: List<LocationUpdateLog> = emptyList(),
+    locationTrackingMode: LocationTrackingMode = LocationTrackingMode.GEOFENCING_API,
+    onSetLocationTrackingMode: (LocationTrackingMode) -> Unit = {},
+    locationTrackingIntervalMinutes: Int = LocationTrackingSettings.DEFAULT_INTERVAL_MINUTES,
+    onSetLocationTrackingIntervalMinutes: (Int) -> Unit = {},
     onSendTestNotification: () -> Unit,
     onExportRequested: () -> Unit,
     onImportRequested: () -> Unit,
@@ -991,6 +1006,65 @@ fun SettingsScreen(
             )
             TextButton(onClick = { showManageLocations = true }) {
                 Text("場所を編集")
+            }
+
+            Text(
+                text = "位置情報",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                text = "位置情報リマインダーの到着・離脱をどう確認するかを選べます。「連続追跡方式」は" +
+                    "一定間隔で位置を取得し続けるため検知が速く正確になりますが、バッテリー消費が増えます。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = locationTrackingMode == LocationTrackingMode.GEOFENCING_API,
+                    onClick = { onSetLocationTrackingMode(LocationTrackingMode.GEOFENCING_API) },
+                    label = { Text("Geofencing API") }
+                )
+                FilterChip(
+                    selected = locationTrackingMode == LocationTrackingMode.CONTINUOUS_TRACKING,
+                    onClick = { onSetLocationTrackingMode(LocationTrackingMode.CONTINUOUS_TRACKING) },
+                    label = { Text("連続追跡方式") }
+                )
+            }
+            if (locationTrackingMode == LocationTrackingMode.CONTINUOUS_TRACKING) {
+                var intervalInput by remember(locationTrackingIntervalMinutes) {
+                    mutableStateOf(locationTrackingIntervalMinutes.toString())
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    OutlinedTextField(
+                        value = intervalInput,
+                        onValueChange = { intervalInput = it.filter { c -> c.isDigit() } },
+                        label = { Text("更新頻度(分)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.width(140.dp)
+                    )
+                    TextButton(onClick = {
+                        val minutes = intervalInput.toIntOrNull()?.coerceIn(
+                            LocationTrackingSettings.MIN_INTERVAL_MINUTES,
+                            LocationTrackingSettings.MAX_INTERVAL_MINUTES
+                        )
+                        if (minutes != null) {
+                            onSetLocationTrackingIntervalMinutes(minutes)
+                        }
+                    }) {
+                        Text("保存")
+                    }
+                }
+                Text(
+                    text = "${LocationTrackingSettings.MIN_INTERVAL_MINUTES}〜" +
+                        "${LocationTrackingSettings.MAX_INTERVAL_MINUTES}分の範囲で指定できます。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Text(

@@ -21,7 +21,11 @@ import kotlinx.coroutines.launch
 /**
  * 位置情報リマインダー(ジオフェンス)の登録・解除を担当する。時刻ベースの[ReminderScheduler]と
  * 同じ考え方で、TaskViewModel・TaskCompletion・BootReceiverの各操作から呼び出される。
- * ジオフェンスのrequestIdにはタスクIDの文字列表現をそのまま使う。
+ * [LocationTrackingSettings.getMode]が[LocationTrackingMode.GEOFENCING_API]ならGoogle Play services
+ * のGeofencing APIへ登録し(ジオフェンスのrequestIdにはタスクIDの文字列表現をそのまま使う)、
+ * [LocationTrackingMode.CONTINUOUS_TRACKING]なら[LocationTrackingService]を起動して自前の
+ * 連続追跡に切り替える。どちらの方式でも、遷移を検知した後の処理([GeofenceConfirmWorker]による
+ * 3分デバウンス)は共通。
  */
 object LocationReminderManager {
 
@@ -51,13 +55,21 @@ object LocationReminderManager {
             return
         }
         if (!hasLocationPermission(context)) {
-            Log.w(TAG, "位置情報の権限が不足しているためタスク${task.id}のジオフェンス登録をスキップします")
+            Log.w(TAG, "位置情報の権限が不足しているためタスク${task.id}の位置情報リマインダー登録をスキップします")
             return
         }
         // 位置情報デバッグ用の定期的な現在地取得(LocationUpdateWorker)も、
         // 位置情報タスクが1件以上ある間だけ動作するようここで併せて起動しておく。
         LocationUpdateScheduler.ensureScheduled(context)
 
+        when (LocationTrackingSettings.getMode(context)) {
+            LocationTrackingMode.GEOFENCING_API -> registerGeofencingApi(context, task, lat, lng, radius)
+            LocationTrackingMode.CONTINUOUS_TRACKING -> LocationTrackingService.start(context)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun registerGeofencingApi(context: Context, task: Task, lat: Double, lng: Double, radius: Int) {
         val transitionTypes = (if (task.notifyOnArrival) Geofence.GEOFENCE_TRANSITION_ENTER else 0) or
             (if (task.notifyOnDeparture) Geofence.GEOFENCE_TRANSITION_EXIT else 0)
 
@@ -98,7 +110,66 @@ object LocationReminderManager {
     }
 
     fun unregister(context: Context, taskId: Long) {
-        LocationServices.getGeofencingClient(context).removeGeofences(listOf(taskId.toString()))
+        when (LocationTrackingSettings.getMode(context)) {
+            LocationTrackingMode.GEOFENCING_API -> {
+                LocationServices.getGeofencingClient(context).removeGeofences(listOf(taskId.toString()))
+            }
+            LocationTrackingMode.CONTINUOUS_TRACKING -> {
+                CoroutineScope(Dispatchers.IO).launch {
+                    AppDatabase.getInstance(context).geofenceStateDao().delete(taskId)
+                    if (AppDatabase.getInstance(context).taskDao().getPendingWithLocation().isEmpty()) {
+                        LocationTrackingService.stop(context)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 確認方式([LocationTrackingMode])を切り替える際に呼ぶ。切り替え前の方式で使っていたリソース
+     * (Geofencing APIへの登録、または連続追跡サービス・保持していた圏内/圏外の基準値)をすべて
+     * 解除してから、新しい方式で位置情報を使う未完了タスクを[reconcileAll]で登録し直す。
+     */
+    fun switchMode(context: Context, newMode: LocationTrackingMode) {
+        val oldMode = LocationTrackingSettings.getMode(context)
+        if (oldMode == newMode) return
+        when (oldMode) {
+            LocationTrackingMode.GEOFENCING_API -> {
+                // 個々のrequestIdが分からなくても、共有しているPendingIntent単位で
+                // 登録済みの全ジオフェンスをまとめて解除できる。
+                LocationServices.getGeofencingClient(context)
+                    .removeGeofences(geofencePendingIntent(context))
+                    .addOnSuccessListener {
+                        Log.d(TAG, "確認方式の切り替えに伴いジオフェンスを一括解除しました")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "確認方式の切り替えに伴うジオフェンス一括解除に失敗しました", e)
+                    }
+            }
+            LocationTrackingMode.CONTINUOUS_TRACKING -> {
+                LocationTrackingService.stop(context)
+                CoroutineScope(Dispatchers.IO).launch {
+                    AppDatabase.getInstance(context).geofenceStateDao().deleteAll()
+                }
+            }
+        }
+        LocationTrackingSettings.setMode(context, newMode)
+        reconcileAll(context)
+    }
+
+    /**
+     * 連続追跡方式の更新頻度を変更する。既にサービスが動作中であれば再起動し、
+     * 新しい間隔での位置情報リクエストにすぐ切り替える。位置情報を使う未完了タスクが
+     * 無い場合は([register]と同様に)サービスを起動しない。
+     */
+    fun updateContinuousTrackingInterval(context: Context, minutes: Int) {
+        LocationTrackingSettings.setIntervalMinutes(context, minutes)
+        if (LocationTrackingSettings.getMode(context) != LocationTrackingMode.CONTINUOUS_TRACKING) return
+        CoroutineScope(Dispatchers.IO).launch {
+            if (AppDatabase.getInstance(context).taskDao().getPendingWithLocation().isNotEmpty()) {
+                LocationTrackingService.restart(context)
+            }
+        }
     }
 
     /**
