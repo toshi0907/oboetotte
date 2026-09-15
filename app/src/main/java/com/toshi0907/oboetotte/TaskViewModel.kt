@@ -313,6 +313,21 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
      * しておく。
      */
     fun setCloudBackupFolder(uri: Uri) {
+        // 以前選択していたフォルダの権限を持ったままにすると、保存先を切り替えるたびに
+        // 永続化されたURI権限が増え続け、Android側の上限(端末により異なるが歴史的に128件)に
+        // 達すると以降のtakePersistableUriPermissionがSecurityExceptionで失敗するようになる。
+        // 新しい権限を取得する前に、古いURIの権限を(取得済みであれば)解放しておく。
+        val previousUri = CloudBackupSettings.getFolderUri(appContext)
+        if (previousUri != null && previousUri != uri) {
+            try {
+                appContext.contentResolver.releasePersistableUriPermission(
+                    previousUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                // 既に解放済み・提供元アプリのアンインストール等で権限が残っていない場合。
+            }
+        }
         appContext.contentResolver.takePersistableUriPermission(
             uri,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION

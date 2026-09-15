@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.io.IOException
 import java.time.ZonedDateTime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -44,6 +45,11 @@ object CloudBackupRunner {
             pruneOldBackups(context, folder)
             CloudBackupSettings.recordResult(context, CloudBackupResult.SUCCESS, System.currentTimeMillis())
             true
+        } catch (e: CancellationException) {
+            // 呼び出し元のコルーチン(ViewModelのクリアやWorkManagerによる停止)がキャンセルされた
+            // だけなので、通常の失敗として記録せずそのまま伝播させる(refreshTaskWidget等、
+            // 既存コードの`CancellationException`は特別扱いする方針と同じ)。
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "クラウドバックアップに失敗しました", e)
             CloudBackupSettings.recordResult(context, CloudBackupResult.FAILURE, System.currentTimeMillis())

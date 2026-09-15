@@ -1086,8 +1086,16 @@ fun SettingsScreen(
             }
             if (cloudBackupFolderUri != null) {
                 val context = LocalContext.current
-                val folderLabel = remember(cloudBackupFolderUri) {
-                    DocumentFile.fromTreeUri(context, cloudBackupFolderUri)?.name ?: cloudBackupFolderUri.toString()
+                // DocumentFile.fromTreeUri(...).nameはドキュメントプロバイダへのIPCを伴い、
+                // 応答が遅いプロバイダだとメインスレッドをブロックしうる(AttachmentThumbnail等
+                // 既存のSAF/ファイルアクセスと同様にDispatchers.IOへ逃がす)。
+                val folderLabel by produceState(
+                    initialValue = cloudBackupFolderUri.toString(),
+                    cloudBackupFolderUri
+                ) {
+                    value = withContext(Dispatchers.IO) {
+                        DocumentFile.fromTreeUri(context, cloudBackupFolderUri)?.name ?: cloudBackupFolderUri.toString()
+                    }
                 }
                 Text(
                     text = "保存先: $folderLabel",
