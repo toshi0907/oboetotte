@@ -1131,6 +1131,10 @@ fun SettingsScreen(
                         )
                         if (count != null) {
                             onSetCloudBackupRetentionCount(count)
+                            // クランプ後の値が保存済みの値と同じ場合、StateFlowが変化を発行せず
+                            // remember(cloudBackupRetentionCount)がリセットされないため、
+                            // 入力欄側も明示的にクランプ後の値へ合わせておく。
+                            retentionInput = count.toString()
                         }
                     }) {
                         Text("保存")
