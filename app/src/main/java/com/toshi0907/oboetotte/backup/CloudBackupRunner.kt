@@ -49,7 +49,7 @@ object CloudBackupRunner {
     private suspend fun runLocked(context: Context, folder: DocumentFile): Boolean {
         var file: DocumentFile? = null
         var exported = false
-        try {
+        return try {
             val zoned = ZonedDateTime.now()
             val fileName = "$BACKUP_FILE_PREFIX%04d%02d%02d_%02d%02d%02d.zip".format(
                 zoned.year, zoned.monthValue, zoned.dayOfMonth,
