@@ -32,7 +32,7 @@
 
 ### 方法1: GitHub Releaseから(推奨)
 
-`latest-debug` というタグに、pushのたびに最新のデバッグAPKが自動で添付されます。
+`latest-debug` というタグに、`main` ブランチへのpushのたびに最新(マージ済み)のデバッグAPKが自動で添付されます。他のブランチへのpushではビルドの成否のみ確認され、このタグは更新されません。
 
 1. [Releaseページ](https://github.com/toshi0907/oboetotte/releases/tag/latest-debug)を開く
 2. `app-debug.apk` をダウンロード
