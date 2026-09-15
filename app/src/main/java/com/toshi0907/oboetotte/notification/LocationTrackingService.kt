@@ -129,6 +129,15 @@ class LocationTrackingService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        // updateContinuousTrackingIntervalが発行したrestart()のIntentは、配送されるまでの間に
+        // switchMode()で確認方式がGeofencing APIへ切り替わり永続化されていることがある。
+        // その場合ここでEXTRA_FORCE_RESTARTをそのまま処理すると、既に選ばれていない連続追跡方式で
+        // 位置情報の購読を開始してしまうため、永続化済みのモードを読み直して確認する。
+        if (LocationTrackingSettings.getMode(this) != LocationTrackingMode.CONTINUOUS_TRACKING) {
+            Log.w(TAG, "連続追跡: モードが切り替わっているため開始せず停止します")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         // LocationReminderManager.registerはタスクの編集(位置情報と無関係な項目の変更を含む)
         // のたびに呼ばれ、その都度start()経由でここへ到達しうる。位置情報リクエストをすでに
         // 開始済みなら購読を維持したままにし(そうしないと更新間隔のタイマーが毎回リセットされ、
