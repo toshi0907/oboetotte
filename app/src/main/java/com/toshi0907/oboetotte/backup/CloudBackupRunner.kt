@@ -55,10 +55,15 @@ object CloudBackupRunner {
         var file: DocumentFile? = null
         var exported = false
         return try {
+            // 秒までの精度だと、同一秒内に連続実行(「今すぐバックアップ」の連打等)された場合に
+            // SAFプロバイダがファイル名を"...(1).zip"のように重複回避してリネームすることがあり、
+            // その場合pruneOldBackupsの文字列比較順(space<periodのため"(1)"付きの方が古い扱いに
+            // なる)で実際には新しいはずのファイルが古いと誤判定され削除されうる。ミリ秒まで含めて
+            // 衝突の可能性を実質無くす。
             val zoned = ZonedDateTime.now()
-            val fileName = "$BACKUP_FILE_PREFIX%04d%02d%02d_%02d%02d%02d.zip".format(
+            val fileName = "$BACKUP_FILE_PREFIX%04d%02d%02d_%02d%02d%02d%03d.zip".format(
                 zoned.year, zoned.monthValue, zoned.dayOfMonth,
-                zoned.hour, zoned.minute, zoned.second
+                zoned.hour, zoned.minute, zoned.second, zoned.nano / 1_000_000
             )
             val created = folder.createFile("application/zip", fileName)
                 ?: throw IOException("バックアップファイルを作成できませんでした")
