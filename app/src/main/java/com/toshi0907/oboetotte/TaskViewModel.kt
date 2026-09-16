@@ -107,6 +107,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         MutableStateFlow(CloudBackupSettings.getRetentionCount(application))
     val cloudBackupRetentionCount: StateFlow<Int> = _cloudBackupRetentionCount
 
+    private val _cloudBackupHour = MutableStateFlow(CloudBackupSettings.getBackupHour(application))
+    val cloudBackupHour: StateFlow<Int> = _cloudBackupHour
+
+    private val _cloudBackupMinute = MutableStateFlow(CloudBackupSettings.getBackupMinute(application))
+    val cloudBackupMinute: StateFlow<Int> = _cloudBackupMinute
+
     private val _cloudBackupLastBackupAt = MutableStateFlow(CloudBackupSettings.getLastBackupAt(application))
     val cloudBackupLastBackupAt: StateFlow<Long?> = _cloudBackupLastBackupAt
 
@@ -396,7 +402,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         CloudBackupSettings.setEnabled(appContext, enabled)
         _cloudBackupEnabled.value = enabled
         if (enabled) {
-            CloudBackupScheduler.ensureScheduled(appContext)
+            // 有効化のたびに現在の保存時刻設定で初回遅延を計算し直す(ensureScheduledのKEEPだと
+            // 過去に別の時刻設定で登録済みの定期実行が残っていた場合に反映されないため)。
+            CloudBackupScheduler.reschedule(appContext)
         } else {
             CloudBackupScheduler.cancel(appContext)
         }
@@ -406,6 +414,20 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun setCloudBackupRetentionCount(count: Int) {
         CloudBackupSettings.setRetentionCount(appContext, count)
         _cloudBackupRetentionCount.value = CloudBackupSettings.getRetentionCount(appContext)
+    }
+
+    /**
+     * クラウド自動バックアップの保存時刻(時:分)を変更する。有効化中であれば、次回実行時刻を
+     * 新しい設定に基づいてすぐに再計算する([CloudBackupScheduler.reschedule])。無効化中は
+     * 設定を保存するだけで、実際のスケジュール登録は次回有効化時に行われる。
+     */
+    fun setCloudBackupTime(hour: Int, minute: Int) {
+        CloudBackupSettings.setBackupTime(appContext, hour, minute)
+        _cloudBackupHour.value = CloudBackupSettings.getBackupHour(appContext)
+        _cloudBackupMinute.value = CloudBackupSettings.getBackupMinute(appContext)
+        if (_cloudBackupEnabled.value) {
+            CloudBackupScheduler.reschedule(appContext)
+        }
     }
 
     /**
