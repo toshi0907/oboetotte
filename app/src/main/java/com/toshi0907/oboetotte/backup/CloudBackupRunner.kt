@@ -1,8 +1,10 @@
 package com.toshi0907.oboetotte.backup
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
+import java.io.File
 import java.io.IOException
 import java.time.ZonedDateTime
 import kotlinx.coroutines.CancellationException
@@ -13,13 +15,14 @@ import kotlinx.coroutines.withContext
 
 /**
  * クラウド自動バックアップの実処理。[CloudBackupWorker](定期実行)と設定画面の
- * 「今すぐバックアップ」ボタン(手動実行)の両方から共通で呼ばれる。[CloudBackupSettings]で
- * 選択されたSAFフォルダへ、[CloudBackupSettings.getRetentionCount]件-1件になるまで古い
- * バックアップファイルを先に削除したうえで、[BackupManager.export]と同じ内容のZIPを
- * 日時付きファイル名で1件作成する。
+ * 「今すぐバックアップ」ボタン(手動実行)の両方から共通で呼ばれる。[BackupManager.export]と
+ * 同じ内容のZIPをまず端末内の一時ファイルへ書き出し、それが成功した場合のみ
+ * [CloudBackupSettings.getRetentionCount]件-1件になるまで保存先フォルダの古いバックアップ
+ * ファイルを削除してから、選択されたSAFフォルダへ日時付きファイル名でコピーする。
  */
 object CloudBackupRunner {
     private const val TAG = "CloudBackup"
+    private const val STAGING_FILE_NAME = "cloud_backup_staging.zip"
 
     // ローカルの手動エクスポート(MainActivity)は"oboetotte_backup_"というプレフィックスの
     // 同形式のファイル名を使う。ユーザーが手動エクスポートの保存先としてクラウド自動バック
@@ -30,9 +33,9 @@ object CloudBackupRunner {
     // 手動実行(今すぐバックアップ)と定期実行(CloudBackupWorker)が同時に走ると、片方が
     // 作成したばかりのバックアップをもう片方のpruneOldBackupsが削除してしまい、それでも
     // 実行した側はSUCCESSを記録してしまう(実際には保持件数分のバックアップが揃っていない
-    // のに成功と報告される)おそれがある。古いバックアップの削除〜ファイル作成〜エクスポート
-    // までを1つのMutexで直列化し、常にどちらか一方だけがこのひとまとまりの処理を実行する
-    // ようにする。
+    // のに成功と報告される)おそれがある。エクスポート〜古いバックアップの削除〜ファイル
+    // 作成までを1つのMutexで直列化し、常にどちらか一方だけがこのひとまとまりの処理を
+    // 実行するようにする。
     private val mutex = Mutex()
 
     suspend fun run(context: Context): Boolean = withContext(Dispatchers.IO) {
@@ -55,12 +58,24 @@ object CloudBackupRunner {
     private suspend fun runLocked(context: Context, folder: DocumentFile): Boolean {
         var file: DocumentFile? = null
         var exported = false
+        val staging = File(context.cacheDir, STAGING_FILE_NAME)
         return try {
-            // 新規バックアップを作成する前に、保持件数-1件になるまで古いバックアップを削除して
-            // おく。削除を新規作成・エクスポートの後回しにすると、その間だけ保持件数+1件分の
-            // 保存領域が一時的に必要になり、保存先の空き容量やクォータが保持件数ちょうどしか
-            // 無い場合(＝保持件数の上限に達している場合)に新規ファイルの作成やエクスポートが
-            // 失敗してしまうため、先に削除して1件分の空きを確保してから作成する。
+            // まずZIPの実体を端末内の一時ファイルへ書き出す。保存先フォルダにはまだ一切
+            // 触れないため、ここで失敗しても既存の古いバックアップはそのまま残る。
+            BackupManager.export(context, Uri.fromFile(staging))
+
+            // ローカルでの書き出しが確実に成功した後、保持件数-1件になるまで古いバックアップ
+            // を削除して保存先フォルダに1件分の空きを確保する。この削除を新規ファイルの
+            // 作成前ではなく確認前に行うと、保持件数ちょうどの状態から次のバックアップを
+            // 取る際に一時的に保持件数+1件分の保存領域が必要になり、保存先の空き容量や
+            // クォータが保持件数ちょうどしか無い場合(＝保持件数の上限に達している場合)に
+            // 失敗してしまう。この削除をZIPの書き出し前(エクスポートの成否が分かる前)に
+            // 行うと、DBの読み込みやZIP生成自体が失敗した際に古いバックアップを削除しただけで
+            // 新しいものが用意できず、既存のバックアップを失ってしまう。ZIPの書き出しを
+            // 済ませた後に削除することで、この失敗パターンは避けられる(なお、削除後の
+            // 保存先への新規ファイル作成・コピー自体がネットワークエラー等で失敗した場合は、
+            // その回に限り保持件数より1件少ない状態になりうるが、これは保存先の容量が
+            // 保持件数ちょうどしか無い状況で新規ファイルを追加する以上、原理的に避けられない)。
             val retention = CloudBackupSettings.getRetentionCount(context)
             pruneOldBackups(folder, retention - 1)
 
@@ -77,7 +92,9 @@ object CloudBackupRunner {
             val created = folder.createFile("application/zip", fileName)
                 ?: throw IOException("バックアップファイルを作成できませんでした")
             file = created
-            BackupManager.export(context, created.uri)
+            val output = context.contentResolver.openOutputStream(created.uri)
+                ?: throw IOException("バックアップファイルへ書き込めませんでした")
+            output.use { out -> staging.inputStream().use { it.copyTo(out) } }
             exported = true
             CloudBackupSettings.recordResult(context, CloudBackupResult.SUCCESS, System.currentTimeMillis())
             true
@@ -91,6 +108,7 @@ object CloudBackupRunner {
             CloudBackupSettings.recordResult(context, CloudBackupResult.FAILURE, System.currentTimeMillis())
             false
         } finally {
+            staging.delete()
             if (!exported) {
                 // エクスポートが完了しなかった場合、作成済みの空/不完全なファイルを残すと
                 // 次回以降の保持件数の計算に混ざってしまうため削除しておく。
