@@ -80,6 +80,8 @@ object BackupManager {
                             put("url", task.url ?: JSONObject.NULL)
                             put("memo", task.memo ?: JSONObject.NULL)
                             put("seriesId", task.seriesId ?: JSONObject.NULL)
+                            put("aiPrompt", task.aiPrompt ?: JSONObject.NULL)
+                            put("aiCachedResponse", task.aiCachedResponse ?: JSONObject.NULL)
                         }
                     }
                 )
@@ -192,7 +194,9 @@ object BackupManager {
                 notifyOnDeparture = obj.optBoolean("notifyOnDeparture", false),
                 url = if (obj.isNull("url")) null else obj.getString("url"),
                 memo = if (obj.isNull("memo")) null else obj.getString("memo"),
-                seriesId = if (obj.isNull("seriesId")) null else obj.getLong("seriesId")
+                seriesId = if (obj.isNull("seriesId")) null else obj.getLong("seriesId"),
+                aiPrompt = if (obj.isNull("aiPrompt")) null else obj.getString("aiPrompt"),
+                aiCachedResponse = if (obj.isNull("aiCachedResponse")) null else obj.getString("aiCachedResponse")
             )
         }
 

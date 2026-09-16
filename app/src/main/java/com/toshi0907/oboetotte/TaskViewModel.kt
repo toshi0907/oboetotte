@@ -6,6 +6,9 @@ import android.content.SharedPreferences
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.toshi0907.oboetotte.ai.GeminiClient
+import com.toshi0907.oboetotte.ai.GeminiModel
+import com.toshi0907.oboetotte.ai.GeminiSettings
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.backup.CloudBackupResult
 import com.toshi0907.oboetotte.backup.CloudBackupRunner
@@ -62,7 +65,8 @@ data class TaskEdits(
     val notifyOnArrival: Boolean,
     val notifyOnDeparture: Boolean,
     val url: String?,
-    val memo: String?
+    val memo: String?,
+    val aiPrompt: String?
 )
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
@@ -118,6 +122,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _cloudBackupLastResult = MutableStateFlow(CloudBackupSettings.getLastBackupResult(application))
     val cloudBackupLastResult: StateFlow<CloudBackupResult?> = _cloudBackupLastResult
+
+    private val _geminiApiKey = MutableStateFlow(GeminiSettings.getApiKey(application))
+    val geminiApiKey: StateFlow<String?> = _geminiApiKey
+
+    private val _geminiModel = MutableStateFlow(GeminiSettings.getModel(application))
+    val geminiModel: StateFlow<GeminiModel> = _geminiModel
 
     // CloudBackupWorker(定期実行)がrecordResultでSharedPreferencesを更新しても、
     // アプリのプロセスが生きている間はcloudBackupLastBackupAt/cloudBackupLastResultの
@@ -207,6 +217,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = edits.title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
+            // プロンプトを変更した場合、古いプロンプトに対するAIの応答キャッシュを使い回さないよう
+            // 明示的にクリアする(スヌーズ時の再利用は同じプロンプトに対する結果のみを対象とするため)。
+            val aiCachedResponse = if (edits.aiPrompt != task.aiPrompt) null else task.aiCachedResponse
             val updated = task.copy(
                 title = trimmed,
                 listId = edits.listId,
@@ -220,7 +233,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 notifyOnArrival = edits.notifyOnArrival,
                 notifyOnDeparture = edits.notifyOnDeparture,
                 url = edits.url,
-                memo = edits.memo
+                memo = edits.memo,
+                aiPrompt = edits.aiPrompt,
+                aiCachedResponse = aiCachedResponse
             )
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
@@ -439,6 +454,29 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val success = CloudBackupRunner.run(appContext)
             onResult(success)
+        }
+    }
+
+    /** AI連携(Gemini)のAPIキーを設定する。空文字は未設定として扱う。 */
+    fun setGeminiApiKey(apiKey: String) {
+        GeminiSettings.setApiKey(appContext, apiKey)
+        _geminiApiKey.value = GeminiSettings.getApiKey(appContext)
+    }
+
+    fun setGeminiModel(model: GeminiModel) {
+        GeminiSettings.setModel(appContext, model)
+        _geminiModel.value = model
+    }
+
+    /**
+     * 設定画面の「AIテスト実行」から呼ぶ。通知の発火を待たずに、現在保存されているAPIキー・
+     * モデルで任意のプロンプトを試せる。呼び出し元のComposableがコルーチンスコープ内で呼ぶ想定。
+     */
+    suspend fun testGeminiPrompt(prompt: String): GeminiClient.Result {
+        val apiKey = GeminiSettings.getApiKey(appContext)
+            ?: return GeminiClient.Result.Failure("APIキーが設定されていません")
+        return withContext(Dispatchers.IO) {
+            GeminiClient.generateContent(apiKey, _geminiModel.value.apiName, prompt, GeminiClient.TEST_TIMEOUT_MILLIS)
         }
     }
 
