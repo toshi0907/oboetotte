@@ -5,16 +5,25 @@ import android.content.Context
 /**
  * 選択可能なGeminiのモデル。無料枠のあるFlash系のみを候補にする。[name]をそのまま
  * SharedPreferencesのキーの値として保存するため、既存の値との互換のためenum定数名を変更しないこと。
+ * Geminiのモデルは既存モデルが数ヶ月単位で廃止される入れ替わりが速いため、廃止されたモデルの
+ * 定数を削除する際は、そのモデル名を保存済みの端末で不正なAPI呼び出しにならないよう
+ * [fromName]の互換マッピングに残すこと(`GEMINI_2_0_FLASH`廃止時の対応を参照)。
  */
 enum class GeminiModel(val apiName: String, val label: String) {
-    GEMINI_2_0_FLASH("gemini-2.0-flash", "Gemini 2.0 Flash"),
     GEMINI_2_5_FLASH("gemini-2.5-flash", "Gemini 2.5 Flash"),
-    GEMINI_2_5_FLASH_LITE("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite");
+    GEMINI_2_5_FLASH_LITE("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
+    GEMINI_3_5_FLASH_LITE("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite");
 
     companion object {
-        val DEFAULT = GEMINI_2_0_FLASH
+        val DEFAULT = GEMINI_2_5_FLASH_LITE
 
-        fun fromName(value: String?): GeminiModel = entries.find { it.name == value } ?: DEFAULT
+        fun fromName(value: String?): GeminiModel {
+            // GEMINI_2_0_FLASH(gemini-2.0-flash)は2026年6月1日付でGoogle側が廃止済みのため
+            // 削除した。既に選択済みの端末が不正なモデル名でAPI呼び出しをしないよう、
+            // 保存済みの値がこの名前だった場合はDEFAULTへ読み替える。
+            if (value == "GEMINI_2_0_FLASH") return DEFAULT
+            return entries.find { it.name == value } ?: DEFAULT
+        }
     }
 }
 
