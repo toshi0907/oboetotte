@@ -1369,8 +1369,11 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.padding(top = 4.dp)
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                GeminiModel.entries.forEach { model ->
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(GeminiModel.entries) { model ->
                     FilterChip(
                         selected = geminiModel == model,
                         onClick = { onSetGeminiModel(model) },
