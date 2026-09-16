@@ -997,6 +997,7 @@ fun TaskDetailDialog(
  * リスト編集・場所編集・テスト通知・位置情報デバッグなど、以前メイン画面のチップに散らばっていた
  * 補助的な操作をここに集約している。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     lists: List<TaskList>,
