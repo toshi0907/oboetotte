@@ -34,7 +34,10 @@ object TaskCompletion {
                 id = 0,
                 isDone = false,
                 dueAt = nextDueAt(dueAt, rule, daysOfWeek),
-                seriesId = task.attachmentGroupId()
+                seriesId = task.attachmentGroupId(),
+                // AIの応答キャッシュは今回のインスタンスに対するものなので、次回分にはそのまま
+                // 引き継がない(次回分自身の通知発火時に改めて呼び出し、キャッシュし直す)。
+                aiCachedResponse = null
             )
             val newId = taskDao.insert(nextTask)
             val inserted = nextTask.copy(id = newId)

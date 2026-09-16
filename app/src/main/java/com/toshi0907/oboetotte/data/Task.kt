@@ -22,7 +22,9 @@ data class Task(
     val notifyOnDeparture: Boolean = false,
     val url: String? = null,
     val memo: String? = null,
-    val seriesId: Long? = null
+    val seriesId: Long? = null,
+    val aiPrompt: String? = null,
+    val aiCachedResponse: String? = null
 )
 
 /**
