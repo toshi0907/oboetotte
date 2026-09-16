@@ -21,10 +21,16 @@ object CloudBackupSettings {
     const val MAX_RETENTION_COUNT = 90
     const val DEFAULT_RETENTION_COUNT = 7
 
+    /** 保存時刻を明示的に設定していないユーザー向けの既定値(深夜帯を想定)。 */
+    const val DEFAULT_BACKUP_HOUR = 3
+    const val DEFAULT_BACKUP_MINUTE = 0
+
     private const val PREFS_NAME = "cloud_backup_settings"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_FOLDER_URI = "folder_uri"
     private const val KEY_RETENTION_COUNT = "retention_count"
+    private const val KEY_BACKUP_HOUR = "backup_hour"
+    private const val KEY_BACKUP_MINUTE = "backup_minute"
     private const val KEY_LAST_BACKUP_AT = "last_backup_at"
     private const val KEY_LAST_BACKUP_RESULT = "last_backup_result"
 
@@ -51,6 +57,18 @@ object CloudBackupSettings {
     fun setRetentionCount(context: Context, count: Int) {
         val clamped = count.coerceIn(MIN_RETENTION_COUNT, MAX_RETENTION_COUNT)
         prefs(context).edit().putInt(KEY_RETENTION_COUNT, clamped).apply()
+    }
+
+    fun getBackupHour(context: Context): Int = prefs(context).getInt(KEY_BACKUP_HOUR, DEFAULT_BACKUP_HOUR)
+
+    fun getBackupMinute(context: Context): Int = prefs(context).getInt(KEY_BACKUP_MINUTE, DEFAULT_BACKUP_MINUTE)
+
+    /** [hour]は0〜23、[minute]は0〜59の範囲に丸めてから保存する。 */
+    fun setBackupTime(context: Context, hour: Int, minute: Int) {
+        prefs(context).edit()
+            .putInt(KEY_BACKUP_HOUR, hour.coerceIn(0, 23))
+            .putInt(KEY_BACKUP_MINUTE, minute.coerceIn(0, 59))
+            .apply()
     }
 
     fun getLastBackupAt(context: Context): Long? {

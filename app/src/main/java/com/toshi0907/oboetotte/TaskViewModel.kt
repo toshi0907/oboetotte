@@ -107,6 +107,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         MutableStateFlow(CloudBackupSettings.getRetentionCount(application))
     val cloudBackupRetentionCount: StateFlow<Int> = _cloudBackupRetentionCount
 
+    private val _cloudBackupHour = MutableStateFlow(CloudBackupSettings.getBackupHour(application))
+    val cloudBackupHour: StateFlow<Int> = _cloudBackupHour
+
+    private val _cloudBackupMinute = MutableStateFlow(CloudBackupSettings.getBackupMinute(application))
+    val cloudBackupMinute: StateFlow<Int> = _cloudBackupMinute
+
     private val _cloudBackupLastBackupAt = MutableStateFlow(CloudBackupSettings.getLastBackupAt(application))
     val cloudBackupLastBackupAt: StateFlow<Long?> = _cloudBackupLastBackupAt
 
@@ -406,6 +412,21 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun setCloudBackupRetentionCount(count: Int) {
         CloudBackupSettings.setRetentionCount(appContext, count)
         _cloudBackupRetentionCount.value = CloudBackupSettings.getRetentionCount(appContext)
+    }
+
+    /**
+     * クラウド自動バックアップの実行時刻を変更する。保持件数と異なりWorkManager側のスケジュール
+     * (次回実行までの遅延)に直接影響するため、自動バックアップが有効な場合は
+     * [CloudBackupScheduler.reschedule]で次回実行時刻を再計算させる(無効な場合は次回有効化時に
+     * [CloudBackupScheduler.ensureScheduled]が現在の設定値を読むため、ここでは何もしなくてよい)。
+     */
+    fun setCloudBackupTime(hour: Int, minute: Int) {
+        CloudBackupSettings.setBackupTime(appContext, hour, minute)
+        _cloudBackupHour.value = CloudBackupSettings.getBackupHour(appContext)
+        _cloudBackupMinute.value = CloudBackupSettings.getBackupMinute(appContext)
+        if (_cloudBackupEnabled.value) {
+            CloudBackupScheduler.reschedule(appContext)
+        }
     }
 
     /**

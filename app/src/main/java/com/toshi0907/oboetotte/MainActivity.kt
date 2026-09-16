@@ -206,6 +206,8 @@ class MainActivity : ComponentActivity() {
                     val cloudBackupEnabled by taskViewModel.cloudBackupEnabled.collectAsState()
                     val cloudBackupFolderUri by taskViewModel.cloudBackupFolderUri.collectAsState()
                     val cloudBackupRetentionCount by taskViewModel.cloudBackupRetentionCount.collectAsState()
+                    val cloudBackupHour by taskViewModel.cloudBackupHour.collectAsState()
+                    val cloudBackupMinute by taskViewModel.cloudBackupMinute.collectAsState()
                     val cloudBackupLastBackupAt by taskViewModel.cloudBackupLastBackupAt.collectAsState()
                     val cloudBackupLastResult by taskViewModel.cloudBackupLastResult.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
@@ -365,6 +367,9 @@ class MainActivity : ComponentActivity() {
                             onSelectCloudBackupFolder = { selectCloudBackupFolderLauncher.launch(null) },
                             cloudBackupRetentionCount = cloudBackupRetentionCount,
                             onSetCloudBackupRetentionCount = taskViewModel::setCloudBackupRetentionCount,
+                            cloudBackupHour = cloudBackupHour,
+                            cloudBackupMinute = cloudBackupMinute,
+                            onSetCloudBackupTime = taskViewModel::setCloudBackupTime,
                             cloudBackupLastBackupAt = cloudBackupLastBackupAt,
                             cloudBackupLastResult = cloudBackupLastResult,
                             onRunCloudBackupNow = {
@@ -992,6 +997,7 @@ fun TaskDetailDialog(
  * リスト編集・場所編集・テスト通知・位置情報デバッグなど、以前メイン画面のチップに散らばっていた
  * 補助的な操作をここに集約している。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     lists: List<TaskList>,
@@ -1018,6 +1024,9 @@ fun SettingsScreen(
     onSelectCloudBackupFolder: () -> Unit = {},
     cloudBackupRetentionCount: Int = CloudBackupSettings.DEFAULT_RETENTION_COUNT,
     onSetCloudBackupRetentionCount: (Int) -> Unit = {},
+    cloudBackupHour: Int = CloudBackupSettings.DEFAULT_BACKUP_HOUR,
+    cloudBackupMinute: Int = CloudBackupSettings.DEFAULT_BACKUP_MINUTE,
+    onSetCloudBackupTime: (Int, Int) -> Unit = { _, _ -> },
     cloudBackupLastBackupAt: Long? = null,
     cloudBackupLastResult: CloudBackupResult? = null,
     onRunCloudBackupNow: () -> Unit = {},
@@ -1031,6 +1040,7 @@ fun SettingsScreen(
     var showManageLocations by remember { mutableStateOf(false) }
     var showLocationDebug by remember { mutableStateOf(false) }
     var showNotificationLogs by remember { mutableStateOf(false) }
+    var showCloudBackupTimePicker by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -1185,6 +1195,20 @@ fun SettingsScreen(
                     onClick = { onSetCloudBackupEnabled(!cloudBackupEnabled) },
                     label = { Text("自動バックアップ(毎日1回)") }
                 )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    Text(
+                        text = "実行時刻: %02d:%02d".format(cloudBackupHour, cloudBackupMinute),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = { showCloudBackupTimePicker = true }) {
+                        Text("変更")
+                    }
+                }
                 var retentionInput by remember(cloudBackupRetentionCount) {
                     mutableStateOf(cloudBackupRetentionCount.toString())
                 }
@@ -1328,6 +1352,32 @@ fun SettingsScreen(
         NotificationLogDialog(
             logs = notificationLogs,
             onDismiss = { showNotificationLogs = false }
+        )
+    }
+
+    if (showCloudBackupTimePicker) {
+        val timeState = rememberTimePickerState(
+            initialHour = cloudBackupHour,
+            initialMinute = cloudBackupMinute,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showCloudBackupTimePicker = false },
+            title = { Text("自動バックアップの実行時刻") },
+            text = { TimePicker(state = timeState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onSetCloudBackupTime(timeState.hour, timeState.minute)
+                    showCloudBackupTimePicker = false
+                }) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloudBackupTimePicker = false }) {
+                    Text("キャンセル")
+                }
+            }
         )
     }
 }
