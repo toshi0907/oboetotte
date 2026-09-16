@@ -206,6 +206,8 @@ class MainActivity : ComponentActivity() {
                     val cloudBackupEnabled by taskViewModel.cloudBackupEnabled.collectAsState()
                     val cloudBackupFolderUri by taskViewModel.cloudBackupFolderUri.collectAsState()
                     val cloudBackupRetentionCount by taskViewModel.cloudBackupRetentionCount.collectAsState()
+                    val cloudBackupHour by taskViewModel.cloudBackupHour.collectAsState()
+                    val cloudBackupMinute by taskViewModel.cloudBackupMinute.collectAsState()
                     val cloudBackupLastBackupAt by taskViewModel.cloudBackupLastBackupAt.collectAsState()
                     val cloudBackupLastResult by taskViewModel.cloudBackupLastResult.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
@@ -365,6 +367,9 @@ class MainActivity : ComponentActivity() {
                             onSelectCloudBackupFolder = { selectCloudBackupFolderLauncher.launch(null) },
                             cloudBackupRetentionCount = cloudBackupRetentionCount,
                             onSetCloudBackupRetentionCount = taskViewModel::setCloudBackupRetentionCount,
+                            cloudBackupHour = cloudBackupHour,
+                            cloudBackupMinute = cloudBackupMinute,
+                            onSetCloudBackupTime = taskViewModel::setCloudBackupTime,
                             cloudBackupLastBackupAt = cloudBackupLastBackupAt,
                             cloudBackupLastResult = cloudBackupLastResult,
                             onRunCloudBackupNow = {
@@ -1018,6 +1023,9 @@ fun SettingsScreen(
     onSelectCloudBackupFolder: () -> Unit = {},
     cloudBackupRetentionCount: Int = CloudBackupSettings.DEFAULT_RETENTION_COUNT,
     onSetCloudBackupRetentionCount: (Int) -> Unit = {},
+    cloudBackupHour: Int = CloudBackupSettings.DEFAULT_BACKUP_HOUR,
+    cloudBackupMinute: Int = CloudBackupSettings.DEFAULT_BACKUP_MINUTE,
+    onSetCloudBackupTime: (Int, Int) -> Unit = { _, _ -> },
     cloudBackupLastBackupAt: Long? = null,
     cloudBackupLastResult: CloudBackupResult? = null,
     onRunCloudBackupNow: () -> Unit = {},
@@ -1031,6 +1039,7 @@ fun SettingsScreen(
     var showManageLocations by remember { mutableStateOf(false) }
     var showLocationDebug by remember { mutableStateOf(false) }
     var showNotificationLogs by remember { mutableStateOf(false) }
+    var showBackupTimePicker by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -1185,6 +1194,25 @@ fun SettingsScreen(
                     onClick = { onSetCloudBackupEnabled(!cloudBackupEnabled) },
                     label = { Text("自動バックアップ(毎日1回)") }
                 )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    Text(
+                        text = "保存時刻: %02d:%02d".format(cloudBackupHour, cloudBackupMinute),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    TextButton(onClick = { showBackupTimePicker = true }) {
+                        Text("変更")
+                    }
+                }
+                Text(
+                    text = "実際の実行はWorkManagerの定期実行のため、指定した時刻ちょうどとは限らず" +
+                        "多少前後することがあります。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 var retentionInput by remember(cloudBackupRetentionCount) {
                     mutableStateOf(cloudBackupRetentionCount.toString())
                 }
@@ -1328,6 +1356,32 @@ fun SettingsScreen(
         NotificationLogDialog(
             logs = notificationLogs,
             onDismiss = { showNotificationLogs = false }
+        )
+    }
+
+    if (showBackupTimePicker) {
+        val timeState = rememberTimePickerState(
+            initialHour = cloudBackupHour,
+            initialMinute = cloudBackupMinute,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showBackupTimePicker = false },
+            title = { Text("自動バックアップの保存時刻") },
+            text = { TimePicker(state = timeState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onSetCloudBackupTime(timeState.hour, timeState.minute)
+                    showBackupTimePicker = false
+                }) {
+                    Text("設定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBackupTimePicker = false }) {
+                    Text("キャンセル")
+                }
+            }
         )
     }
 }
