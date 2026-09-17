@@ -68,6 +68,13 @@ object GeminiClient {
     }
 
     /**
+     * `google_search`と`google_maps`の同時使用(組み合わせ利用)はGemini 3.5 Flash以降のみ対応で、
+     * Gemini 2.5系モデルではAPIがエラーを返す(各ツール単体のグラウンディング自体は2.5系でも対応)。
+     * 新しいモデルが追加・廃止されるたびに対応状況を見直すこと([GeminiModel]と同様)。
+     */
+    private val MODELS_WITHOUT_SEARCH_AND_MAPS_COMBO = setOf("gemini-2.5-flash", "gemini-2.5-flash-lite")
+
+    /**
      * [useWebSearch]/[useMaps]/[useUrlContext]は、それぞれGemini APIの組み込みツール
      * `google_search`(Web検索によるグラウンディング)・`google_maps`(地図データによるグラウンディング)・
      * `url_context`(プロンプト中のURLの内容を取得してコンテキストに使う)に対応する。
@@ -85,6 +92,12 @@ object GeminiClient {
         mapsLatitude: Double? = null,
         mapsLongitude: Double? = null
     ): Result {
+        if (useWebSearch && useMaps && model in MODELS_WITHOUT_SEARCH_AND_MAPS_COMBO) {
+            return Result.Failure(
+                "選択中のモデルではWeb検索とマップを同時に使用できません。設定画面でモデルを変更するか、" +
+                    "タスクのツール選択を見直してください。"
+            )
+        }
         return try {
             val url = URL(ENDPOINT_TEMPLATE.format(model, apiKey))
             val connection = url.openConnection() as HttpURLConnection
