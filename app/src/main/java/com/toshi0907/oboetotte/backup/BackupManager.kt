@@ -82,6 +82,7 @@ object BackupManager {
                             put("seriesId", task.seriesId ?: JSONObject.NULL)
                             put("aiPrompt", task.aiPrompt ?: JSONObject.NULL)
                             put("aiCachedResponse", task.aiCachedResponse ?: JSONObject.NULL)
+                            put("autoSnoozeMinutes", task.autoSnoozeMinutes ?: JSONObject.NULL)
                         }
                     }
                 )
@@ -196,7 +197,8 @@ object BackupManager {
                 memo = if (obj.isNull("memo")) null else obj.getString("memo"),
                 seriesId = if (obj.isNull("seriesId")) null else obj.getLong("seriesId"),
                 aiPrompt = if (obj.isNull("aiPrompt")) null else obj.getString("aiPrompt"),
-                aiCachedResponse = if (obj.isNull("aiCachedResponse")) null else obj.getString("aiCachedResponse")
+                aiCachedResponse = if (obj.isNull("aiCachedResponse")) null else obj.getString("aiCachedResponse"),
+                autoSnoozeMinutes = if (obj.isNull("autoSnoozeMinutes")) null else obj.getLong("autoSnoozeMinutes")
             )
         }
 

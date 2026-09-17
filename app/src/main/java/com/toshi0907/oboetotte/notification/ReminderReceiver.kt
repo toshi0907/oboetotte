@@ -36,6 +36,7 @@ class ReminderReceiver : BroadcastReceiver() {
         val taskId = intent.getLongExtra(ReminderScheduler.EXTRA_TASK_ID, -1L)
         if (taskId == -1L) return
         val isSnooze = intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_SNOOZE, false)
+        val isAutoSnooze = intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_AUTO_SNOOZE, false)
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
@@ -43,7 +44,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 val db = AppDatabase.getInstance(context)
                 val task = db.taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
-                    val aiOutcome = resolveAiOutcome(context, db, task, isSnooze)
+                    val aiOutcome = resolveAiOutcome(context, db, task, isSnooze || isAutoSnooze)
                     val posted = showNotification(context, taskId, task.title, showTaskActions = true, url = task.url, aiOutcome = aiOutcome)
                     if (posted) {
                         val aiSuffix = when (aiOutcome) {
@@ -51,7 +52,11 @@ class ReminderReceiver : BroadcastReceiver() {
                             is AiOutcome.Success -> "(AI要約: 成功)"
                             AiOutcome.Failure -> "(AI要約: 失敗)"
                         }
-                        val condition = (if (isSnooze) "スヌーズ経由の再通知" else "期限到達") + aiSuffix
+                        val condition = when {
+                            isAutoSnooze -> "オートスヌーズ経由の再通知"
+                            isSnooze -> "スヌーズ経由の再通知"
+                            else -> "期限到達"
+                        } + aiSuffix
                         db.notificationLogDao().insertAndTrim(
                             NotificationLog(
                                 triggeredAt = System.currentTimeMillis(),
@@ -59,6 +64,15 @@ class ReminderReceiver : BroadcastReceiver() {
                                 triggerCondition = condition
                             )
                         )
+                        // オートスヌーズが設定されたタスクは、未完了のまま指定間隔が経過するたびに
+                        // 再通知を繰り返す(上限なし)。手動スヌーズ・アプリ側の編集等でこのアラームの
+                        // 枠(taskIdをrequestCodeとするPendingIntent)が上書きされれば、その時点を
+                        // 基準に次回分が計算し直される。タスク完了時はReminderScheduler.cancelで
+                        // このアラームごと止まる。
+                        val autoSnoozeMinutes = task.autoSnoozeMinutes
+                        if (autoSnoozeMinutes != null && autoSnoozeMinutes > 0) {
+                            ReminderScheduler.scheduleAutoSnooze(context, taskId, autoSnoozeMinutes)
+                        }
                     }
                 }
             } finally {
@@ -75,17 +89,22 @@ class ReminderReceiver : BroadcastReceiver() {
     /**
      * [task.aiPrompt]が設定され、かつAPIキーが設定されている場合のみGeminiへ問い合わせる。
      * 新規にAPIを呼び出すのは通常の期限到達時のみで、結果を[Task.aiCachedResponse]へキャッシュする。
-     * スヌーズ経由の再通知([isSnooze])は常にこのキャッシュを再利用し(初回呼び出しが失敗して
-     * キャッシュが無い場合を含め)、APIを再度呼び出さない(通知のたびにAPIを呼び直さないため)。
-     * タイムアウト・エラー時は[AiOutcome.Failure]を返し、呼び出し元は通常の通知にフォールバックする
-     * ([GeminiClient.NOTIFICATION_TIMEOUT_MILLIS]はBroadcastReceiverのgoAsyncの制限時間内に
-     * 収まるよう短めに設定している)。
+     * 手動スヌーズ・オートスヌーズ経由の再通知([useCachedResponseOnly])は常にこのキャッシュを
+     * 再利用し(初回呼び出しが失敗してキャッシュが無い場合を含め)、APIを再度呼び出さない
+     * (通知のたびにAPIを呼び直さないため)。タイムアウト・エラー時は[AiOutcome.Failure]を返し、
+     * 呼び出し元は通常の通知にフォールバックする([GeminiClient.NOTIFICATION_TIMEOUT_MILLIS]は
+     * BroadcastReceiverのgoAsyncの制限時間内に収まるよう短めに設定している)。
      */
-    private suspend fun resolveAiOutcome(context: Context, db: AppDatabase, task: Task, isSnooze: Boolean): AiOutcome? {
+    private suspend fun resolveAiOutcome(
+        context: Context,
+        db: AppDatabase,
+        task: Task,
+        useCachedResponseOnly: Boolean
+    ): AiOutcome? {
         val prompt = task.aiPrompt?.takeIf { it.isNotBlank() } ?: return null
         val apiKey = GeminiSettings.getApiKey(context) ?: return null
 
-        if (isSnooze) {
+        if (useCachedResponseOnly) {
             return task.aiCachedResponse?.takeIf { it.isNotBlank() }?.let { AiOutcome.Success(it) }
         }
 

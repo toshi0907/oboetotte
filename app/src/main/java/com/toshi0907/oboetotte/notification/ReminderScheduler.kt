@@ -12,6 +12,7 @@ object ReminderScheduler {
     const val EXTRA_TASK_ID = "task_id"
     const val EXTRA_IS_TEST = "is_test"
     const val EXTRA_IS_SNOOZE = "is_snooze"
+    const val EXTRA_IS_AUTO_SNOOZE = "is_auto_snooze"
     private const val TEST_REQUEST_CODE = -1
     const val TEST_DELAY_SECONDS = 5L
 
@@ -78,6 +79,27 @@ object ReminderScheduler {
         return true
     }
 
+    /**
+     * オートスヌーズ用。[com.toshi0907.oboetotte.data.Task.autoSnoozeMinutes]が設定された
+     * タスクの通知([ReminderReceiver])が発火した直後に、未完了のままであれば
+     * [minutes]分後に自動で再通知するためのアラームを登録する。アラーム本体・手動スヌーズ
+     * ([scheduleSnooze])と同じ[pendingIntentFor]のPendingIntent(taskIdをrequestCodeとする
+     * 枠)を再利用するため、dueAtの変更・タスク完了による[schedule]/[cancel]や、手動スヌーズが
+     * 呼ばれれば通常どおり上書き・キャンセルされる。これにより、手動でスヌーズを選んだ場合は
+     * その時刻を基準に次回のオートスヌーズが計算し直される(手動スヌーズが優先される)。
+     */
+    fun scheduleAutoSnooze(context: Context, taskId: Long, minutes: Long): Boolean {
+        if (!canScheduleExactAlarms(context)) return false
+
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            System.currentTimeMillis() + minutes * 60_000,
+            pendingIntentFor(context, taskId, isAutoSnooze = true)
+        )
+        return true
+    }
+
     /** [TEST_DELAY_SECONDS]秒後にテスト通知を発火させる。本番と同じAlarmManager経由の経路を検証する。 */
     fun scheduleTestNotification(context: Context): Boolean {
         if (!canScheduleExactAlarms(context)) return false
@@ -106,10 +128,16 @@ object ReminderScheduler {
      * [FLAG_UPDATE_CURRENT]により、既存の[PendingIntent](同じtaskId=同じrequestCode)の
      * extrasもこの値で上書きされる。
      */
-    private fun pendingIntentFor(context: Context, taskId: Long, isSnooze: Boolean = false): PendingIntent {
+    private fun pendingIntentFor(
+        context: Context,
+        taskId: Long,
+        isSnooze: Boolean = false,
+        isAutoSnooze: Boolean = false
+    ): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra(EXTRA_TASK_ID, taskId)
             putExtra(EXTRA_IS_SNOOZE, isSnooze)
+            putExtra(EXTRA_IS_AUTO_SNOOZE, isAutoSnooze)
         }
         return PendingIntent.getBroadcast(
             context,

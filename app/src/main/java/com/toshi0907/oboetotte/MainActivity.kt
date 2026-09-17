@@ -486,6 +486,12 @@ private fun repeatRuleLabel(task: Task): String? {
     }
 }
 
+private fun autoSnoozeLabel(task: Task): String? {
+    val minutes = task.autoSnoozeMinutes ?: return null
+    val label = ReminderScheduler.SNOOZE_OPTIONS.find { it.minutes == minutes }?.label ?: "${minutes}分後"
+    return "オートスヌーズ: $label"
+}
+
 private val URL_SCHEME_PREFIX = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
 
 /**
@@ -920,6 +926,7 @@ fun TaskDetailDialog(
                 }
                 Text(text = current.dueAt?.let { formatDueAt(it) } ?: "期限なし")
                 repeatRuleLabel(current)?.let { Text(text = "繰り返し: $it") }
+                autoSnoozeLabel(current)?.let { Text(text = it) }
                 locationLabel(current)?.let { Text(text = it) }
                 if (!current.memo.isNullOrBlank()) {
                     Text(text = "メモ", style = MaterialTheme.typography.titleSmall)
@@ -2166,6 +2173,7 @@ fun EditTaskDialog(
     var selectedDays by remember(task.id) {
         mutableStateOf(RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek))
     }
+    var autoSnoozeMinutes by remember(task.id) { mutableStateOf(task.autoSnoozeMinutes) }
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var subtaskInput by remember(task.id) { mutableStateOf("") }
@@ -2303,6 +2311,32 @@ fun EditTaskDialog(
                             text = "曜日を1つ以上選択してください",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+
+                Text(text = "オートスヌーズ", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "期限到達後、未完了のまま指定間隔が経過すると自動で再通知します",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = autoSnoozeMinutes == null,
+                            onClick = { autoSnoozeMinutes = null },
+                            label = { Text("なし") }
+                        )
+                    }
+                    items(ReminderScheduler.SNOOZE_OPTIONS) { option ->
+                        FilterChip(
+                            selected = autoSnoozeMinutes == option.minutes,
+                            onClick = { autoSnoozeMinutes = option.minutes },
+                            label = { Text(option.label) }
                         )
                     }
                 }
@@ -2565,7 +2599,8 @@ fun EditTaskDialog(
                             notifyOnDeparture = location != null && notifyOnDeparture,
                             url = normalizeUrl(url),
                             memo = memo.trim().ifBlank { null },
-                            aiPrompt = aiPrompt.trim().ifBlank { null }
+                            aiPrompt = aiPrompt.trim().ifBlank { null },
+                            autoSnoozeMinutes = autoSnoozeMinutes
                         )
                     )
                 }

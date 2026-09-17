@@ -66,7 +66,8 @@ data class TaskEdits(
     val notifyOnDeparture: Boolean,
     val url: String?,
     val memo: String?,
-    val aiPrompt: String?
+    val aiPrompt: String?,
+    val autoSnoozeMinutes: Long?
 )
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
@@ -235,7 +236,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 url = edits.url,
                 memo = edits.memo,
                 aiPrompt = edits.aiPrompt,
-                aiCachedResponse = aiCachedResponse
+                aiCachedResponse = aiCachedResponse,
+                autoSnoozeMinutes = edits.autoSnoozeMinutes
             )
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
