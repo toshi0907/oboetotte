@@ -84,6 +84,10 @@ object BackupManager {
                             put("aiPrompt", task.aiPrompt ?: JSONObject.NULL)
                             put("aiCachedResponse", task.aiCachedResponse ?: JSONObject.NULL)
                             put("autoSnoozeMinutes", task.autoSnoozeMinutes ?: JSONObject.NULL)
+                            put("aiUseWebSearch", task.aiUseWebSearch)
+                            put("aiUseMaps", task.aiUseMaps)
+                            put("aiUseUrlContext", task.aiUseUrlContext)
+                            put("aiCachedSources", task.aiCachedSources ?: JSONObject.NULL)
                         }
                     }
                 )
@@ -202,7 +206,11 @@ object BackupManager {
                 // UIが選択肢として提供する間隔(SNOOZE_OPTIONS)以外の値がバックアップファイルに
                 // 含まれていた場合、想定外の間隔で再通知が繰り返されてしまうため無視してnullにする。
                 autoSnoozeMinutes = (if (obj.isNull("autoSnoozeMinutes")) null else obj.getLong("autoSnoozeMinutes"))
-                    ?.takeIf { minutes -> ReminderScheduler.SNOOZE_OPTIONS.any { it.minutes == minutes } }
+                    ?.takeIf { minutes -> ReminderScheduler.SNOOZE_OPTIONS.any { it.minutes == minutes } },
+                aiUseWebSearch = obj.optBoolean("aiUseWebSearch", false),
+                aiUseMaps = obj.optBoolean("aiUseMaps", false),
+                aiUseUrlContext = obj.optBoolean("aiUseUrlContext", false),
+                aiCachedSources = if (obj.isNull("aiCachedSources")) null else obj.getString("aiCachedSources")
             )
         }
 

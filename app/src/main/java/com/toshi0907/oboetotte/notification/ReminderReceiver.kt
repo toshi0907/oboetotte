@@ -88,7 +88,8 @@ class ReminderReceiver : BroadcastReceiver() {
 
     /**
      * [task.aiPrompt]が設定され、かつAPIキーが設定されている場合のみGeminiへ問い合わせる。
-     * 新規にAPIを呼び出すのは通常の期限到達時のみで、結果を[Task.aiCachedResponse]へキャッシュする。
+     * 新規にAPIを呼び出すのは通常の期限到達時のみで、結果(応答本文+[Task.aiUseWebSearch]等の
+     * ツールを使った場合の出典)を[Task.aiCachedResponse]/[Task.aiCachedSources]へキャッシュする。
      * 手動スヌーズ・オートスヌーズ経由の再通知([useCachedResponseOnly])は常にこのキャッシュを
      * 再利用し(初回呼び出しが失敗してキャッシュが無い場合を含め)、APIを再度呼び出さない
      * (通知のたびにAPIを呼び直さないため)。タイムアウト・エラー時は[AiOutcome.Failure]を返し、
@@ -110,13 +111,23 @@ class ReminderReceiver : BroadcastReceiver() {
         val apiKey = GeminiSettings.getApiKey(context) ?: return null
         val model = GeminiSettings.getModel(context)
         return when (
-            val result = GeminiClient.generateContent(apiKey, model.apiName, prompt, GeminiClient.NOTIFICATION_TIMEOUT_MILLIS)
+            val result = GeminiClient.generateContent(
+                apiKey,
+                model.apiName,
+                prompt,
+                GeminiClient.NOTIFICATION_TIMEOUT_MILLIS,
+                useWebSearch = task.aiUseWebSearch,
+                useMaps = task.aiUseMaps,
+                useUrlContext = task.aiUseUrlContext,
+                mapsLatitude = task.latitude,
+                mapsLongitude = task.longitude
+            )
         ) {
             is GeminiClient.Result.Success -> {
                 // キャッシュの保存に失敗しても、今回取得できたAI要約自体は破棄せず通知に使う
                 // (キャッシュ書き込みの失敗によって通知そのものが表示されなくなることを避ける)。
                 try {
-                    db.taskDao().updateAiCachedResponse(task.id, result.text)
+                    db.taskDao().updateAiCachedResponse(task.id, result.text, GeminiClient.encodeSources(result.sources))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
