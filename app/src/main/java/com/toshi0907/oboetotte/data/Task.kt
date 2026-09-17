@@ -29,7 +29,7 @@ data class Task(
     val aiUseWebSearch: Boolean = false,
     val aiUseMaps: Boolean = false,
     val aiUseUrlContext: Boolean = false,
-    // GeminiClient.Sourceのtitle/uriを持つJSON配列文字列(例: `[{"title":"...","uri":"..."}]`)。
+    // GeminiClient.Sourceのtitle/uri/originを持つJSON配列文字列(例: `[{"title":"...","uri":"...","origin":"WEB_SEARCH"}]`)。
     // グラウンディングを使わなかった/出典が無かった場合はnull。
     val aiCachedSources: String? = null
 )

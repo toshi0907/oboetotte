@@ -24,8 +24,11 @@ object GeminiClient {
     /** 設定画面の「AIテスト実行」から呼ぶ際のタイムアウト(通知経由より余裕を持たせる)。 */
     const val TEST_TIMEOUT_MILLIS = 15_000
 
+    /** 出典の取得元ツール。Googleの利用規約上、[MAPS]は表示時に「Google Maps」への帰属表記が必須。 */
+    enum class SourceOrigin { WEB_SEARCH, MAPS, URL_CONTEXT }
+
     /** グラウンディングツール使用時に応答へ付く出典。[title]が取得できない場合は[uri]をそのまま使う。 */
-    data class Source(val title: String, val uri: String)
+    data class Source(val title: String, val uri: String, val origin: SourceOrigin)
 
     /** [Task.aiCachedSources]へ保存するJSON配列文字列へ変換する。出典が無ければnull。 */
     fun encodeSources(sources: List<Source>): String? {
@@ -36,13 +39,14 @@ object GeminiClient {
                 JSONObject().apply {
                     put("title", source.title)
                     put("uri", source.uri)
+                    put("origin", source.origin.name)
                 }
             )
         }
         return array.toString()
     }
 
-    /** [encodeSources]の逆変換。旧形式のデータ(キー自体が無い)・壊れたJSONは空リスト扱いにする。 */
+    /** [encodeSources]の逆変換。壊れたJSONや不明な`origin`は無視・[SourceOrigin.WEB_SEARCH]扱いにする。 */
     fun decodeSources(json: String?): List<Source> {
         if (json.isNullOrBlank()) return emptyList()
         return try {
@@ -50,7 +54,8 @@ object GeminiClient {
             (0 until array.length()).mapNotNull { i ->
                 val obj = array.optJSONObject(i) ?: return@mapNotNull null
                 val uri = obj.optString("uri").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                Source(title = obj.optString("title").takeIf { it.isNotBlank() } ?: uri, uri = uri)
+                val origin = SourceOrigin.entries.find { it.name == obj.optString("origin") } ?: SourceOrigin.WEB_SEARCH
+                Source(title = obj.optString("title").takeIf { it.isNotBlank() } ?: uri, uri = uri, origin = origin)
             }
         } catch (e: Exception) {
             emptyList()
@@ -166,15 +171,19 @@ object GeminiClient {
                     ?: maps?.optString("uri")?.takeIf { it.isNotBlank() }
                     ?: continue
                 val title = (web?.optString("title") ?: maps?.optString("title"))?.takeIf { it.isNotBlank() }
-                sources.add(Source(title = title ?: uri, uri = uri))
+                val origin = if (maps != null) SourceOrigin.MAPS else SourceOrigin.WEB_SEARCH
+                sources.add(Source(title = title ?: uri, uri = uri, origin = origin))
             }
         }
 
         candidate.optJSONObject("urlContextMetadata")?.optJSONArray("urlMetadata")?.let { entries ->
             for (i in 0 until entries.length()) {
                 val entry = entries.optJSONObject(i) ?: continue
+                // urlRetrievalStatusが取得失敗(ERROR/UNSAFE等)でもretrievedUrlは返るため、
+                // 実際にコンテキストとして使われたSUCCESSの場合のみ出典として扱う。
+                if (entry.optString("urlRetrievalStatus") != "URL_RETRIEVAL_STATUS_SUCCESS") continue
                 val uri = entry.optString("retrievedUrl")?.takeIf { it.isNotBlank() } ?: continue
-                sources.add(Source(title = uri, uri = uri))
+                sources.add(Source(title = uri, uri = uri, origin = SourceOrigin.URL_CONTEXT))
             }
         }
 

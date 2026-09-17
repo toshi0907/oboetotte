@@ -40,6 +40,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -60,6 +61,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
@@ -78,6 +80,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -503,19 +506,45 @@ private fun AiToolCheckboxes(
     onUseUrlContextChange: (Boolean) -> Unit
 ) {
     Text(text = "使用するツール", style = MaterialTheme.typography.labelMedium)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = useWebSearch, onCheckedChange = onUseWebSearchChange)
+    Row(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .toggleable(value = useWebSearch, onValueChange = onUseWebSearchChange, role = Role.Checkbox),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(checked = useWebSearch, onCheckedChange = null)
         Text("Web検索(最新のWeb情報を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = useMaps, onCheckedChange = onUseMapsChange)
+    Row(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .toggleable(value = useMaps, onValueChange = onUseMapsChange, role = Role.Checkbox),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(checked = useMaps, onCheckedChange = null)
         Text("マップ(地図データ・周辺施設を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = useUrlContext, onCheckedChange = onUseUrlContextChange)
+    Row(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .toggleable(value = useUrlContext, onValueChange = onUseUrlContextChange, role = Role.Checkbox),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(checked = useUrlContext, onCheckedChange = null)
         Text("URLコンテキスト(プロンプト中のURLの内容を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
     }
 }
+
+/**
+ * 出典表示用のラベル。[GeminiClient.SourceOrigin.MAPS]はGoogleの利用規約上「Google Maps」への
+ * 帰属表記が必須のため、表記(大文字小文字・改行・翻訳)を変えずにそのまま付記する。
+ */
+private fun sourceLabel(source: GeminiClient.Source): String =
+    if (source.origin == GeminiClient.SourceOrigin.MAPS) {
+        "出典(Google Maps): ${source.title}"
+    } else {
+        "出典: ${source.title}"
+    }
 
 /** [Task.aiUseWebSearch]等から選択済みツールを一覧表示用の文字列にする。未選択ならnull。 */
 private fun aiToolsLabel(task: Task): String? {
@@ -988,7 +1017,7 @@ fun TaskDetailDialog(
                         }
                         sources.forEach { source ->
                             Text(
-                                text = "出典: ${source.title}",
+                                text = sourceLabel(source),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.clickable {
@@ -1415,8 +1444,9 @@ fun SettingsScreen(
             )
             Text(
                 text = "タスクごとに「Web検索」「マップ」「URLコンテキスト」の組み込みツールを" +
-                    "使わせることもできます。Web検索・マップは通常のトークン課金とは別に" +
-                    "無料枠(月5,000回、Web検索とマップで共有)を超えると課金が発生する点にご注意ください。",
+                    "使わせることもできます。Web検索・マップは通常のトークン課金とは別に無料枠が" +
+                    "設定されており、モデル・料金プランによって条件が異なります。超過分は課金が" +
+                    "発生するため、最新の条件はGemini APIの料金ページでご確認ください。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1827,7 +1857,7 @@ fun GeminiTestDialog(
                         )
                         current.sources.forEach { source ->
                             Text(
-                                text = "出典: ${source.title}",
+                                text = sourceLabel(source),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.clickable {
