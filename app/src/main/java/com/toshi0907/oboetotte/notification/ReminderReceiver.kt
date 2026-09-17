@@ -102,12 +102,12 @@ class ReminderReceiver : BroadcastReceiver() {
         useCachedResponseOnly: Boolean
     ): AiOutcome? {
         val prompt = task.aiPrompt?.takeIf { it.isNotBlank() } ?: return null
-        val apiKey = GeminiSettings.getApiKey(context) ?: return null
 
         if (useCachedResponseOnly) {
             return task.aiCachedResponse?.takeIf { it.isNotBlank() }?.let { AiOutcome.Success(it) }
         }
 
+        val apiKey = GeminiSettings.getApiKey(context) ?: return null
         val model = GeminiSettings.getModel(context)
         return when (
             val result = GeminiClient.generateContent(apiKey, model.apiName, prompt, GeminiClient.NOTIFICATION_TIMEOUT_MILLIS)
