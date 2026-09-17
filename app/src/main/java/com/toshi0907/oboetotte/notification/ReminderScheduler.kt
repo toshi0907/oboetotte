@@ -41,10 +41,34 @@ object ReminderScheduler {
         return alarmManager.canScheduleExactAlarms()
     }
 
+    /**
+     * [task]の状態に応じてアラームを立て直す/キャンセルする。`updateTask`・`toggleDone`・
+     * `addTask`・`addSubtask`・[com.toshi0907.oboetotte.notification.BootReceiver]など、
+     * タスクの状態が変わりうる箇所から都度呼ばれ、常にDBの状態とアラームの登録状態を同期させる。
+     *
+     * `dueAt`が過去(期限到達後)の場合、通常は通知済みとみなしキャンセルするだけでよいが、
+     * [Task.autoSnoozeMinutes]が設定されたタスクは「未完了のまま指定間隔で再通知を繰り返す」
+     * ループの途中である可能性がある(`dueAt`自体はオートスヌーズでは書き換えないため、
+     * 期限到達後は常にこの条件に該当する)。ここで無条件にキャンセルしてしまうと、端末再起動時の
+     * [BootReceiver]の再スケジュールや、期限日時を変えないまま他の項目だけを編集した場合の
+     * `updateTask`経由の呼び出しのたびに、進行中のオートスヌーズが理由なく止まってしまう
+     * (アラーム本体・手動スヌーズ・オートスヌーズはいずれも同じ[pendingIntentFor]のPendingIntent
+     * を共有しているため)。そのため、期限到達後かつオートスヌーズが設定済みの未完了タスクは
+     * キャンセルせず、「今から指定間隔後」を基準にオートスヌーズを立て直す。
+     */
     fun schedule(context: Context, task: Task) {
         val dueAt = task.dueAt
-        if (dueAt == null || task.isDone || dueAt <= System.currentTimeMillis()) {
+        if (dueAt == null || task.isDone) {
             cancel(context, task.id)
+            return
+        }
+        if (dueAt <= System.currentTimeMillis()) {
+            val autoSnoozeMinutes = task.autoSnoozeMinutes
+            if (autoSnoozeMinutes != null && autoSnoozeMinutes > 0) {
+                scheduleAutoSnooze(context, task.id, autoSnoozeMinutes)
+            } else {
+                cancel(context, task.id)
+            }
             return
         }
         if (!canScheduleExactAlarms(context)) return
