@@ -25,7 +25,13 @@ data class Task(
     val seriesId: Long? = null,
     val aiPrompt: String? = null,
     val aiCachedResponse: String? = null,
-    val autoSnoozeMinutes: Long? = null
+    val autoSnoozeMinutes: Long? = null,
+    val aiUseWebSearch: Boolean = false,
+    val aiUseMaps: Boolean = false,
+    val aiUseUrlContext: Boolean = false,
+    // GeminiClient.Sourceのtitle/uriを持つJSON配列文字列(例: `[{"title":"...","uri":"..."}]`)。
+    // グラウンディングを使わなかった/出典が無かった場合はnull。
+    val aiCachedSources: String? = null
 )
 
 /**

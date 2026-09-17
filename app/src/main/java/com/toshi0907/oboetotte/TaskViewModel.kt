@@ -67,7 +67,10 @@ data class TaskEdits(
     val url: String?,
     val memo: String?,
     val aiPrompt: String?,
-    val autoSnoozeMinutes: Long?
+    val autoSnoozeMinutes: Long?,
+    val aiUseWebSearch: Boolean,
+    val aiUseMaps: Boolean,
+    val aiUseUrlContext: Boolean
 )
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
@@ -218,9 +221,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = edits.title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            // プロンプトを変更した場合、古いプロンプトに対するAIの応答キャッシュを使い回さないよう
-            // 明示的にクリアする(スヌーズ時の再利用は同じプロンプトに対する結果のみを対象とするため)。
-            val aiCachedResponse = if (edits.aiPrompt != task.aiPrompt) null else task.aiCachedResponse
+            // プロンプトまたは使用ツールを変更した場合、古い条件に対するAIの応答キャッシュを
+            // 使い回さないよう明示的にクリアする(スヌーズ時の再利用は同じ条件に対する結果のみを
+            // 対象とするため)。
+            val aiConditionChanged = edits.aiPrompt != task.aiPrompt ||
+                edits.aiUseWebSearch != task.aiUseWebSearch ||
+                edits.aiUseMaps != task.aiUseMaps ||
+                edits.aiUseUrlContext != task.aiUseUrlContext
+            val aiCachedResponse = if (aiConditionChanged) null else task.aiCachedResponse
+            val aiCachedSources = if (aiConditionChanged) null else task.aiCachedSources
             val updated = task.copy(
                 title = trimmed,
                 listId = edits.listId,
@@ -237,7 +246,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 memo = edits.memo,
                 aiPrompt = edits.aiPrompt,
                 aiCachedResponse = aiCachedResponse,
-                autoSnoozeMinutes = edits.autoSnoozeMinutes
+                autoSnoozeMinutes = edits.autoSnoozeMinutes,
+                aiUseWebSearch = edits.aiUseWebSearch,
+                aiUseMaps = edits.aiUseMaps,
+                aiUseUrlContext = edits.aiUseUrlContext,
+                aiCachedSources = aiCachedSources
             )
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
@@ -472,13 +485,27 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 設定画面の「AIテスト実行」から呼ぶ。通知の発火を待たずに、現在保存されているAPIキー・
-     * モデルで任意のプロンプトを試せる。呼び出し元のComposableがコルーチンスコープ内で呼ぶ想定。
+     * モデルで任意のプロンプトと組み込みツールの組み合わせを試せる。呼び出し元のComposableが
+     * コルーチンスコープ内で呼ぶ想定。
      */
-    suspend fun testGeminiPrompt(prompt: String): GeminiClient.Result {
+    suspend fun testGeminiPrompt(
+        prompt: String,
+        useWebSearch: Boolean,
+        useMaps: Boolean,
+        useUrlContext: Boolean
+    ): GeminiClient.Result {
         val apiKey = GeminiSettings.getApiKey(appContext)
             ?: return GeminiClient.Result.Failure("APIキーが設定されていません")
         return withContext(Dispatchers.IO) {
-            GeminiClient.generateContent(apiKey, _geminiModel.value.apiName, prompt, GeminiClient.TEST_TIMEOUT_MILLIS)
+            GeminiClient.generateContent(
+                apiKey,
+                _geminiModel.value.apiName,
+                prompt,
+                GeminiClient.TEST_TIMEOUT_MILLIS,
+                useWebSearch = useWebSearch,
+                useMaps = useMaps,
+                useUrlContext = useUrlContext
+            )
         }
     }
 

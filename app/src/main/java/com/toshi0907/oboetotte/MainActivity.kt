@@ -492,6 +492,41 @@ private fun autoSnoozeLabel(task: Task): String? {
     return "オートスヌーズ: $label"
 }
 
+/** [EditTaskDialog]/[GeminiTestDialog]と共通の、選択された組み込みツールのチェックボックス群。 */
+@Composable
+private fun AiToolCheckboxes(
+    useWebSearch: Boolean,
+    onUseWebSearchChange: (Boolean) -> Unit,
+    useMaps: Boolean,
+    onUseMapsChange: (Boolean) -> Unit,
+    useUrlContext: Boolean,
+    onUseUrlContextChange: (Boolean) -> Unit
+) {
+    Text(text = "使用するツール", style = MaterialTheme.typography.labelMedium)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = useWebSearch, onCheckedChange = onUseWebSearchChange)
+        Text("Web検索(最新のWeb情報を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = useMaps, onCheckedChange = onUseMapsChange)
+        Text("マップ(地図データ・周辺施設を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = useUrlContext, onCheckedChange = onUseUrlContextChange)
+        Text("URLコンテキスト(プロンプト中のURLの内容を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** [Task.aiUseWebSearch]等から選択済みツールを一覧表示用の文字列にする。未選択ならnull。 */
+private fun aiToolsLabel(task: Task): String? {
+    val labels = buildList {
+        if (task.aiUseWebSearch) add("Web検索")
+        if (task.aiUseMaps) add("マップ")
+        if (task.aiUseUrlContext) add("URLコンテキスト")
+    }
+    return labels.takeIf { it.isNotEmpty() }?.joinToString("・")
+}
+
 private val URL_SCHEME_PREFIX = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
 
 /**
@@ -935,12 +970,36 @@ fun TaskDetailDialog(
                 if (!current.aiPrompt.isNullOrBlank()) {
                     Text(text = "AIプロンプト", style = MaterialTheme.typography.titleSmall)
                     Text(text = current.aiPrompt)
+                    aiToolsLabel(current)?.let {
+                        Text(
+                            text = "使用するツール: $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (!current.aiCachedResponse.isNullOrBlank()) {
                         Text(
                             text = "直近のAI応答: ${current.aiCachedResponse}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        val sources = remember(current.aiCachedSources) {
+                            GeminiClient.decodeSources(current.aiCachedSources)
+                        }
+                        sources.forEach { source ->
+                            Text(
+                                text = "出典: ${source.title}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clickable {
+                                    try {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(source.uri)))
+                                    } catch (e: ActivityNotFoundException) {
+                                        Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
                 if (attachments.isNotEmpty()) {
@@ -1065,7 +1124,8 @@ fun SettingsScreen(
     geminiModel: GeminiModel = GeminiModel.DEFAULT,
     onSetGeminiApiKey: (String) -> Unit = {},
     onSetGeminiModel: (GeminiModel) -> Unit = {},
-    onTestGeminiPrompt: suspend (String) -> GeminiClient.Result = { GeminiClient.Result.Failure("未設定") },
+    onTestGeminiPrompt: suspend (String, Boolean, Boolean, Boolean) -> GeminiClient.Result =
+        { _, _, _, _ -> GeminiClient.Result.Failure("未設定") },
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1352,6 +1412,13 @@ fun SettingsScreen(
                     "Gemini(無料枠)に問い合わせ、結果を通知に含めます。APIキーはこの端末内にのみ" +
                     "保存され、リポジトリには含まれません。",
                 style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text = "タスクごとに「Web検索」「マップ」「URLコンテキスト」の組み込みツールを" +
+                    "使わせることもできます。Web検索・マップは通常のトークン課金とは別に" +
+                    "無料枠(月5,000回、Web検索とマップで共有)を超えると課金が発生する点にご注意ください。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             var apiKeyInput by remember(geminiApiKey) { mutableStateOf(geminiApiKey ?: "") }
             Row(
@@ -1704,13 +1771,17 @@ fun NotificationLogDialog(
  */
 @Composable
 fun GeminiTestDialog(
-    onTest: suspend (String) -> GeminiClient.Result,
+    onTest: suspend (String, Boolean, Boolean, Boolean) -> GeminiClient.Result,
     onDismiss: () -> Unit
 ) {
     var prompt by remember { mutableStateOf("") }
+    var useWebSearch by remember { mutableStateOf(false) }
+    var useMaps by remember { mutableStateOf(false) }
+    var useUrlContext by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<GeminiClient.Result?>(null) }
     var loading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1727,13 +1798,21 @@ fun GeminiTestDialog(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3
                 )
+                AiToolCheckboxes(
+                    useWebSearch = useWebSearch,
+                    onUseWebSearchChange = { useWebSearch = it },
+                    useMaps = useMaps,
+                    onUseMapsChange = { useMaps = it },
+                    useUrlContext = useUrlContext,
+                    onUseUrlContextChange = { useUrlContext = it }
+                )
                 TextButton(
                     enabled = prompt.isNotBlank() && !loading,
                     onClick = {
                         loading = true
                         result = null
                         coroutineScope.launch {
-                            result = onTest(prompt)
+                            result = onTest(prompt, useWebSearch, useMaps, useUrlContext)
                             loading = false
                         }
                     }
@@ -1741,10 +1820,26 @@ fun GeminiTestDialog(
                     Text(if (loading) "実行中..." else "実行")
                 }
                 when (val current = result) {
-                    is GeminiClient.Result.Success -> Text(
-                        text = current.text,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    is GeminiClient.Result.Success -> {
+                        Text(
+                            text = current.text,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        current.sources.forEach { source ->
+                            Text(
+                                text = "出典: ${source.title}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clickable {
+                                    try {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(source.uri)))
+                                    } catch (e: ActivityNotFoundException) {
+                                        Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+                        }
+                    }
                     is GeminiClient.Result.Failure -> Text(
                         text = "失敗: ${current.message}",
                         style = MaterialTheme.typography.bodyMedium,
@@ -2168,6 +2263,9 @@ fun EditTaskDialog(
     var url by remember(task.id) { mutableStateOf(task.url ?: "") }
     var memo by remember(task.id) { mutableStateOf(task.memo ?: "") }
     var aiPrompt by remember(task.id) { mutableStateOf(task.aiPrompt ?: "") }
+    var aiUseWebSearch by remember(task.id) { mutableStateOf(task.aiUseWebSearch) }
+    var aiUseMaps by remember(task.id) { mutableStateOf(task.aiUseMaps) }
+    var aiUseUrlContext by remember(task.id) { mutableStateOf(task.aiUseUrlContext) }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
     var repeatRule by remember(task.id) { mutableStateOf(task.repeatRule) }
     var selectedDays by remember(task.id) {
@@ -2520,6 +2618,14 @@ fun EditTaskDialog(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3
                 )
+                AiToolCheckboxes(
+                    useWebSearch = aiUseWebSearch,
+                    onUseWebSearchChange = { aiUseWebSearch = it },
+                    useMaps = aiUseMaps,
+                    onUseMapsChange = { aiUseMaps = it },
+                    useUrlContext = aiUseUrlContext,
+                    onUseUrlContextChange = { aiUseUrlContext = it }
+                )
 
                 Text(text = "添付ファイル", style = MaterialTheme.typography.titleSmall)
                 attachments.forEach { attachment ->
@@ -2600,7 +2706,10 @@ fun EditTaskDialog(
                             url = normalizeUrl(url),
                             memo = memo.trim().ifBlank { null },
                             aiPrompt = aiPrompt.trim().ifBlank { null },
-                            autoSnoozeMinutes = autoSnoozeMinutes
+                            autoSnoozeMinutes = autoSnoozeMinutes,
+                            aiUseWebSearch = aiUseWebSearch,
+                            aiUseMaps = aiUseMaps,
+                            aiUseUrlContext = aiUseUrlContext
                         )
                     )
                 }

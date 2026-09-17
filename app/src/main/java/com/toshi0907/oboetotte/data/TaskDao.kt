@@ -31,11 +31,12 @@ interface TaskDao {
     suspend fun setDone(taskId: Long, isDone: Boolean)
 
     /**
-     * AI連携(Gemini)の呼び出し結果をキャッシュする。通常の期限到達通知でのみ更新し、
-     * スヌーズ経由の再通知はこのキャッシュ済みの値をそのまま使い回すことでAPI呼び出し回数を抑える。
+     * AI連携(Gemini)の呼び出し結果(応答本文+groundingツール使用時の出典)をキャッシュする。
+     * 通常の期限到達通知でのみ更新し、スヌーズ経由の再通知はこのキャッシュ済みの値をそのまま
+     * 使い回すことでAPI呼び出し回数を抑える。
      */
-    @Query("UPDATE tasks SET aiCachedResponse = :response WHERE id = :taskId")
-    suspend fun updateAiCachedResponse(taskId: Long, response: String?)
+    @Query("UPDATE tasks SET aiCachedResponse = :response, aiCachedSources = :sources WHERE id = :taskId")
+    suspend fun updateAiCachedResponse(taskId: Long, response: String?, sources: String?)
 
     @Update
     suspend fun update(task: Task)
