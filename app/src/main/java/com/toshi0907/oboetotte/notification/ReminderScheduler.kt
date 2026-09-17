@@ -12,6 +12,7 @@ object ReminderScheduler {
     const val EXTRA_TASK_ID = "task_id"
     const val EXTRA_IS_TEST = "is_test"
     const val EXTRA_IS_SNOOZE = "is_snooze"
+    const val EXTRA_IS_AUTO_SNOOZE = "is_auto_snooze"
     private const val TEST_REQUEST_CODE = -1
     const val TEST_DELAY_SECONDS = 5L
 
@@ -40,10 +41,34 @@ object ReminderScheduler {
         return alarmManager.canScheduleExactAlarms()
     }
 
+    /**
+     * [task]の状態に応じてアラームを立て直す/キャンセルする。`updateTask`・`toggleDone`・
+     * `addTask`・`addSubtask`・[com.toshi0907.oboetotte.notification.BootReceiver]など、
+     * タスクの状態が変わりうる箇所から都度呼ばれ、常にDBの状態とアラームの登録状態を同期させる。
+     *
+     * `dueAt`が過去(期限到達後)の場合、通常は通知済みとみなしキャンセルするだけでよいが、
+     * [Task.autoSnoozeMinutes]が設定されたタスクは「未完了のまま指定間隔で再通知を繰り返す」
+     * ループの途中である可能性がある(`dueAt`自体はオートスヌーズでは書き換えないため、
+     * 期限到達後は常にこの条件に該当する)。ここで無条件にキャンセルしてしまうと、端末再起動時の
+     * [BootReceiver]の再スケジュールや、期限日時を変えないまま他の項目だけを編集した場合の
+     * `updateTask`経由の呼び出しのたびに、進行中のオートスヌーズが理由なく止まってしまう
+     * (アラーム本体・手動スヌーズ・オートスヌーズはいずれも同じ[pendingIntentFor]のPendingIntent
+     * を共有しているため)。そのため、期限到達後かつオートスヌーズが設定済みの未完了タスクは
+     * キャンセルせず、「今から指定間隔後」を基準にオートスヌーズを立て直す。
+     */
     fun schedule(context: Context, task: Task) {
         val dueAt = task.dueAt
-        if (dueAt == null || task.isDone || dueAt <= System.currentTimeMillis()) {
+        if (dueAt == null || task.isDone) {
             cancel(context, task.id)
+            return
+        }
+        if (dueAt <= System.currentTimeMillis()) {
+            val autoSnoozeMinutes = task.autoSnoozeMinutes
+            if (autoSnoozeMinutes != null && autoSnoozeMinutes > 0) {
+                scheduleAutoSnooze(context, task.id, autoSnoozeMinutes)
+            } else {
+                cancel(context, task.id)
+            }
             return
         }
         if (!canScheduleExactAlarms(context)) return
@@ -78,6 +103,27 @@ object ReminderScheduler {
         return true
     }
 
+    /**
+     * オートスヌーズ用。[com.toshi0907.oboetotte.data.Task.autoSnoozeMinutes]が設定された
+     * タスクの通知([ReminderReceiver])が発火した直後に、未完了のままであれば
+     * [minutes]分後に自動で再通知するためのアラームを登録する。アラーム本体・手動スヌーズ
+     * ([scheduleSnooze])と同じ[pendingIntentFor]のPendingIntent(taskIdをrequestCodeとする
+     * 枠)を再利用するため、dueAtの変更・タスク完了による[schedule]/[cancel]や、手動スヌーズが
+     * 呼ばれれば通常どおり上書き・キャンセルされる。これにより、手動でスヌーズを選んだ場合は
+     * その時刻を基準に次回のオートスヌーズが計算し直される(手動スヌーズが優先される)。
+     */
+    fun scheduleAutoSnooze(context: Context, taskId: Long, minutes: Long): Boolean {
+        if (!canScheduleExactAlarms(context)) return false
+
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            System.currentTimeMillis() + minutes * 60_000,
+            pendingIntentFor(context, taskId, isAutoSnooze = true)
+        )
+        return true
+    }
+
     /** [TEST_DELAY_SECONDS]秒後にテスト通知を発火させる。本番と同じAlarmManager経由の経路を検証する。 */
     fun scheduleTestNotification(context: Context): Boolean {
         if (!canScheduleExactAlarms(context)) return false
@@ -106,10 +152,16 @@ object ReminderScheduler {
      * [FLAG_UPDATE_CURRENT]により、既存の[PendingIntent](同じtaskId=同じrequestCode)の
      * extrasもこの値で上書きされる。
      */
-    private fun pendingIntentFor(context: Context, taskId: Long, isSnooze: Boolean = false): PendingIntent {
+    private fun pendingIntentFor(
+        context: Context,
+        taskId: Long,
+        isSnooze: Boolean = false,
+        isAutoSnooze: Boolean = false
+    ): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra(EXTRA_TASK_ID, taskId)
             putExtra(EXTRA_IS_SNOOZE, isSnooze)
+            putExtra(EXTRA_IS_AUTO_SNOOZE, isAutoSnooze)
         }
         return PendingIntent.getBroadcast(
             context,

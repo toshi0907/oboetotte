@@ -24,7 +24,8 @@ data class Task(
     val memo: String? = null,
     val seriesId: Long? = null,
     val aiPrompt: String? = null,
-    val aiCachedResponse: String? = null
+    val aiCachedResponse: String? = null,
+    val autoSnoozeMinutes: Long? = null
 )
 
 /**
