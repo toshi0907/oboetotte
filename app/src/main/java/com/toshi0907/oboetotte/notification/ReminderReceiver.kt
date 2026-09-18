@@ -152,7 +152,10 @@ class ReminderReceiver : BroadcastReceiver() {
         }
     }
 
-    /** @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。 */
+    /**
+     * @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか。権限が無い、通知が
+     * 無効化されている、このチャンネルの重要度が`IMPORTANCE_NONE`のいずれかであれば`false`。
+     */
     private fun showNotification(
         context: Context,
         notificationId: Long,
@@ -231,8 +234,18 @@ class ReminderReceiver : BroadcastReceiver() {
         ) {
             return false
         }
-        NotificationManagerCompat.from(context)
-            .notify(ReminderScheduler.NOTIFICATION_TAG_DUE, notificationId.toInt(), notification)
+        // POST_NOTIFICATIONS権限があっても、通知自体が無効化されている、またはこのチャンネルの
+        // 重要度がIMPORTANCE_NONEの場合はnotify()を呼んでも実際には表示されない
+        // (update/AppUpdateNotifier.showNotificationと同じ確認方法)。通知のみタスクは
+        // この戻り値を見て実際に表示できた場合のみ自動完了するため、ここで確実に弾く。
+        val notifier = NotificationManagerCompat.from(context)
+        val channelBlocked =
+            notificationManager.getNotificationChannel(CHANNEL_ID)?.importance ==
+                NotificationManager.IMPORTANCE_NONE
+        if (!notifier.areNotificationsEnabled() || channelBlocked) {
+            return false
+        }
+        notifier.notify(ReminderScheduler.NOTIFICATION_TAG_DUE, notificationId.toInt(), notification)
         return true
     }
 

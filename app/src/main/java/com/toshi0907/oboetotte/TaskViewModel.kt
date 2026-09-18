@@ -235,17 +235,24 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = edits.title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
+            // 編集ダイアログを開いたまま保持しているtaskスナップショットは、裏で(通知のみタスクの
+            // 自動完了・別画面からの操作等により)既に完了・繰り返しの次回分生成が済んでいる可能性が
+            // ある。ここでDBから最新の状態を読み直し、それを土台にすることでisDoneを含む状態を
+            // 誤って古い値へ巻き戻さない(特にisDoneをtrue→falseへ戻すと、既にTaskCompletion.complete
+            // が生成した次回分と合わせてアクティブなインスタンスが重複してしまう)。タスクが
+            // 既に削除されていた場合(current == null)も何もせず終了する。
+            val current = taskDao.getById(task.id) ?: return@launch
             // プロンプトまたは使用ツールを変更した場合、古い条件に対するAIの応答キャッシュを
             // 使い回さないよう明示的にクリアする(スヌーズ時の再利用は同じ条件に対する結果のみを
-            // 対象とするため)。マップ使用不可より前に有効化されていたタスク(task.aiUseMaps)は
+            // 対象とするため)。マップ使用不可より前に有効化されていたタスク(current.aiUseMaps)は
             // ここで無効化するため、そのキャッシュも古い条件のものとしてクリア対象に含める。
-            val aiConditionChanged = task.aiUseMaps ||
-                edits.aiPrompt != task.aiPrompt ||
-                edits.aiUseWebSearch != task.aiUseWebSearch ||
-                edits.aiUseUrlContext != task.aiUseUrlContext
-            val aiCachedResponse = if (aiConditionChanged) null else task.aiCachedResponse
-            val aiCachedSources = if (aiConditionChanged) null else task.aiCachedSources
-            val updated = task.copy(
+            val aiConditionChanged = current.aiUseMaps ||
+                edits.aiPrompt != current.aiPrompt ||
+                edits.aiUseWebSearch != current.aiUseWebSearch ||
+                edits.aiUseUrlContext != current.aiUseUrlContext
+            val aiCachedResponse = if (aiConditionChanged) null else current.aiCachedResponse
+            val aiCachedSources = if (aiConditionChanged) null else current.aiCachedSources
+            val updated = current.copy(
                 title = trimmed,
                 listId = edits.listId,
                 dueAt = edits.dueAt,
