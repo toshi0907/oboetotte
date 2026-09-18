@@ -116,6 +116,7 @@ import com.toshi0907.oboetotte.ui.theme.Green80
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import com.toshi0907.oboetotte.update.AppUpdateChecker
 import com.toshi0907.oboetotte.update.AppUpdateCheckScheduler
+import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.update.AppUpdateInstaller
 import java.io.File
 import java.time.Instant
@@ -231,9 +232,16 @@ class MainActivity : ComponentActivity() {
                     }
                     val coroutineScope = rememberCoroutineScope()
                     var updateCheckResult by remember { mutableStateOf<AppUpdateChecker.Result?>(null) }
+                    var updateLastCheckedAt by remember {
+                        mutableStateOf(AppUpdateCheckSettings.getLastCheckedAt(context))
+                    }
+                    var isDownloadingUpdate by remember { mutableStateOf(false) }
                     fun checkForUpdate() {
                         coroutineScope.launch {
                             updateCheckResult = withContext(Dispatchers.IO) { AppUpdateChecker.check() }
+                            val checkedAt = System.currentTimeMillis()
+                            AppUpdateCheckSettings.recordCheckedAt(context, checkedAt)
+                            updateLastCheckedAt = checkedAt
                         }
                     }
                     fun downloadAndInstallUpdate(downloadUrl: String) {
@@ -241,6 +249,8 @@ class MainActivity : ComponentActivity() {
                             startActivity(AppUpdateInstaller.unknownSourcesSettingsIntent(context))
                             return
                         }
+                        if (isDownloadingUpdate) return
+                        isDownloadingUpdate = true
                         coroutineScope.launch {
                             try {
                                 val file = withContext(Dispatchers.IO) {
@@ -251,6 +261,8 @@ class MainActivity : ComponentActivity() {
                                 // ダウンロード中の通信エラーや、パッケージインストーラーが
                                 // 見つからない端末など、失敗してもアプリ全体をクラッシュさせない。
                                 Toast.makeText(context, "更新のダウンロードに失敗しました", Toast.LENGTH_SHORT).show()
+                            } finally {
+                                isDownloadingUpdate = false
                             }
                         }
                     }
@@ -327,6 +339,7 @@ class MainActivity : ComponentActivity() {
                                 startActivity(intent)
                             },
                             updateCheckResult = updateCheckResult,
+                            isDownloadingUpdate = isDownloadingUpdate,
                             onDownloadUpdate = ::downloadAndInstallUpdate,
                             onOpenSettings = { currentScreen = MainScreen.Settings },
                             modifier = Modifier.padding(innerPadding)
@@ -387,6 +400,8 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             updateCheckResult = updateCheckResult,
+                            updateLastCheckedAt = updateLastCheckedAt,
+                            isDownloadingUpdate = isDownloadingUpdate,
                             onCheckForUpdate = ::checkForUpdate,
                             onDownloadUpdate = ::downloadAndInstallUpdate,
                             geminiApiKey = geminiApiKey,
@@ -579,6 +594,7 @@ fun TaskScreen(
     locationPermissionGranted: Boolean = true,
     onRequestLocationSettings: () -> Unit = {},
     updateCheckResult: AppUpdateChecker.Result? = null,
+    isDownloadingUpdate: Boolean = false,
     onDownloadUpdate: (String) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -655,8 +671,11 @@ fun TaskScreen(
                             text = "新しいバージョンが利用可能です。",
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
-                        TextButton(onClick = { onDownloadUpdate(updateCheckResult.downloadUrl) }) {
-                            Text("更新する")
+                        TextButton(
+                            onClick = { onDownloadUpdate(updateCheckResult.downloadUrl) },
+                            enabled = !isDownloadingUpdate
+                        ) {
+                            Text(if (isDownloadingUpdate) "ダウンロード中…" else "更新する")
                         }
                     }
                 }
@@ -1127,6 +1146,8 @@ fun SettingsScreen(
     cloudBackupLastResult: CloudBackupResult? = null,
     onRunCloudBackupNow: () -> Unit = {},
     updateCheckResult: AppUpdateChecker.Result? = null,
+    updateLastCheckedAt: Long? = null,
+    isDownloadingUpdate: Boolean = false,
     onCheckForUpdate: () -> Unit = {},
     onDownloadUpdate: (String) -> Unit = {},
     geminiApiKey: String? = null,
@@ -1162,9 +1183,55 @@ fun SettingsScreen(
             }
 
             Text(
-                text = "リスト",
+                text = "アップデート",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 16.dp)
+            )
+            Text(
+                text = "現在のビルド: ${BuildConfig.GIT_COMMIT_SHA.take(7)}",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text = if (updateLastCheckedAt != null) {
+                    "最終確認: ${formatDueAt(updateLastCheckedAt)}"
+                } else {
+                    "最終確認: まだ確認していません"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            when (updateCheckResult) {
+                is AppUpdateChecker.Result.UpdateAvailable -> {
+                    Text(
+                        text = "新しいバージョンが利用可能です。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    TextButton(
+                        onClick = { onDownloadUpdate(updateCheckResult.downloadUrl) },
+                        enabled = !isDownloadingUpdate
+                    ) {
+                        Text(if (isDownloadingUpdate) "ダウンロード中…" else "ダウンロードしてインストール")
+                    }
+                }
+                AppUpdateChecker.Result.UpToDate -> Text(
+                    text = "最新版です。",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                AppUpdateChecker.Result.CheckFailed -> Text(
+                    text = "確認できませんでした。通信環境を確認してください。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                null -> {}
+            }
+            TextButton(onClick = onCheckForUpdate) {
+                Text("更新を確認")
+            }
+
+            Text(
+                text = "リスト",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
             )
             TextButton(onClick = { showManageLists = true }) {
                 Text("リストを編集")
@@ -1375,40 +1442,6 @@ fun SettingsScreen(
                         }
                     )
                 }
-            }
-
-            Text(
-                text = "アップデート",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-            Text(
-                text = "現在のビルド: ${BuildConfig.GIT_COMMIT_SHA.take(7)}",
-                style = MaterialTheme.typography.bodySmall
-            )
-            when (updateCheckResult) {
-                is AppUpdateChecker.Result.UpdateAvailable -> {
-                    Text(
-                        text = "新しいバージョンが利用可能です。",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    TextButton(onClick = { onDownloadUpdate(updateCheckResult.downloadUrl) }) {
-                        Text("ダウンロードしてインストール")
-                    }
-                }
-                AppUpdateChecker.Result.UpToDate -> Text(
-                    text = "最新版です。",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                AppUpdateChecker.Result.CheckFailed -> Text(
-                    text = "確認できませんでした。通信環境を確認してください。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-                null -> {}
-            }
-            TextButton(onClick = onCheckForUpdate) {
-                Text("更新を確認")
             }
 
             Text(
