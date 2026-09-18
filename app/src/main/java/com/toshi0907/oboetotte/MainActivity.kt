@@ -219,6 +219,7 @@ class MainActivity : ComponentActivity() {
                     val cloudBackupLastResult by taskViewModel.cloudBackupLastResult.collectAsState()
                     val geminiApiKey by taskViewModel.geminiApiKey.collectAsState()
                     val geminiModel by taskViewModel.geminiModel.collectAsState()
+                    val updateLastCheckedAt by taskViewModel.updateLastCheckedAt.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
                     val context = LocalContext.current
@@ -232,16 +233,13 @@ class MainActivity : ComponentActivity() {
                     }
                     val coroutineScope = rememberCoroutineScope()
                     var updateCheckResult by remember { mutableStateOf<AppUpdateChecker.Result?>(null) }
-                    var updateLastCheckedAt by remember {
-                        mutableStateOf(AppUpdateCheckSettings.getLastCheckedAt(context))
-                    }
                     var isDownloadingUpdate by remember { mutableStateOf(false) }
                     fun checkForUpdate() {
                         coroutineScope.launch {
                             updateCheckResult = withContext(Dispatchers.IO) { AppUpdateChecker.check() }
-                            val checkedAt = System.currentTimeMillis()
-                            AppUpdateCheckSettings.recordCheckedAt(context, checkedAt)
-                            updateLastCheckedAt = checkedAt
+                            // taskViewModel.updateLastCheckedAtへの反映は、SharedPreferencesの
+                            // 変更を直接購読しているTaskViewModel側のリスナーが自動的に行う。
+                            AppUpdateCheckSettings.recordCheckedAt(context, System.currentTimeMillis())
                         }
                     }
                     fun downloadAndInstallUpdate(downloadUrl: String) {
