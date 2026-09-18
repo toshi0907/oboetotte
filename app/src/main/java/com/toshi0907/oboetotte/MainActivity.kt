@@ -1133,8 +1133,8 @@ fun SettingsScreen(
     geminiModel: GeminiModel = GeminiModel.DEFAULT,
     onSetGeminiApiKey: (String) -> Unit = {},
     onSetGeminiModel: (GeminiModel) -> Unit = {},
-    onTestGeminiPrompt: suspend (String, Boolean, Boolean, Boolean) -> GeminiClient.Result =
-        { _, _, _, _ -> GeminiClient.Result.Failure("未設定") },
+    onTestGeminiPrompt: suspend (String, Boolean, Boolean) -> GeminiClient.Result =
+        { _, _, _ -> GeminiClient.Result.Failure("未設定") },
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
