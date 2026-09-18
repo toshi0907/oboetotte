@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.toshi0907.oboetotte.MainActivity
 import com.toshi0907.oboetotte.R
+import com.toshi0907.oboetotte.TaskCompletion
 import com.toshi0907.oboetotte.ai.GeminiClient
 import com.toshi0907.oboetotte.ai.GeminiSettings
 import com.toshi0907.oboetotte.data.AppDatabase
@@ -45,18 +46,26 @@ class ReminderReceiver : BroadcastReceiver() {
                 val task = db.taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
                     val aiOutcome = resolveAiOutcome(context, db, task, isSnooze || isAutoSnooze)
-                    val posted = showNotification(context, taskId, task.title, showTaskActions = true, url = task.url, aiOutcome = aiOutcome)
+                    val posted = showNotification(
+                        context,
+                        taskId,
+                        task.title,
+                        showTaskActions = !task.notifyOnlyMode,
+                        url = task.url,
+                        aiOutcome = aiOutcome
+                    )
                     if (posted) {
                         val aiSuffix = when (aiOutcome) {
                             null -> ""
                             is AiOutcome.Success -> "(AI要約: 成功)"
                             AiOutcome.Failure -> "(AI要約: 失敗)"
                         }
+                        val notifyOnlySuffix = if (task.notifyOnlyMode) "(通知のみ・自動完了)" else ""
                         val condition = when {
                             isAutoSnooze -> "オートスヌーズ経由の再通知"
                             isSnooze -> "スヌーズ経由の再通知"
                             else -> "期限到達"
-                        } + aiSuffix
+                        } + notifyOnlySuffix + aiSuffix
                         db.notificationLogDao().insertAndTrim(
                             NotificationLog(
                                 triggeredAt = System.currentTimeMillis(),
@@ -64,14 +73,21 @@ class ReminderReceiver : BroadcastReceiver() {
                                 triggerCondition = condition
                             )
                         )
-                        // オートスヌーズが設定されたタスクは、未完了のまま指定間隔が経過するたびに
-                        // 再通知を繰り返す(上限なし)。手動スヌーズ・アプリ側の編集等でこのアラームの
-                        // 枠(taskIdをrequestCodeとするPendingIntent)が上書きされれば、その時点を
-                        // 基準に次回分が計算し直される。タスク完了時はReminderScheduler.cancelで
-                        // このアラームごと止まる。
-                        val autoSnoozeMinutes = task.autoSnoozeMinutes
-                        if (autoSnoozeMinutes != null && autoSnoozeMinutes > 0) {
-                            ReminderScheduler.scheduleAutoSnooze(context, taskId, autoSnoozeMinutes)
+                        if (task.notifyOnlyMode) {
+                            // 通知が実際に表示できた時点でのみ完了扱いにする(権限が無く表示できなかった
+                            // 場合は完了させず、通知されないままタスクが消えてしまうことを避ける)。
+                            // 繰り返しタスクの次回分生成・アラーム再スケジュールもTaskCompletion.completeに含まれる。
+                            TaskCompletion.complete(context, task)
+                        } else {
+                            // オートスヌーズが設定されたタスクは、未完了のまま指定間隔が経過するたびに
+                            // 再通知を繰り返す(上限なし)。手動スヌーズ・アプリ側の編集等でこのアラームの
+                            // 枠(taskIdをrequestCodeとするPendingIntent)が上書きされれば、その時点を
+                            // 基準に次回分が計算し直される。タスク完了時はReminderScheduler.cancelで
+                            // このアラームごと止まる。
+                            val autoSnoozeMinutes = task.autoSnoozeMinutes
+                            if (autoSnoozeMinutes != null && autoSnoozeMinutes > 0) {
+                                ReminderScheduler.scheduleAutoSnooze(context, taskId, autoSnoozeMinutes)
+                            }
                         }
                     }
                 }

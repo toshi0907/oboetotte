@@ -88,6 +88,7 @@ object BackupManager {
                             put("aiUseMaps", task.aiUseMaps)
                             put("aiUseUrlContext", task.aiUseUrlContext)
                             put("aiCachedSources", task.aiCachedSources ?: JSONObject.NULL)
+                            put("notifyOnlyMode", task.notifyOnlyMode)
                         }
                     }
                 )
@@ -210,7 +211,8 @@ object BackupManager {
                 aiUseWebSearch = obj.optBoolean("aiUseWebSearch", false),
                 aiUseMaps = obj.optBoolean("aiUseMaps", false),
                 aiUseUrlContext = obj.optBoolean("aiUseUrlContext", false),
-                aiCachedSources = if (obj.isNull("aiCachedSources")) null else obj.getString("aiCachedSources")
+                aiCachedSources = if (obj.isNull("aiCachedSources")) null else obj.getString("aiCachedSources"),
+                notifyOnlyMode = obj.optBoolean("notifyOnlyMode", false)
             )
         }
 

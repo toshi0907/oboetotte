@@ -70,7 +70,8 @@ data class TaskEdits(
     val aiPrompt: String?,
     val autoSnoozeMinutes: Long?,
     val aiUseWebSearch: Boolean,
-    val aiUseUrlContext: Boolean
+    val aiUseUrlContext: Boolean,
+    val notifyOnlyMode: Boolean
 )
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
@@ -260,11 +261,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 memo = edits.memo,
                 aiPrompt = edits.aiPrompt,
                 aiCachedResponse = aiCachedResponse,
-                autoSnoozeMinutes = edits.autoSnoozeMinutes,
+                // 通知のみタスクはスヌーズ機能(手動・オート)を併用しないため、有効な場合は
+                // オートスヌーズの間隔設定を強制的にクリアする(EditTaskDialog側で選択UIを
+                // 隠していても、ここで正規化することでデータの整合性を保証する)。
+                autoSnoozeMinutes = if (edits.notifyOnlyMode) null else edits.autoSnoozeMinutes,
                 aiUseWebSearch = edits.aiUseWebSearch,
                 aiUseMaps = false,
                 aiUseUrlContext = edits.aiUseUrlContext,
-                aiCachedSources = aiCachedSources
+                aiCachedSources = aiCachedSources,
+                notifyOnlyMode = edits.notifyOnlyMode
             )
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)

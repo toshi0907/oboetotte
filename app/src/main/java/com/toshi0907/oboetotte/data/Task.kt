@@ -34,7 +34,11 @@ data class Task(
     val aiUseUrlContext: Boolean = false,
     // GeminiClient.Sourceのtitle/uri/originを持つJSON配列文字列(例: `[{"title":"...","uri":"...","origin":"WEB_SEARCH"}]`)。
     // グラウンディングを使わなかった/出典が無かった場合はnull。
-    val aiCachedSources: String? = null
+    val aiCachedSources: String? = null,
+    // trueの場合、期限日時通知(ReminderReceiver)を実際に表示できた時点で自動的にタスクを完了扱いにする
+    // (通知されること自体が重要で、完了操作の確認は不要なタスク向け)。この場合、通知には「完了」/「スヌーズ」
+    // ボタンを出さず、オートスヌーズ(autoSnoozeMinutes)も併用しない(TaskViewModel.updateTaskがnullへ正規化する)。
+    val notifyOnlyMode: Boolean = false
 )
 
 /**

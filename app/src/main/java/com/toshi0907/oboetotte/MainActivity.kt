@@ -987,6 +987,9 @@ fun TaskDetailDialog(
                 }
                 Text(text = current.dueAt?.let { formatDueAt(it) } ?: "期限なし")
                 repeatRuleLabel(current)?.let { Text(text = "繰り返し: $it") }
+                if (current.notifyOnlyMode) {
+                    Text(text = "通知のみタスク(通知表示で自動完了・スヌーズ不可)")
+                }
                 autoSnoozeLabel(current)?.let { Text(text = it) }
                 locationLabel(current)?.let { Text(text = it) }
                 if (!current.memo.isNullOrBlank()) {
@@ -2309,6 +2312,7 @@ fun EditTaskDialog(
         mutableStateOf(RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek))
     }
     var autoSnoozeMinutes by remember(task.id) { mutableStateOf(task.autoSnoozeMinutes) }
+    var notifyOnlyMode by remember(task.id) { mutableStateOf(task.notifyOnlyMode) }
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var subtaskInput by remember(task.id) { mutableStateOf("") }
@@ -2450,29 +2454,48 @@ fun EditTaskDialog(
                     }
                 }
 
-                Text(text = "オートスヌーズ", style = MaterialTheme.typography.titleSmall)
+                Text(text = "通知のみタスク", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    text = "期限到達後、未完了のまま指定間隔が経過すると自動で再通知します",
+                    text = "通知されることが重要で完了確認が不要なタスク向け。有効にすると、期限日時通知を" +
+                        "表示できた時点で自動的に完了になり、通知に「完了」「スヌーズ」ボタンは出ません" +
+                        "(スヌーズ機能は併用できません)",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    item {
-                        FilterChip(
-                            selected = autoSnoozeMinutes == null,
-                            onClick = { autoSnoozeMinutes = null },
-                            label = { Text("なし") }
-                        )
-                    }
-                    items(ReminderScheduler.SNOOZE_OPTIONS) { option ->
-                        FilterChip(
-                            selected = autoSnoozeMinutes == option.minutes,
-                            onClick = { autoSnoozeMinutes = option.minutes },
-                            label = { Text(option.label) }
-                        )
+                FilterChip(
+                    selected = notifyOnlyMode,
+                    onClick = {
+                        notifyOnlyMode = !notifyOnlyMode
+                        if (notifyOnlyMode) autoSnoozeMinutes = null
+                    },
+                    label = { Text("通知のみタスクとして有効にする") }
+                )
+
+                if (!notifyOnlyMode) {
+                    Text(text = "オートスヌーズ", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        text = "期限到達後、未完了のまま指定間隔が経過すると自動で再通知します",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        item {
+                            FilterChip(
+                                selected = autoSnoozeMinutes == null,
+                                onClick = { autoSnoozeMinutes = null },
+                                label = { Text("なし") }
+                            )
+                        }
+                        items(ReminderScheduler.SNOOZE_OPTIONS) { option ->
+                            FilterChip(
+                                selected = autoSnoozeMinutes == option.minutes,
+                                onClick = { autoSnoozeMinutes = option.minutes },
+                                label = { Text(option.label) }
+                            )
+                        }
                     }
                 }
 
@@ -2741,9 +2764,10 @@ fun EditTaskDialog(
                             url = normalizeUrl(url),
                             memo = memo.trim().ifBlank { null },
                             aiPrompt = aiPrompt.trim().ifBlank { null },
-                            autoSnoozeMinutes = autoSnoozeMinutes,
+                            autoSnoozeMinutes = if (notifyOnlyMode) null else autoSnoozeMinutes,
                             aiUseWebSearch = aiUseWebSearch,
-                            aiUseUrlContext = aiUseUrlContext
+                            aiUseUrlContext = aiUseUrlContext,
+                            notifyOnlyMode = notifyOnlyMode
                         )
                     )
                 }
