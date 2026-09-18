@@ -117,10 +117,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 prompt,
                 GeminiClient.NOTIFICATION_TIMEOUT_MILLIS,
                 useWebSearch = task.aiUseWebSearch,
-                useMaps = task.aiUseMaps,
-                useUrlContext = task.aiUseUrlContext,
-                mapsLatitude = task.latitude,
-                mapsLongitude = task.longitude
+                useUrlContext = task.aiUseUrlContext
             )
         ) {
             is GeminiClient.Result.Success -> {

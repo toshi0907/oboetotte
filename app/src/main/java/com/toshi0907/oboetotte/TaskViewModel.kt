@@ -69,7 +69,6 @@ data class TaskEdits(
     val aiPrompt: String?,
     val autoSnoozeMinutes: Long?,
     val aiUseWebSearch: Boolean,
-    val aiUseMaps: Boolean,
     val aiUseUrlContext: Boolean
 )
 
@@ -224,15 +223,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // プロンプトまたは使用ツールを変更した場合、古い条件に対するAIの応答キャッシュを
             // 使い回さないよう明示的にクリアする(スヌーズ時の再利用は同じ条件に対する結果のみを
             // 対象とするため)。
-            // マップが有効なまま座標だけが変わった場合も、以前の場所を基準にした結果を
-            // 使い回さないようクリア対象に含める。
-            val mapsLocationChanged = edits.aiUseMaps &&
-                (edits.latitude != task.latitude || edits.longitude != task.longitude)
             val aiConditionChanged = edits.aiPrompt != task.aiPrompt ||
                 edits.aiUseWebSearch != task.aiUseWebSearch ||
-                edits.aiUseMaps != task.aiUseMaps ||
-                edits.aiUseUrlContext != task.aiUseUrlContext ||
-                mapsLocationChanged
+                edits.aiUseUrlContext != task.aiUseUrlContext
             val aiCachedResponse = if (aiConditionChanged) null else task.aiCachedResponse
             val aiCachedSources = if (aiConditionChanged) null else task.aiCachedSources
             val updated = task.copy(
@@ -253,7 +246,6 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 aiCachedResponse = aiCachedResponse,
                 autoSnoozeMinutes = edits.autoSnoozeMinutes,
                 aiUseWebSearch = edits.aiUseWebSearch,
-                aiUseMaps = edits.aiUseMaps,
                 aiUseUrlContext = edits.aiUseUrlContext,
                 aiCachedSources = aiCachedSources
             )
@@ -496,7 +488,6 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun testGeminiPrompt(
         prompt: String,
         useWebSearch: Boolean,
-        useMaps: Boolean,
         useUrlContext: Boolean
     ): GeminiClient.Result {
         val apiKey = GeminiSettings.getApiKey(appContext)
@@ -508,7 +499,6 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 prompt,
                 GeminiClient.TEST_TIMEOUT_MILLIS,
                 useWebSearch = useWebSearch,
-                useMaps = useMaps,
                 useUrlContext = useUrlContext
             )
         }

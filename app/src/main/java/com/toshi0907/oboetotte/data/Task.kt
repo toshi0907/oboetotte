@@ -27,6 +27,8 @@ data class Task(
     val aiCachedResponse: String? = null,
     val autoSnoozeMinutes: Long? = null,
     val aiUseWebSearch: Boolean = false,
+    // マップの組み込みツール(google_maps)は使用不可のため、UIからtrueにする経路は無い
+    // (常にfalse)。カラム自体は既存端末のデータ・バックアップとの互換性のためだけに残している。
     val aiUseMaps: Boolean = false,
     val aiUseUrlContext: Boolean = false,
     // GeminiClient.Sourceのtitle/uri/originを持つJSON配列文字列(例: `[{"title":"...","uri":"...","origin":"WEB_SEARCH"}]`)。

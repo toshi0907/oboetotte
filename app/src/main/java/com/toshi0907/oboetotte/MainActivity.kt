@@ -500,8 +500,6 @@ private fun autoSnoozeLabel(task: Task): String? {
 private fun AiToolCheckboxes(
     useWebSearch: Boolean,
     onUseWebSearchChange: (Boolean) -> Unit,
-    useMaps: Boolean,
-    onUseMapsChange: (Boolean) -> Unit,
     useUrlContext: Boolean,
     onUseUrlContextChange: (Boolean) -> Unit
 ) {
@@ -518,15 +516,6 @@ private fun AiToolCheckboxes(
     Row(
         modifier = Modifier
             .minimumInteractiveComponentSize()
-            .toggleable(value = useMaps, onValueChange = onUseMapsChange, role = Role.Checkbox),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(checked = useMaps, onCheckedChange = null)
-        Text("マップ(地図データ・周辺施設を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
-    }
-    Row(
-        modifier = Modifier
-            .minimumInteractiveComponentSize()
             .toggleable(value = useUrlContext, onValueChange = onUseUrlContextChange, role = Role.Checkbox),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -535,22 +524,13 @@ private fun AiToolCheckboxes(
     }
 }
 
-/**
- * 出典表示用のラベル。[GeminiClient.SourceOrigin.MAPS]はGoogleの利用規約上「Google Maps」への
- * 帰属表記が必須のため、表記(大文字小文字・改行・翻訳)を変えずにそのまま付記する。
- */
-private fun sourceLabel(source: GeminiClient.Source): String =
-    if (source.origin == GeminiClient.SourceOrigin.MAPS) {
-        "出典(Google Maps): ${source.title}"
-    } else {
-        "出典: ${source.title}"
-    }
+/** 出典表示用のラベル。 */
+private fun sourceLabel(source: GeminiClient.Source): String = "出典: ${source.title}"
 
 /** [Task.aiUseWebSearch]等から選択済みツールを一覧表示用の文字列にする。未選択ならnull。 */
 private fun aiToolsLabel(task: Task): String? {
     val labels = buildList {
         if (task.aiUseWebSearch) add("Web検索")
-        if (task.aiUseMaps) add("マップ")
         if (task.aiUseUrlContext) add("URLコンテキスト")
     }
     return labels.takeIf { it.isNotEmpty() }?.joinToString("・")
@@ -1443,10 +1423,10 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
-                text = "タスクごとに「Web検索」「マップ」「URLコンテキスト」の組み込みツールを" +
-                    "使わせることもできます。Web検索・マップは通常のトークン課金とは別に無料枠が" +
-                    "設定されており、モデル・料金プランによって条件が異なります。超過分は課金が" +
-                    "発生するため、最新の条件はGemini APIの料金ページでご確認ください。",
+                text = "タスクごとに「Web検索」「URLコンテキスト」の組み込みツールを使わせる" +
+                    "こともできます。Web検索は通常のトークン課金とは別に無料枠が設定されており、" +
+                    "モデル・料金プランによって条件が異なります。超過分は課金が発生するため、" +
+                    "最新の条件はGemini APIの料金ページでご確認ください。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1801,12 +1781,11 @@ fun NotificationLogDialog(
  */
 @Composable
 fun GeminiTestDialog(
-    onTest: suspend (String, Boolean, Boolean, Boolean) -> GeminiClient.Result,
+    onTest: suspend (String, Boolean, Boolean) -> GeminiClient.Result,
     onDismiss: () -> Unit
 ) {
     var prompt by remember { mutableStateOf("") }
     var useWebSearch by remember { mutableStateOf(false) }
-    var useMaps by remember { mutableStateOf(false) }
     var useUrlContext by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<GeminiClient.Result?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -1831,8 +1810,6 @@ fun GeminiTestDialog(
                 AiToolCheckboxes(
                     useWebSearch = useWebSearch,
                     onUseWebSearchChange = { useWebSearch = it },
-                    useMaps = useMaps,
-                    onUseMapsChange = { useMaps = it },
                     useUrlContext = useUrlContext,
                     onUseUrlContextChange = { useUrlContext = it }
                 )
@@ -1842,7 +1819,7 @@ fun GeminiTestDialog(
                         loading = true
                         result = null
                         coroutineScope.launch {
-                            result = onTest(prompt, useWebSearch, useMaps, useUrlContext)
+                            result = onTest(prompt, useWebSearch, useUrlContext)
                             loading = false
                         }
                     }
@@ -2294,7 +2271,6 @@ fun EditTaskDialog(
     var memo by remember(task.id) { mutableStateOf(task.memo ?: "") }
     var aiPrompt by remember(task.id) { mutableStateOf(task.aiPrompt ?: "") }
     var aiUseWebSearch by remember(task.id) { mutableStateOf(task.aiUseWebSearch) }
-    var aiUseMaps by remember(task.id) { mutableStateOf(task.aiUseMaps) }
     var aiUseUrlContext by remember(task.id) { mutableStateOf(task.aiUseUrlContext) }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
     var repeatRule by remember(task.id) { mutableStateOf(task.repeatRule) }
@@ -2651,8 +2627,6 @@ fun EditTaskDialog(
                 AiToolCheckboxes(
                     useWebSearch = aiUseWebSearch,
                     onUseWebSearchChange = { aiUseWebSearch = it },
-                    useMaps = aiUseMaps,
-                    onUseMapsChange = { aiUseMaps = it },
                     useUrlContext = aiUseUrlContext,
                     onUseUrlContextChange = { aiUseUrlContext = it }
                 )
@@ -2738,7 +2712,6 @@ fun EditTaskDialog(
                             aiPrompt = aiPrompt.trim().ifBlank { null },
                             autoSnoozeMinutes = autoSnoozeMinutes,
                             aiUseWebSearch = aiUseWebSearch,
-                            aiUseMaps = aiUseMaps,
                             aiUseUrlContext = aiUseUrlContext
                         )
                     )
