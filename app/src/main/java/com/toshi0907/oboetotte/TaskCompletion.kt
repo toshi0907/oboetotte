@@ -17,10 +17,15 @@ import java.time.ZoneId
  */
 object TaskCompletion {
     suspend fun complete(context: Context, task: Task) {
-        if (task.isDone) return
-
         val taskDao = AppDatabase.getInstance(context).taskDao()
-        taskDao.setDone(task.id, true)
+        // taskDao.setDoneはisDone != trueの行にしか一致しないため、同じタスクに対して
+        // ほぼ同時に呼ばれた複数回のcomplete呼び出し(例: 通知のみタスクの自動完了と
+        // アプリ内の手動完了が競合した場合)のうち、実際に状態を遷移させた1回だけが
+        // 0件超の更新件数を得る。他方はここで早期returnし、繰り返しタスクの次回分が
+        // 重複生成されるのを防ぐ(呼び出し元から渡されたtaskスナップショットのisDoneは
+        // 古い可能性があるため、DBへの書き込み結果そのものを正としてチェックする)。
+        val updatedRows = taskDao.setDone(task.id, true)
+        if (updatedRows == 0) return
         ReminderScheduler.cancel(context, task.id)
         LocationReminderManager.unregister(context, task.id)
 

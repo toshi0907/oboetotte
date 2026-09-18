@@ -27,8 +27,16 @@ interface TaskDao {
     )
     suspend fun getPendingWithLocation(): List<Task>
 
-    @Query("UPDATE tasks SET isDone = :isDone WHERE id = :taskId")
-    suspend fun setDone(taskId: Long, isDone: Boolean)
+    /**
+     * WHERE句にisDone != :isDoneを含めることで、対象の行が実際にこの呼び出しで
+     * 状態遷移した場合にのみ1を返す(既に同じ状態であれば0件更新・0を返す)。
+     * [com.toshi0907.oboetotte.TaskCompletion.complete]が、同じタスクへ同時に
+     * 呼ばれた複数の完了処理(例: 通知のみタスクの自動完了とアプリ内の手動完了が
+     * ほぼ同時に発生した場合)のうち片方だけを実処理させ、繰り返しタスクの次回分が
+     * 重複生成されないようにするために使う。
+     */
+    @Query("UPDATE tasks SET isDone = :isDone WHERE id = :taskId AND isDone != :isDone")
+    suspend fun setDone(taskId: Long, isDone: Boolean): Int
 
     /**
      * AI連携(Gemini)の呼び出し結果(応答本文+groundingツール使用時の出典)をキャッシュする。
