@@ -222,8 +222,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // プロンプトまたは使用ツールを変更した場合、古い条件に対するAIの応答キャッシュを
             // 使い回さないよう明示的にクリアする(スヌーズ時の再利用は同じ条件に対する結果のみを
-            // 対象とするため)。
-            val aiConditionChanged = edits.aiPrompt != task.aiPrompt ||
+            // 対象とするため)。マップ使用不可より前に有効化されていたタスク(task.aiUseMaps)は
+            // ここで無効化するため、そのキャッシュも古い条件のものとしてクリア対象に含める。
+            val aiConditionChanged = task.aiUseMaps ||
+                edits.aiPrompt != task.aiPrompt ||
                 edits.aiUseWebSearch != task.aiUseWebSearch ||
                 edits.aiUseUrlContext != task.aiUseUrlContext
             val aiCachedResponse = if (aiConditionChanged) null else task.aiCachedResponse
@@ -246,6 +248,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 aiCachedResponse = aiCachedResponse,
                 autoSnoozeMinutes = edits.autoSnoozeMinutes,
                 aiUseWebSearch = edits.aiUseWebSearch,
+                aiUseMaps = false,
                 aiUseUrlContext = edits.aiUseUrlContext,
                 aiCachedSources = aiCachedSources
             )
