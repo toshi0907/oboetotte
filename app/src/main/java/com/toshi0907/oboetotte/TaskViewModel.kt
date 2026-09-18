@@ -26,6 +26,7 @@ import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.LocationTrackingMode
 import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -132,6 +133,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _geminiModel = MutableStateFlow(GeminiSettings.getModel(application))
     val geminiModel: StateFlow<GeminiModel> = _geminiModel
 
+    private val _updateLastCheckedAt = MutableStateFlow(AppUpdateCheckSettings.getLastCheckedAt(application))
+    val updateLastCheckedAt: StateFlow<Long?> = _updateLastCheckedAt
+
     // CloudBackupWorker(定期実行)がrecordResultでSharedPreferencesを更新しても、
     // アプリのプロセスが生きている間はcloudBackupLastBackupAt/cloudBackupLastResultの
     // StateFlowがそれだけでは更新されない(runCloudBackupNowによる明示的な再読込でのみ
@@ -144,12 +148,22 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             _cloudBackupLastResult.value = CloudBackupSettings.getLastBackupResult(appContext)
         }
 
+    // AppUpdateCheckWorker(定期実行)がrecordCheckedAtでSharedPreferencesを更新しても、
+    // アプリのプロセスが生きている間はupdateLastCheckedAtのStateFlowがそれだけでは更新されない
+    // ため、cloudBackupPrefsListenerと同じ考え方でSharedPreferences側の変更を直接購読して同期する。
+    private val updateCheckPrefsListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            _updateLastCheckedAt.value = AppUpdateCheckSettings.getLastCheckedAt(appContext)
+        }
+
     init {
         CloudBackupSettings.addLastResultChangeListener(appContext, cloudBackupPrefsListener)
+        AppUpdateCheckSettings.addLastCheckedAtChangeListener(appContext, updateCheckPrefsListener)
     }
 
     override fun onCleared() {
         CloudBackupSettings.removeLastResultChangeListener(appContext, cloudBackupPrefsListener)
+        AppUpdateCheckSettings.removeLastCheckedAtChangeListener(appContext, updateCheckPrefsListener)
     }
 
     val allTasks: StateFlow<List<Task>> = taskDao.getAll()

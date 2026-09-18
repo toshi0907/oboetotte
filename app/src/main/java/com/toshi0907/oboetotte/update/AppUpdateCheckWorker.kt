@@ -19,6 +19,7 @@ class AppUpdateCheckWorker(
 
     override suspend fun doWork(): Result {
         val result = withContext(Dispatchers.IO) { AppUpdateChecker.check() }
+        AppUpdateCheckSettings.recordCheckedAt(applicationContext, System.currentTimeMillis())
         if (result is AppUpdateChecker.Result.UpdateAvailable &&
             AppUpdateNotifier.shouldNotify(applicationContext, result.buildNumber)
         ) {
