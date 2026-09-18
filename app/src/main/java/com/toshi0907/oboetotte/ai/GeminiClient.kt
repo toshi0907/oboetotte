@@ -24,8 +24,8 @@ object GeminiClient {
     /** 設定画面の「AIテスト実行」から呼ぶ際のタイムアウト(通知経由より余裕を持たせる)。 */
     const val TEST_TIMEOUT_MILLIS = 15_000
 
-    /** 出典の取得元ツール。Googleの利用規約上、[MAPS]は表示時に「Google Maps」への帰属表記が必須。 */
-    enum class SourceOrigin { WEB_SEARCH, MAPS, URL_CONTEXT }
+    /** 出典の取得元ツール。 */
+    enum class SourceOrigin { WEB_SEARCH, URL_CONTEXT }
 
     /** グラウンディングツール使用時に応答へ付く出典。[title]が取得できない場合は[uri]をそのまま使う。 */
     data class Source(val title: String, val uri: String, val origin: SourceOrigin)
@@ -68,18 +68,9 @@ object GeminiClient {
     }
 
     /**
-     * `google_search`と`google_maps`の同時使用(組み合わせ利用)はGemini 3.5 Flash以降のみ対応で、
-     * Gemini 2.5系モデルではAPIがエラーを返す(各ツール単体のグラウンディング自体は2.5系でも対応)。
-     * 新しいモデルが追加・廃止されるたびに対応状況を見直すこと([GeminiModel]と同様)。
-     */
-    private val MODELS_WITHOUT_SEARCH_AND_MAPS_COMBO = setOf("gemini-2.5-flash", "gemini-2.5-flash-lite")
-
-    /**
-     * [useWebSearch]/[useMaps]/[useUrlContext]は、それぞれGemini APIの組み込みツール
-     * `google_search`(Web検索によるグラウンディング)・`google_maps`(地図データによるグラウンディング)・
-     * `url_context`(プロンプト中のURLの内容を取得してコンテキストに使う)に対応する。
-     * [mapsLatitude]/[mapsLongitude]は`google_maps`利用時、その場所を基準にした結果を得るための
-     * 任意の位置情報([Task.latitude]/[Task.longitude]をそのまま渡す想定)。
+     * [useWebSearch]/[useUrlContext]は、それぞれGemini APIの組み込みツール
+     * `google_search`(Web検索によるグラウンディング)・`url_context`(プロンプト中のURLの
+     * 内容を取得してコンテキストに使う)に対応する。
      */
     fun generateContent(
         apiKey: String,
@@ -87,17 +78,8 @@ object GeminiClient {
         prompt: String,
         timeoutMillis: Int,
         useWebSearch: Boolean = false,
-        useMaps: Boolean = false,
-        useUrlContext: Boolean = false,
-        mapsLatitude: Double? = null,
-        mapsLongitude: Double? = null
+        useUrlContext: Boolean = false
     ): Result {
-        if (useWebSearch && useMaps && model in MODELS_WITHOUT_SEARCH_AND_MAPS_COMBO) {
-            return Result.Failure(
-                "選択中のモデルではWeb検索とマップを同時に使用できません。設定画面でモデルを変更するか、" +
-                    "タスクのツール選択を見直してください。"
-            )
-        }
         return try {
             val url = URL(ENDPOINT_TEMPLATE.format(model, apiKey))
             val connection = url.openConnection() as HttpURLConnection
@@ -110,7 +92,6 @@ object GeminiClient {
 
                 val tools = JSONArray().apply {
                     if (useWebSearch) put(JSONObject().put("google_search", JSONObject()))
-                    if (useMaps) put(JSONObject().put("google_maps", JSONObject()))
                     if (useUrlContext) put(JSONObject().put("url_context", JSONObject()))
                 }
 
@@ -125,21 +106,6 @@ object GeminiClient {
                     )
                     if (tools.length() > 0) {
                         put("tools", tools)
-                        if (useMaps && mapsLatitude != null && mapsLongitude != null) {
-                            put(
-                                "toolConfig",
-                                JSONObject().put(
-                                    "retrievalConfig",
-                                    JSONObject().put(
-                                        "latLng",
-                                        JSONObject().apply {
-                                            put("latitude", mapsLatitude)
-                                            put("longitude", mapsLongitude)
-                                        }
-                                    )
-                                )
-                            )
-                        }
                     }
                 }
                 connection.outputStream.use { it.write(requestBody.toString().toByteArray(Charsets.UTF_8)) }
@@ -167,7 +133,7 @@ object GeminiClient {
     }
 
     /**
-     * `google_search`/`google_maps`は`groundingMetadata.groundingChunks`、`url_context`は
+     * `google_search`は`groundingMetadata.groundingChunks`、`url_context`は
      * `urlContextMetadata.urlMetadata`に出典情報を返す。フィールド名の解釈を誤っていても
      * (`opt*`系のみ使用のため)例外にはならず、単に出典が空になるだけで応答本文自体は失われない。
      */
@@ -179,13 +145,9 @@ object GeminiClient {
             for (i in 0 until chunks.length()) {
                 val chunk = chunks.optJSONObject(i) ?: continue
                 val web = chunk.optJSONObject("web")
-                val maps = chunk.optJSONObject("maps")
-                val uri = web?.optString("uri")?.takeIf { it.isNotBlank() }
-                    ?: maps?.optString("uri")?.takeIf { it.isNotBlank() }
-                    ?: continue
-                val title = (web?.optString("title") ?: maps?.optString("title"))?.takeIf { it.isNotBlank() }
-                val origin = if (maps != null) SourceOrigin.MAPS else SourceOrigin.WEB_SEARCH
-                sources.add(Source(title = title ?: uri, uri = uri, origin = origin))
+                val uri = web?.optString("uri")?.takeIf { it.isNotBlank() } ?: continue
+                val title = web.optString("title")?.takeIf { it.isNotBlank() }
+                sources.add(Source(title = title ?: uri, uri = uri, origin = SourceOrigin.WEB_SEARCH))
             }
         }
 
