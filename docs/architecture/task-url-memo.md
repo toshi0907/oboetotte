@@ -1,0 +1,3 @@
+# タスクのURL・メモ
+
+**タスクのURL・メモ**: `Task.url`/`Task.memo`はいずれも任意の文字列で、`EditTaskDialog`のタイトル直下(URL)・サブタスク一覧の直前(メモ、複数行の`OutlinedTextField`)で入力・編集できます。`url`はダイアログ保存時に`normalizeUrl()`(`MainActivity.kt`内のプライベート関数)で先頭が`http://`/`https://`でなければ`https://`を補い、空文字ならNULLとして保存します。`url`が設定されている場合、期限日時通知(`ReminderReceiver`)・位置情報通知(`GeofenceReceiver`)の両方に「リンクを開く」という`NotificationCompat.Action`が追加され、タップすると`ReminderScheduler.openUrlPendingIntent(context, taskId, url)`が`Intent.ACTION_VIEW`でブラウザ等を起動します(通知本体のタップは従来どおりアプリを開きます)。このボタンの`PendingIntent`リクエストコードは`taskId.toInt() * 10 + 9`で、「スヌーズ」ボタンの`taskId.toInt() * 10 + 5`(詳細は前項)と衝突しないオフセットを使っています。`memo`は通知には表示されず、`EditTaskDialog`を開いたときのみ参照・編集できます。

@@ -56,7 +56,34 @@ GitHub Issueに対応する形で実装を行った場合は、対応内容のPR
 
 パッケージ名/applicationId: `com.toshi0907.oboetotte`、minSdk 26、target/compileSdk 35。Kotlin 2.0.21 + AGP 8.7.3で、**Composeを使うには`org.jetbrains.kotlin.plugin.compose`プラグインが必須**(ルート・`app`両方の`build.gradle.kts`に適用済み。Kotlin 2.0以降は従来の`composeOptions.kotlinCompilerExtensionVersion`は機能しない)。**Room等のエンティティのスキーマを変更する際は、`@Database`の`version`を上げるのに加えて必ず新しい`Migration`を追加し`addMigrations()`に登録すること**(怠るとアプリ更新時にユーザーのデータが失われる)。
 
-永続化層(Room)・ViewModel・画面構成・繰り返しタスク・リマインダー通知・AI連携(Gemini)・位置情報リマインダー・各種デバッグ画面・保存済みの場所・ファイル添付・バックアップ(ローカル/クラウド)・ホーム画面ウィジェット・共有によるタスク追加・アプリ内アップデート等、機能ごとの実装詳細は**`docs/architecture.md`を参照**。該当機能に触れる作業の前に必ず目を通すこと。
+機能ごとの実装詳細は`docs/architecture/`配下にファイルを分割している。該当する機能に触れる作業の前に、CLAUDE.md全体ではなく対象のファイルだけを参照すること(新しい機能をここに追記する際も、既存ファイルへの追記か新規ファイル追加かを検討し、CLAUDE.md本体は肥大化させない)。
+
+- 永続化層(Room): `docs/architecture/persistence-room.md`
+- TaskViewModel: `docs/architecture/task-viewmodel.md`
+- 繰り返しタスク: `docs/architecture/repeat-tasks.md`
+- 画面構成(MainActivity): `docs/architecture/screen-structure.md`
+- タスク一覧画面(TaskScreen): `docs/architecture/task-list-screen.md`
+- 設定画面(SettingsScreen): `docs/architecture/settings-screen.md`
+- サブタスクのツリー表示: `docs/architecture/subtask-tree.md`
+- 期限ピッカー・DBマイグレーション: `docs/architecture/due-picker-db-migration.md`
+- リマインダー通知: `docs/architecture/reminder-notifications.md`
+- AI連携(Gemini): `docs/architecture/ai-gemini.md`
+- 位置情報リマインダー: `docs/architecture/location-reminders.md`
+- 位置情報リマインダーの確認方式(連続追跡): `docs/architecture/location-tracking-mode.md`
+- 位置情報の更新履歴(デバッグ): `docs/architecture/location-update-log.md`
+- 通知履歴(デバッグ): `docs/architecture/notification-log.md`
+- 保存済みの場所: `docs/architecture/saved-locations.md`
+- タスクのURL・メモ: `docs/architecture/task-url-memo.md`
+- タスクへのファイル添付: `docs/architecture/task-attachments.md`
+- ローカルバックアップ(エクスポート/インポート): `docs/architecture/local-backup.md`
+- クラウド自動バックアップ: `docs/architecture/cloud-backup.md`
+- ホーム画面ウィジェット: `docs/architecture/home-widget.md`
+- 共有によるタスク追加: `docs/architecture/share-task.md`
+- アプリ内アップデート: `docs/architecture/app-update.md`
+- テーマ: `docs/architecture/theme.md`
+- アプリアイコン: `docs/architecture/app-icon.md`
+- 基本情報(パッケージ名/SDKバージョン): `docs/architecture/basic-info.md`
+- Kotlin/AGP/Composeコンパイラプラグイン: `docs/architecture/kotlin-agp-compose.md`
 
 ## 利用可能なスキル(myskills 由来)
 
