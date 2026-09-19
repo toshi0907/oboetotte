@@ -1,0 +1,3 @@
+# 保存済みの場所
+
+**保存済みの場所(自宅・職場など)**: `data/SavedLocation`(`id`/`name`/`latitude`/`longitude`/`radiusMeters`)として、タスクとは独立に登録しておける場所の一覧です。設定画面(`SettingsScreen`)の「場所を編集」ボタンから`ManageLocationsDialog`を開くと、住所文字入力または現在地取得(`LocationPicker`、後述)で座標を決めてから名称・半径を付けて登録でき、登録済みの一覧では名称のタップで名称・半径の変更(座標は変更不可。座標を変えたい場合は削除して登録し直す)、「削除」ボタンで削除できます。`EditTaskDialog`の「位置」セクションは「住所で指定」「現在地を使う」に加えて「登録済みから選択」タブを持ち、選択すると保存済みの場所がチップとして並び、タップするとそのタスクの位置・半径にそのまま反映されます(反映後も半径チップで上書き可能)。「住所で指定」「現在地を使う」の入力UI自体は`LocationPicker`(`MainActivity.kt`内のプライベートComposable)として`EditTaskDialog`と`ManageLocationsDialog`で共通化しています。バックアップのJSON形式にも`savedLocations`配列として含まれます(旧形式のファイルにはキー自体が無いため、`JSONObject.optJSONArray`で無ければ空扱いにして後方互換を保っています)。

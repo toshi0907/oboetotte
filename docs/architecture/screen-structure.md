@@ -1,0 +1,3 @@
+# 画面構成(MainActivity)
+
+**画面構成**: `MainActivity`はNavigation Compose等のライブラリを使わず、`setContent`内の`var currentScreen by remember { mutableStateOf(MainScreen.Tasks) }`(`MainScreen`は`MainActivity.kt`内のプライベートな`enum class`で`Tasks`/`Settings`の2値)を`when`で分岐させ、`TaskScreen`と`SettingsScreen`のどちらかをメイン画面全体として描画するだけのシンプルな構成です(両画面とも`Scaffold`の同じ`innerPadding`を共有)。`TaskScreen`側は末尾の「設定」`AssistChip`の`onOpenSettings`で`currentScreen = MainScreen.Settings`に、`SettingsScreen`側は先頭の「← 戻る」`TextButton`の`onBack`で`currentScreen = MainScreen.Tasks`に戻します。`SettingsScreen`は`BackHandler`(`androidx.activity.compose`)でシステムの「戻る」操作(戻るジェスチャー・戻るボタン)も同じ`onBack`にフックしており、アプリ終了ではなくタスク一覧への復帰として扱われます。
