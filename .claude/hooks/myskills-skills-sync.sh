@@ -20,6 +20,11 @@
 #   3. .claude/settings.json に settings.snippet.json の内容をマージ
 set -euo pipefail
 
+# 呼び出し元から GIT_DIR 等が継承されていると、この後の cd が効かず
+# 意図しないリポジトリを操作してしまうため、先にクリアしておく。
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE \
+  GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX
+
 cd "$CLAUDE_PROJECT_DIR"
 
 if [ ! -f .gitmodules ] || ! grep -q '\.myskills' .gitmodules 2>/dev/null; then
