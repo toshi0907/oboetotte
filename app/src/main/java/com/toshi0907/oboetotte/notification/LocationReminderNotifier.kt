@@ -56,7 +56,7 @@ object LocationReminderNotifier {
             .addAction(
                 R.drawable.ic_notification,
                 "完了",
-                ReminderScheduler.completePendingIntent(context, taskId)
+                ReminderScheduler.locationCompletePendingIntent(context, taskId)
             )
         if (!url.isNullOrBlank()) {
             builder.addAction(

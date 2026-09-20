@@ -13,6 +13,9 @@ object ReminderScheduler {
     const val EXTRA_IS_TEST = "is_test"
     const val EXTRA_IS_SNOOZE = "is_snooze"
     const val EXTRA_IS_AUTO_SNOOZE = "is_auto_snooze"
+    const val EXTRA_DUE_AT = "due_at"
+    private const val ACTION_COMPLETE_DUE = "com.toshi0907.oboetotte.action.COMPLETE_DUE"
+    private const val ACTION_COMPLETE_LOCATION = "com.toshi0907.oboetotte.action.COMPLETE_LOCATION"
     private const val TEST_REQUEST_CODE = -1
     const val TEST_DELAY_SECONDS = 5L
 
@@ -190,9 +193,46 @@ object ReminderScheduler {
         )
     }
 
-    /** 通知の「完了」ボタン用。[CompleteReceiver]宛で、通知アクションを起動する他のコンポーネントとは異なるため衝突しない。 */
-    fun completePendingIntent(context: Context, taskId: Long): PendingIntent {
+    /**
+     * 期限日時通知([ReminderReceiver])の「完了」ボタン用。[CompleteReceiver]宛。
+     * [dueAt]には通知を表示した時点の期限を渡し、[EXTRA_DUE_AT]としてIntentに載せる。
+     * [CompleteReceiver]はこれを完了処理直前のタスクの現在の`dueAt`と突き合わせ、繰り返しタスクの
+     * 完了等で既に次回分の期限に進んでいた場合に、古い通知の「完了」を誤って新しい期限のタスクへ
+     * 適用してしまわないようにする。位置情報通知の「完了」ボタンには[locationCompletePendingIntent]
+     * を使うこと(下記参照)。[ACTION_COMPLETE_DUE]を明示的に設定しているのは、リクエストコードが
+     * 同じ`taskId.toInt()`であっても[locationCompletePendingIntent]と異なる`PendingIntent`として
+     * 区別するため(`PendingIntent`の同一性はコンポーネント+リクエストコード+Intentの
+     * action/data/categories/typeで決まり、extrasの違いは同一性に影響しないため、actionを
+     * 分けないと`FLAG_UPDATE_CURRENT`で片方の`EXTRA_DUE_AT`の有無がもう片方の、既に表示済みの
+     * 通知に埋め込まれたPendingIntentの中身まで上書きしてしまう)。
+     */
+    fun completePendingIntent(context: Context, taskId: Long, dueAt: Long): PendingIntent {
         val intent = Intent(context, CompleteReceiver::class.java).apply {
+            action = ACTION_COMPLETE_DUE
+            putExtra(EXTRA_TASK_ID, taskId)
+            putExtra(EXTRA_DUE_AT, dueAt)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            taskId.toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * 位置情報通知([LocationReminderNotifier])の「完了」ボタン用。期限の概念が無いため
+     * [EXTRA_DUE_AT]は載せず、[CompleteReceiver]は従来通りタスクが存在すれば完了扱いとする。
+     * [ACTION_COMPLETE_LOCATION]により[completePendingIntent](期限日時通知側)とは別の
+     * `PendingIntent`として区別する(理由は[completePendingIntent]のコメント参照。
+     * リクエストコードが同じ`taskId.toInt()`でもactionが異なれば別の`PendingIntent`になるため、
+     * 以前のように`taskId.toInt() * 10 + N`のような算術でリクエストコードだけをずらす方式は
+     * 採らない。この方式は同じ`taskId`同士の衝突は避けられても、`taskIdA == taskIdB * 10 + N`と
+     * なる別タスク同士のリクエストコードが偶然一致するケースを防げないため)。
+     */
+    fun locationCompletePendingIntent(context: Context, taskId: Long): PendingIntent {
+        val intent = Intent(context, CompleteReceiver::class.java).apply {
+            action = ACTION_COMPLETE_LOCATION
             putExtra(EXTRA_TASK_ID, taskId)
         }
         return PendingIntent.getBroadcast(

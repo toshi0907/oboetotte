@@ -30,7 +30,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_TEST, false)) {
-            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showTaskActions = false, url = null, aiOutcome = null)
+            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showTaskActions = false, url = null, aiOutcome = null, dueAt = null)
             return
         }
 
@@ -52,7 +52,8 @@ class ReminderReceiver : BroadcastReceiver() {
                         task.title,
                         showTaskActions = !task.notifyOnlyMode,
                         url = task.url,
-                        aiOutcome = aiOutcome
+                        aiOutcome = aiOutcome,
+                        dueAt = task.dueAt
                     )
                     if (posted) {
                         val aiSuffix = when (aiOutcome) {
@@ -162,7 +163,8 @@ class ReminderReceiver : BroadcastReceiver() {
         title: String,
         showTaskActions: Boolean,
         url: String?,
-        aiOutcome: AiOutcome?
+        aiOutcome: AiOutcome?,
+        dueAt: Long?
     ): Boolean {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -195,12 +197,18 @@ class ReminderReceiver : BroadcastReceiver() {
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
 
-        if (showTaskActions) {
+        if (showTaskActions && dueAt != null) {
+            // dueAtはスケジュール済みのアラームが発火した場合は常に非nullのはず
+            // (ReminderScheduler.scheduleはdueAtがnullなら通知自体をスケジュールしない)だが、
+            // 万一nullであれば「完了」ボタンの期限突き合わせができないため、安全側に倒して
+            // このボタン自体を出さない(スヌーズボタンは引き続き表示する)。
             builder.addAction(
                 R.drawable.ic_notification,
                 "完了",
-                ReminderScheduler.completePendingIntent(context, notificationId)
+                ReminderScheduler.completePendingIntent(context, notificationId, dueAt)
             )
+        }
+        if (showTaskActions) {
             builder.addAction(
                 R.drawable.ic_notification,
                 "スヌーズ",

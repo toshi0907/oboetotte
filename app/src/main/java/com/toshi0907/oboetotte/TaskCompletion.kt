@@ -1,6 +1,7 @@
 package com.toshi0907.oboetotte
 
 import android.content.Context
+import androidx.core.app.NotificationManagerCompat
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.attachmentGroupId
@@ -17,6 +18,17 @@ import java.time.ZoneId
  */
 object TaskCompletion {
     suspend fun complete(context: Context, task: Task) {
+        // アプリ内のチェックボックスや「通知のみタスク」の自動完了など、通知の「完了」ボタン
+        // (notification/CompleteReceiver、既にここへ来る前に自身の通知を消去済み)以外の経路で
+        // 完了させた場合、そのタスクの期限日時・位置情報の通知が表示されたまま残ってしまう
+        // (アラームのキャンセルとは別に、表示済みの通知自体は明示的にcancelしないと消えない)。
+        // 完了処理の入口をここに集約しているため、ここで両タグとも消去しておけば経路によらず
+        // 常に同期する。
+        NotificationManagerCompat.from(context).apply {
+            cancel(ReminderScheduler.NOTIFICATION_TAG_DUE, task.id.toInt())
+            cancel(ReminderScheduler.NOTIFICATION_TAG_LOCATION, task.id.toInt())
+        }
+
         val taskDao = AppDatabase.getInstance(context).taskDao()
         // taskDao.setDoneはisDone != trueの行にしか一致しないため、同じタスクに対して
         // ほぼ同時に呼ばれた複数回のcomplete呼び出し(例: 通知のみタスクの自動完了と
