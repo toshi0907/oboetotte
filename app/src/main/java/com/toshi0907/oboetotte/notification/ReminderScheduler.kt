@@ -192,24 +192,44 @@ object ReminderScheduler {
     }
 
     /**
-     * 通知の「完了」ボタン用。[CompleteReceiver]宛で、通知アクションを起動する他のコンポーネントとは異なるため衝突しない。
-     * [dueAt]を渡すと(期限日時通知[ReminderReceiver]からの呼び出し)、通知を表示した時点の期限を
-     * [EXTRA_DUE_AT]としてIntentに載せる。[CompleteReceiver]はこれを完了処理直前のタスクの現在の
-     * `dueAt`と突き合わせ、繰り返しタスクの完了等で既に次回分の期限に進んでいた場合に、古い通知の
-     * 「完了」を誤って新しい期限のタスクへ適用してしまわないようにする。位置情報通知
-     * ([LocationReminderNotifier])には期限の概念が無いため`null`のまま呼び出し、従来通り
-     * タスクが存在すれば完了扱いとする。
+     * 期限日時通知([ReminderReceiver])の「完了」ボタン用。[CompleteReceiver]宛で、リクエストコードは
+     * `taskId.toInt()`(通知アクションを起動する他のコンポーネントとは異なるため衝突しない)。
+     * [dueAt]には通知を表示した時点の期限を渡し、[EXTRA_DUE_AT]としてIntentに載せる。
+     * [CompleteReceiver]はこれを完了処理直前のタスクの現在の`dueAt`と突き合わせ、繰り返しタスクの
+     * 完了等で既に次回分の期限に進んでいた場合に、古い通知の「完了」を誤って新しい期限のタスクへ
+     * 適用してしまわないようにする。位置情報通知の「完了」ボタンには[locationCompletePendingIntent]
+     * を使うこと(下記参照)。
      */
-    fun completePendingIntent(context: Context, taskId: Long, dueAt: Long? = null): PendingIntent {
+    fun completePendingIntent(context: Context, taskId: Long, dueAt: Long): PendingIntent {
         val intent = Intent(context, CompleteReceiver::class.java).apply {
             putExtra(EXTRA_TASK_ID, taskId)
-            if (dueAt != null) {
-                putExtra(EXTRA_DUE_AT, dueAt)
-            }
+            putExtra(EXTRA_DUE_AT, dueAt)
         }
         return PendingIntent.getBroadcast(
             context,
             taskId.toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * 位置情報通知([LocationReminderNotifier])の「完了」ボタン用。期限の概念が無いため
+     * [EXTRA_DUE_AT]は載せず、[CompleteReceiver]は従来通りタスクが存在すれば完了扱いとする。
+     * リクエストコードは[completePendingIntent](期限日時通知側、`taskId.toInt()`)と別の枠にするため
+     * `taskId.toInt() * 10 + 3`を使う(同じ`CompleteReceiver`宛のPendingIntentでもリクエストコードが
+     * 同じだと`FLAG_UPDATE_CURRENT`により後から作られた側のIntent extras(`EXTRA_DUE_AT`の有無)で
+     * もう片方の、既に表示済みの通知に埋め込まれたPendingIntentの中身まで上書きされてしまうため、
+     * 期限日時通知側と位置情報通知側は必ず別のリクエストコードを使う。通知そのものの消去は
+     * [CompleteReceiver]がタスクIDから直接両タグをcancelするため、この番号の違いに影響されない)。
+     */
+    fun locationCompletePendingIntent(context: Context, taskId: Long): PendingIntent {
+        val intent = Intent(context, CompleteReceiver::class.java).apply {
+            putExtra(EXTRA_TASK_ID, taskId)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            taskId.toInt() * 10 + LOCATION_COMPLETE_REQUEST_CODE_OFFSET,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -231,6 +251,7 @@ object ReminderScheduler {
         )
     }
 
+    private const val LOCATION_COMPLETE_REQUEST_CODE_OFFSET = 3
     private const val SNOOZE_PICKER_REQUEST_CODE_OFFSET = 5
     private const val OPEN_URL_REQUEST_CODE_OFFSET = 9
 }

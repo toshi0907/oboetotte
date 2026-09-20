@@ -197,12 +197,18 @@ class ReminderReceiver : BroadcastReceiver() {
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
 
-        if (showTaskActions) {
+        if (showTaskActions && dueAt != null) {
+            // dueAtはスケジュール済みのアラームが発火した場合は常に非nullのはず
+            // (ReminderScheduler.scheduleはdueAtがnullなら通知自体をスケジュールしない)だが、
+            // 万一nullであれば「完了」ボタンの期限突き合わせができないため、安全側に倒して
+            // このボタン自体を出さない(スヌーズボタンは引き続き表示する)。
             builder.addAction(
                 R.drawable.ic_notification,
                 "完了",
                 ReminderScheduler.completePendingIntent(context, notificationId, dueAt)
             )
+        }
+        if (showTaskActions) {
             builder.addAction(
                 R.drawable.ic_notification,
                 "スヌーズ",
