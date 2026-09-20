@@ -18,13 +18,17 @@ class CompleteReceiver : BroadcastReceiver() {
         val hasNotifiedDueAt = intent.hasExtra(ReminderScheduler.EXTRA_DUE_AT)
         val notifiedDueAt = intent.getLongExtra(ReminderScheduler.EXTRA_DUE_AT, -1L)
 
-        // タスク完了時は、期限日時・位置情報どちらの通知が表示中でも両方消去する。
-        // (タップされた通知自体は、下記の期限不一致でタスクを完了させない場合でも、
-        // 既に古くなっているので消去してよい)
-        NotificationManagerCompat.from(context).apply {
-            cancel(ReminderScheduler.NOTIFICATION_TAG_DUE, taskId.toInt())
-            cancel(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt())
+        // タップされた通知自体は、下記の期限不一致でタスクを完了させない場合でも既に古くなって
+        // いるのでここで消去してよいが、消すのは「今回タップされた側」のタグ(期限日時通知経由なら
+        // DUE、位置情報通知経由ならLOCATION)だけにする。両方消してしまうと、期限不一致で完了させ
+        // ない場合に、まだ有効なもう片方の通知(例: 位置情報の方)まで誤って消してしまうため。
+        // 完了処理を実際に行った場合の両タグの消去はTaskCompletion.completeが担う。
+        val tappedTag = if (hasNotifiedDueAt) {
+            ReminderScheduler.NOTIFICATION_TAG_DUE
+        } else {
+            ReminderScheduler.NOTIFICATION_TAG_LOCATION
         }
+        NotificationManagerCompat.from(context).cancel(tappedTag, taskId.toInt())
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
