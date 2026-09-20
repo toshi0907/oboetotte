@@ -40,7 +40,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -61,7 +60,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
@@ -80,10 +78,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -92,8 +88,6 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
-import com.toshi0907.oboetotte.ai.GeminiClient
-import com.toshi0907.oboetotte.ai.GeminiModel
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.backup.BackupManager
 import com.toshi0907.oboetotte.backup.CloudBackupResult
@@ -217,8 +211,6 @@ class MainActivity : ComponentActivity() {
                     val cloudBackupMinute by taskViewModel.cloudBackupMinute.collectAsState()
                     val cloudBackupLastBackupAt by taskViewModel.cloudBackupLastBackupAt.collectAsState()
                     val cloudBackupLastResult by taskViewModel.cloudBackupLastResult.collectAsState()
-                    val geminiApiKey by taskViewModel.geminiApiKey.collectAsState()
-                    val geminiModel by taskViewModel.geminiModel.collectAsState()
                     val updateLastCheckedAt by taskViewModel.updateLastCheckedAt.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
@@ -402,11 +394,6 @@ class MainActivity : ComponentActivity() {
                             isDownloadingUpdate = isDownloadingUpdate,
                             onCheckForUpdate = ::checkForUpdate,
                             onDownloadUpdate = ::downloadAndInstallUpdate,
-                            geminiApiKey = geminiApiKey,
-                            geminiModel = geminiModel,
-                            onSetGeminiApiKey = taskViewModel::setGeminiApiKey,
-                            onSetGeminiModel = taskViewModel::setGeminiModel,
-                            onTestGeminiPrompt = taskViewModel::testGeminiPrompt,
                             onBack = { currentScreen = MainScreen.Tasks },
                             modifier = Modifier.padding(innerPadding)
                         )
@@ -506,47 +493,6 @@ private fun autoSnoozeLabel(task: Task): String? {
     val minutes = task.autoSnoozeMinutes ?: return null
     val label = ReminderScheduler.SNOOZE_OPTIONS.find { it.minutes == minutes }?.label ?: "${minutes}分後"
     return "オートスヌーズ: $label"
-}
-
-/** [EditTaskDialog]/[GeminiTestDialog]と共通の、選択された組み込みツールのチェックボックス群。 */
-@Composable
-private fun AiToolCheckboxes(
-    useWebSearch: Boolean,
-    onUseWebSearchChange: (Boolean) -> Unit,
-    useUrlContext: Boolean,
-    onUseUrlContextChange: (Boolean) -> Unit
-) {
-    Text(text = "使用するツール", style = MaterialTheme.typography.labelMedium)
-    Row(
-        modifier = Modifier
-            .minimumInteractiveComponentSize()
-            .toggleable(value = useWebSearch, onValueChange = onUseWebSearchChange, role = Role.Checkbox),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(checked = useWebSearch, onCheckedChange = null)
-        Text("Web検索(最新のWeb情報を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
-    }
-    Row(
-        modifier = Modifier
-            .minimumInteractiveComponentSize()
-            .toggleable(value = useUrlContext, onValueChange = onUseUrlContextChange, role = Role.Checkbox),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(checked = useUrlContext, onCheckedChange = null)
-        Text("URLコンテキスト(プロンプト中のURLの内容を踏まえて回答)", style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-/** 出典表示用のラベル。 */
-private fun sourceLabel(source: GeminiClient.Source): String = "出典: ${source.title}"
-
-/** [Task.aiUseWebSearch]等から選択済みツールを一覧表示用の文字列にする。未選択ならnull。 */
-private fun aiToolsLabel(task: Task): String? {
-    val labels = buildList {
-        if (task.aiUseWebSearch) add("Web検索")
-        if (task.aiUseUrlContext) add("URLコンテキスト")
-    }
-    return labels.takeIf { it.isNotEmpty() }?.joinToString("・")
 }
 
 private val URL_SCHEME_PREFIX = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
@@ -996,41 +942,6 @@ fun TaskDetailDialog(
                     Text(text = "メモ", style = MaterialTheme.typography.titleSmall)
                     Text(text = current.memo)
                 }
-                if (!current.aiPrompt.isNullOrBlank()) {
-                    Text(text = "AIプロンプト", style = MaterialTheme.typography.titleSmall)
-                    Text(text = current.aiPrompt)
-                    aiToolsLabel(current)?.let {
-                        Text(
-                            text = "使用するツール: $it",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    if (!current.aiCachedResponse.isNullOrBlank()) {
-                        Text(
-                            text = "直近のAI応答: ${current.aiCachedResponse}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        val sources = remember(current.aiCachedSources) {
-                            GeminiClient.decodeSources(current.aiCachedSources)
-                        }
-                        sources.forEach { source ->
-                            Text(
-                                text = sourceLabel(source),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.clickable {
-                                    try {
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(source.uri)))
-                                    } catch (e: ActivityNotFoundException) {
-                                        Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                }
                 if (attachments.isNotEmpty()) {
                     Text(text = "添付ファイル", style = MaterialTheme.typography.titleSmall)
                     attachments.forEach { attachment ->
@@ -1151,12 +1062,6 @@ fun SettingsScreen(
     isDownloadingUpdate: Boolean = false,
     onCheckForUpdate: () -> Unit = {},
     onDownloadUpdate: (String) -> Unit = {},
-    geminiApiKey: String? = null,
-    geminiModel: GeminiModel = GeminiModel.DEFAULT,
-    onSetGeminiApiKey: (String) -> Unit = {},
-    onSetGeminiModel: (GeminiModel) -> Unit = {},
-    onTestGeminiPrompt: suspend (String, Boolean, Boolean) -> GeminiClient.Result =
-        { _, _, _ -> GeminiClient.Result.Failure("未設定") },
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1165,7 +1070,6 @@ fun SettingsScreen(
     var showLocationDebug by remember { mutableStateOf(false) }
     var showNotificationLogs by remember { mutableStateOf(false) }
     var showBackupTimePicker by remember { mutableStateOf(false) }
-    var showGeminiTest by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -1446,61 +1350,6 @@ fun SettingsScreen(
             }
 
             Text(
-                text = "AI連携",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-            Text(
-                text = "タスクにAIへのプロンプトを登録しておくと、期限日時の通知が届くタイミングで" +
-                    "Gemini(無料枠)に問い合わせ、結果を通知に含めます。APIキーはこの端末内にのみ" +
-                    "保存され、リポジトリには含まれません。",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                text = "タスクごとに「Web検索」「URLコンテキスト」の組み込みツールを使わせる" +
-                    "こともできます。Web検索は通常のトークン課金とは別に無料枠が設定されており、" +
-                    "モデル・料金プランによって条件が異なります。超過分は課金が発生するため、" +
-                    "最新の条件はGemini APIの料金ページでご確認ください。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            var apiKeyInput by remember(geminiApiKey) { mutableStateOf(geminiApiKey ?: "") }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 4.dp)
-            ) {
-                OutlinedTextField(
-                    value = apiKeyInput,
-                    onValueChange = { apiKeyInput = it },
-                    label = { Text("Gemini APIキー") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = { onSetGeminiApiKey(apiKeyInput) }) {
-                    Text("保存")
-                }
-            }
-            Text(
-                text = "モデル",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(GeminiModel.entries) { model ->
-                    FilterChip(
-                        selected = geminiModel == model,
-                        onClick = { onSetGeminiModel(model) },
-                        label = { Text(model.label) }
-                    )
-                }
-            }
-
-            Text(
                 text = "デバッグ",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 8.dp)
@@ -1513,9 +1362,6 @@ fun SettingsScreen(
             }
             TextButton(onClick = { showNotificationLogs = true }) {
                 Text("通知履歴")
-            }
-            TextButton(onClick = { showGeminiTest = true }) {
-                Text("AIテスト実行")
             }
         }
     }
@@ -1552,13 +1398,6 @@ fun SettingsScreen(
         NotificationLogDialog(
             logs = notificationLogs,
             onDismiss = { showNotificationLogs = false }
-        )
-    }
-
-    if (showGeminiTest) {
-        GeminiTestDialog(
-            onTest = onTestGeminiPrompt,
-            onDismiss = { showGeminiTest = false }
         )
     }
 
@@ -1798,95 +1637,6 @@ fun NotificationLogDialog(
                             )
                         }
                     }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("閉じる")
-            }
-        }
-    )
-}
-
-/**
- * 設定画面の「AIテスト実行」から開く。通知の発火を待たずに、現在保存されているAPIキー・モデルで
- * 任意のプロンプトを試せる([onTest]は[TaskViewModel.testGeminiPrompt]をそのまま渡す想定)。
- */
-@Composable
-fun GeminiTestDialog(
-    onTest: suspend (String, Boolean, Boolean) -> GeminiClient.Result,
-    onDismiss: () -> Unit
-) {
-    var prompt by remember { mutableStateOf("") }
-    var useWebSearch by remember { mutableStateOf(false) }
-    var useUrlContext by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<GeminiClient.Result?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
-    val context = LocalContext.current
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("AIテスト実行") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    label = { Text("プロンプト") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
-                )
-                AiToolCheckboxes(
-                    useWebSearch = useWebSearch,
-                    onUseWebSearchChange = { useWebSearch = it },
-                    useUrlContext = useUrlContext,
-                    onUseUrlContextChange = { useUrlContext = it }
-                )
-                TextButton(
-                    enabled = prompt.isNotBlank() && !loading,
-                    onClick = {
-                        loading = true
-                        result = null
-                        coroutineScope.launch {
-                            result = onTest(prompt, useWebSearch, useUrlContext)
-                            loading = false
-                        }
-                    }
-                ) {
-                    Text(if (loading) "実行中..." else "実行")
-                }
-                when (val current = result) {
-                    is GeminiClient.Result.Success -> {
-                        Text(
-                            text = current.text,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        current.sources.forEach { source ->
-                            Text(
-                                text = sourceLabel(source),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.clickable {
-                                    try {
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(source.uri)))
-                                    } catch (e: ActivityNotFoundException) {
-                                        Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    is GeminiClient.Result.Failure -> Text(
-                        text = "失敗: ${current.message}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    null -> {}
                 }
             }
         },
@@ -2303,9 +2053,6 @@ fun EditTaskDialog(
     var listId by remember(task.id) { mutableStateOf(task.listId) }
     var url by remember(task.id) { mutableStateOf(task.url ?: "") }
     var memo by remember(task.id) { mutableStateOf(task.memo ?: "") }
-    var aiPrompt by remember(task.id) { mutableStateOf(task.aiPrompt ?: "") }
-    var aiUseWebSearch by remember(task.id) { mutableStateOf(task.aiUseWebSearch) }
-    var aiUseUrlContext by remember(task.id) { mutableStateOf(task.aiUseUrlContext) }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
     var repeatRule by remember(task.id) { mutableStateOf(task.repeatRule) }
     var selectedDays by remember(task.id) {
@@ -2666,25 +2413,6 @@ fun EditTaskDialog(
                     minLines = 3
                 )
 
-                Text(text = "AIプロンプト", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    text = "設定すると、この期限日時の通知が届くタイミングでGeminiに問い合わせ、" +
-                        "結果を通知に含めます(設定画面でAPIキーの登録が必要です)。",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                OutlinedTextField(
-                    value = aiPrompt,
-                    onValueChange = { aiPrompt = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
-                )
-                AiToolCheckboxes(
-                    useWebSearch = aiUseWebSearch,
-                    onUseWebSearchChange = { aiUseWebSearch = it },
-                    useUrlContext = aiUseUrlContext,
-                    onUseUrlContextChange = { aiUseUrlContext = it }
-                )
-
                 Text(text = "添付ファイル", style = MaterialTheme.typography.titleSmall)
                 attachments.forEach { attachment ->
                     AttachmentRow(
@@ -2763,10 +2491,7 @@ fun EditTaskDialog(
                             notifyOnDeparture = location != null && notifyOnDeparture,
                             url = normalizeUrl(url),
                             memo = memo.trim().ifBlank { null },
-                            aiPrompt = aiPrompt.trim().ifBlank { null },
                             autoSnoozeMinutes = if (notifyOnlyMode) null else autoSnoozeMinutes,
-                            aiUseWebSearch = aiUseWebSearch,
-                            aiUseUrlContext = aiUseUrlContext,
                             notifyOnlyMode = notifyOnlyMode
                         )
                     )

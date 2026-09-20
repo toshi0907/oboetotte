@@ -67,7 +67,6 @@ GitHub Issueに対応する形で実装を行った場合は、対応内容のPR
 - サブタスクのツリー表示: `docs/architecture/subtask-tree.md`
 - 期限ピッカー・DBマイグレーション: `docs/architecture/due-picker-db-migration.md`
 - リマインダー通知: `docs/architecture/reminder-notifications.md`
-- AI連携(Gemini): `docs/architecture/ai-gemini.md`
 - 位置情報リマインダー: `docs/architecture/location-reminders.md`
 - 位置情報リマインダーの確認方式(連続追跡): `docs/architecture/location-tracking-mode.md`
 - 位置情報の更新履歴(デバッグ): `docs/architecture/location-update-log.md`

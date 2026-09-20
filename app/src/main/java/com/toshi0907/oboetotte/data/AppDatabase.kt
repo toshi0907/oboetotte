@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LocationUpdateLog::class,
         GeofenceState::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -169,6 +169,48 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // AI連携(Gemini)機能の削除に伴い、aiPrompt/aiCachedResponse/aiUseWebSearch/aiUseMaps/
+        // aiUseUrlContext/aiCachedSourcesの各カラムを落とす。SQLiteのALTER TABLE DROP COLUMNは
+        // 端末のSQLiteバージョンによっては使えないため、新しいテーブルを作って必要なカラムだけ
+        // コピーし、古いテーブルと入れ替える(Roomが推奨するカラム削除の手順)。
+        private val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `tasks_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`isDone` INTEGER NOT NULL DEFAULT 0, " +
+                        "`dueAt` INTEGER, " +
+                        "`listId` INTEGER, " +
+                        "`parentTaskId` INTEGER, " +
+                        "`repeatRule` TEXT, " +
+                        "`repeatDaysOfWeek` TEXT, " +
+                        "`locationName` TEXT, " +
+                        "`latitude` REAL, " +
+                        "`longitude` REAL, " +
+                        "`radiusMeters` INTEGER, " +
+                        "`notifyOnArrival` INTEGER NOT NULL DEFAULT 0, " +
+                        "`notifyOnDeparture` INTEGER NOT NULL DEFAULT 0, " +
+                        "`url` TEXT, " +
+                        "`memo` TEXT, " +
+                        "`seriesId` INTEGER, " +
+                        "`autoSnoozeMinutes` INTEGER, " +
+                        "`notifyOnlyMode` INTEGER NOT NULL DEFAULT 0)"
+                )
+                db.execSQL(
+                    "INSERT INTO `tasks_new` (" +
+                        "id, title, isDone, dueAt, listId, parentTaskId, repeatRule, repeatDaysOfWeek, " +
+                        "locationName, latitude, longitude, radiusMeters, notifyOnArrival, notifyOnDeparture, " +
+                        "url, memo, seriesId, autoSnoozeMinutes, notifyOnlyMode) " +
+                        "SELECT id, title, isDone, dueAt, listId, parentTaskId, repeatRule, repeatDaysOfWeek, " +
+                        "locationName, latitude, longitude, radiusMeters, notifyOnArrival, notifyOnDeparture, " +
+                        "url, memo, seriesId, autoSnoozeMinutes, notifyOnlyMode FROM `tasks`"
+                )
+                db.execSQL("DROP TABLE `tasks`")
+                db.execSQL("ALTER TABLE `tasks_new` RENAME TO `tasks`")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -190,7 +232,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_16_17,
                         MIGRATION_17_18,
                         MIGRATION_18_19,
-                        MIGRATION_19_20
+                        MIGRATION_19_20,
+                        MIGRATION_20_21
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
