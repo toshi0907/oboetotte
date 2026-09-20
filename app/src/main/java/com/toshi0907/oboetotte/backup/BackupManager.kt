@@ -81,13 +81,7 @@ object BackupManager {
                             put("url", task.url ?: JSONObject.NULL)
                             put("memo", task.memo ?: JSONObject.NULL)
                             put("seriesId", task.seriesId ?: JSONObject.NULL)
-                            put("aiPrompt", task.aiPrompt ?: JSONObject.NULL)
-                            put("aiCachedResponse", task.aiCachedResponse ?: JSONObject.NULL)
                             put("autoSnoozeMinutes", task.autoSnoozeMinutes ?: JSONObject.NULL)
-                            put("aiUseWebSearch", task.aiUseWebSearch)
-                            put("aiUseMaps", task.aiUseMaps)
-                            put("aiUseUrlContext", task.aiUseUrlContext)
-                            put("aiCachedSources", task.aiCachedSources ?: JSONObject.NULL)
                             put("notifyOnlyMode", task.notifyOnlyMode)
                         }
                     }
@@ -202,16 +196,10 @@ object BackupManager {
                 url = if (obj.isNull("url")) null else obj.getString("url"),
                 memo = if (obj.isNull("memo")) null else obj.getString("memo"),
                 seriesId = if (obj.isNull("seriesId")) null else obj.getLong("seriesId"),
-                aiPrompt = if (obj.isNull("aiPrompt")) null else obj.getString("aiPrompt"),
-                aiCachedResponse = if (obj.isNull("aiCachedResponse")) null else obj.getString("aiCachedResponse"),
                 // UIが選択肢として提供する間隔(SNOOZE_OPTIONS)以外の値がバックアップファイルに
                 // 含まれていた場合、想定外の間隔で再通知が繰り返されてしまうため無視してnullにする。
                 autoSnoozeMinutes = (if (obj.isNull("autoSnoozeMinutes")) null else obj.getLong("autoSnoozeMinutes"))
                     ?.takeIf { minutes -> ReminderScheduler.SNOOZE_OPTIONS.any { it.minutes == minutes } },
-                aiUseWebSearch = obj.optBoolean("aiUseWebSearch", false),
-                aiUseMaps = obj.optBoolean("aiUseMaps", false),
-                aiUseUrlContext = obj.optBoolean("aiUseUrlContext", false),
-                aiCachedSources = if (obj.isNull("aiCachedSources")) null else obj.getString("aiCachedSources"),
                 notifyOnlyMode = obj.optBoolean("notifyOnlyMode", false)
             )
         }
