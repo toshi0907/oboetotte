@@ -15,8 +15,12 @@ class CompleteReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val taskId = intent.getLongExtra(ReminderScheduler.EXTRA_TASK_ID, -1L)
         if (taskId == -1L) return
+        val hasNotifiedDueAt = intent.hasExtra(ReminderScheduler.EXTRA_DUE_AT)
+        val notifiedDueAt = intent.getLongExtra(ReminderScheduler.EXTRA_DUE_AT, -1L)
 
         // タスク完了時は、期限日時・位置情報どちらの通知が表示中でも両方消去する。
+        // (タップされた通知自体は、下記の期限不一致でタスクを完了させない場合でも、
+        // 既に古くなっているので消去してよい)
         NotificationManagerCompat.from(context).apply {
             cancel(ReminderScheduler.NOTIFICATION_TAG_DUE, taskId.toInt())
             cancel(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt())
@@ -26,7 +30,13 @@ class CompleteReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val task = AppDatabase.getInstance(context).taskDao().getById(taskId)
-                if (task != null) {
+                // 期限日時通知([ReminderScheduler.EXTRA_DUE_AT]付き)の「完了」は、通知を表示した
+                // 時点の期限と現在のタスクの期限が一致する場合のみ完了とする。繰り返しタスクが
+                // アプリ内で先に完了し、次回分の期限に進んだ後にこの古い通知の「完了」を押しても、
+                // (次回分は別IDのタスクのため通常は影響しないが、念のため)期限が変わっていれば
+                // 完了処理を行わない。位置情報通知([ReminderScheduler.EXTRA_DUE_AT]無し)は従来通り
+                // タスクが存在すれば完了扱いとする。
+                if (task != null && (!hasNotifiedDueAt || task.dueAt == notifiedDueAt)) {
                     TaskCompletion.complete(context, task)
                 }
             } finally {

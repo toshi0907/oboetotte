@@ -13,6 +13,7 @@ object ReminderScheduler {
     const val EXTRA_IS_TEST = "is_test"
     const val EXTRA_IS_SNOOZE = "is_snooze"
     const val EXTRA_IS_AUTO_SNOOZE = "is_auto_snooze"
+    const val EXTRA_DUE_AT = "due_at"
     private const val TEST_REQUEST_CODE = -1
     const val TEST_DELAY_SECONDS = 5L
 
@@ -190,10 +191,21 @@ object ReminderScheduler {
         )
     }
 
-    /** 通知の「完了」ボタン用。[CompleteReceiver]宛で、通知アクションを起動する他のコンポーネントとは異なるため衝突しない。 */
-    fun completePendingIntent(context: Context, taskId: Long): PendingIntent {
+    /**
+     * 通知の「完了」ボタン用。[CompleteReceiver]宛で、通知アクションを起動する他のコンポーネントとは異なるため衝突しない。
+     * [dueAt]を渡すと(期限日時通知[ReminderReceiver]からの呼び出し)、通知を表示した時点の期限を
+     * [EXTRA_DUE_AT]としてIntentに載せる。[CompleteReceiver]はこれを完了処理直前のタスクの現在の
+     * `dueAt`と突き合わせ、繰り返しタスクの完了等で既に次回分の期限に進んでいた場合に、古い通知の
+     * 「完了」を誤って新しい期限のタスクへ適用してしまわないようにする。位置情報通知
+     * ([LocationReminderNotifier])には期限の概念が無いため`null`のまま呼び出し、従来通り
+     * タスクが存在すれば完了扱いとする。
+     */
+    fun completePendingIntent(context: Context, taskId: Long, dueAt: Long? = null): PendingIntent {
         val intent = Intent(context, CompleteReceiver::class.java).apply {
             putExtra(EXTRA_TASK_ID, taskId)
+            if (dueAt != null) {
+                putExtra(EXTRA_DUE_AT, dueAt)
+            }
         }
         return PendingIntent.getBroadcast(
             context,
