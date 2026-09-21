@@ -352,6 +352,7 @@ class OpenTaskUrlAction : ActionCallback {
  * 最終更新日時の更新を行う(Issue #111)。
  */
 class RefreshTaskWidgetAction : ActionCallback {
+    /** タップされたウィジェットの再取得・再描画・最終更新日時の更新を行う。詳細はクラスのKDocを参照。 */
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         refreshTaskWidget(context)
     }
