@@ -9,10 +9,14 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
@@ -115,7 +119,11 @@ class TaskWidget : GlanceAppWidget() {
                                         style = textStyle,
                                         modifier = GlanceModifier
                                             .fillMaxWidth()
-                                            .clickable(actionStartActivity(openUrlIntent(url)))
+                                            .clickable(
+                                                actionRunCallback<OpenTaskUrlAction>(
+                                                    actionParametersOf(URL_PARAM_KEY to url)
+                                                )
+                                            )
                                     )
                                 }
                             }
@@ -152,11 +160,25 @@ class TaskWidget : GlanceAppWidget() {
     }
 }
 
-/** タスクの[url]をブラウザ等で直接開くACTION_VIEWの[Intent]。ウィジェットのプロセス外から起動するため`FLAG_ACTIVITY_NEW_TASK`を付与する。 */
-private fun openUrlIntent(url: String): Intent =
-    Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+/** [OpenTaskUrlAction]に開くURLを渡すための[ActionParameters.Key]。 */
+private val URL_PARAM_KEY = ActionParameters.Key<String>("task_url")
+
+/**
+ * ウィジェットのリンク行をタップした際にタスクの[Task.url][com.toshi0907.oboetotte.data.Task.url]を
+ * ブラウザ等で直接開く[ActionCallback]。`androidx.glance.action.actionStartActivity`には任意の
+ * [Intent]を渡せるオーバーロードが無いため、`ActionCallback`経由で`Context.startActivity`を呼ぶ
+ * (ウィジェットのプロセス外から起動するため`FLAG_ACTIVITY_NEW_TASK`を付与する)。
+ */
+class OpenTaskUrlAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val url = parameters[URL_PARAM_KEY] ?: return
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+        )
     }
+}
 
 /** [TaskWidget]をシステムに公開するための`AppWidgetProvider`。AndroidManifest.xmlに登録している。 */
 class TaskWidgetReceiver : GlanceAppWidgetReceiver() {
