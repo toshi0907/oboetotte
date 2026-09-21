@@ -508,3 +508,13 @@ enum class TaskDisplayFilter {
     /** 未完了かつ期限が今日、または期限切れの項目 */
     DUE_TODAY_OR_OVERDUE
 }
+
+/**
+ * [task]が表示フィルタ([this])に合致するか。メイン画面(`TaskScreen`)とホーム画面ウィジェットの
+ * 両方から共通で使う判定ロジック。[nowMillis]は[DUE_TODAY_OR_OVERDUE]の判定基準となる
+ * 「現在時刻」で、呼び出し側が用意する([Task.isOverdue]/[Task.isDueToday]と同じ考え方)。
+ */
+fun TaskDisplayFilter.matches(task: Task, nowMillis: Long): Boolean = when (this) {
+    TaskDisplayFilter.HAS_URL -> !task.url.isNullOrBlank()
+    TaskDisplayFilter.DUE_TODAY_OR_OVERDUE -> task.isOverdue(nowMillis) || task.isDueToday(nowMillis)
+}

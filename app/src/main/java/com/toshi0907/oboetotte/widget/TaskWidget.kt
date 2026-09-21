@@ -1,8 +1,10 @@
 package com.toshi0907.oboetotte.widget
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -34,9 +36,10 @@ import com.toshi0907.oboetotte.MainActivity
 import com.toshi0907.oboetotte.TaskDisplayFilter
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.formatDueAt
-import com.toshi0907.oboetotte.isDueToday
-import com.toshi0907.oboetotte.isOverdue
+import com.toshi0907.oboetotte.matches
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 /**
  * ホーム画面ウィジェット。トップレベルの未完了タスクを、メイン画面と同じ並び順
@@ -80,13 +83,7 @@ class TaskWidget : GlanceAppWidget() {
                 listFilteredTasks
             } else {
                 listFilteredTasks.filter { task ->
-                    activeDisplayFilters.any { filter ->
-                        when (filter) {
-                            TaskDisplayFilter.HAS_URL -> !task.url.isNullOrBlank()
-                            TaskDisplayFilter.DUE_TODAY_OR_OVERDUE ->
-                                task.isOverdue(nowMillis) || task.isDueToday(nowMillis)
-                        }
-                    }
+                    activeDisplayFilters.any { filter -> filter.matches(task, nowMillis) }
                 }
             }
 
@@ -167,16 +164,23 @@ private val URL_PARAM_KEY = ActionParameters.Key<String>("task_url")
  * ウィジェットのリンク行をタップした際にタスクの[Task.url][com.toshi0907.oboetotte.data.Task.url]を
  * ブラウザ等で直接開く[ActionCallback]。`androidx.glance.action.actionStartActivity`には任意の
  * [Intent]を渡せるオーバーロードが無いため、`ActionCallback`経由で`Context.startActivity`を呼ぶ
- * (ウィジェットのプロセス外から起動するため`FLAG_ACTIVITY_NEW_TASK`を付与する)。
+ * (ウィジェットのプロセス外から起動するため`FLAG_ACTIVITY_NEW_TASK`を付与する)。開けるアプリが
+ * 無い場合は`MainActivity`のURL項目タップ時と同じ文言を`Toast`で表示する
+ * (`onAction`はメインスレッドで呼ばれるとは限らないため`Dispatchers.Main`に切り替える)。
  */
 class OpenTaskUrlAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val url = parameters[URL_PARAM_KEY] ?: return
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
             }
-        )
+        }
     }
 }
 

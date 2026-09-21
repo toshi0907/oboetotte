@@ -758,13 +758,7 @@ fun TaskScreen(
                 tasks
             } else {
                 tasks.filter { task ->
-                    activeDisplayFilters.any { filter ->
-                        when (filter) {
-                            TaskDisplayFilter.HAS_URL -> !task.url.isNullOrBlank()
-                            TaskDisplayFilter.DUE_TODAY_OR_OVERDUE ->
-                                task.isOverdue(nowMillis) || task.isDueToday(nowMillis)
-                        }
-                    }
+                    activeDisplayFilters.any { filter -> filter.matches(task, nowMillis) }
                 }
             }
 
