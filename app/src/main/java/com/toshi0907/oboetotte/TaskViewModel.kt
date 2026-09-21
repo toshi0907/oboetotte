@@ -164,6 +164,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _showCompleted = MutableStateFlow(false)
     val showCompleted: StateFlow<Boolean> = _showCompleted
 
+    private val _activeDisplayFilters = MutableStateFlow<Set<TaskDisplayFilter>>(emptySet())
+    val activeDisplayFilters: StateFlow<Set<TaskDisplayFilter>> = _activeDisplayFilters
+
+    fun toggleDisplayFilter(filter: TaskDisplayFilter) {
+        _activeDisplayFilters.value = _activeDisplayFilters.value.let {
+            if (filter in it) it - filter else it + filter
+        }
+    }
+
     val tasks: StateFlow<List<Task>> = combine(
         allTasks,
         _selectedListId,
@@ -485,4 +494,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
          */
         const val DEFAULT_DUE_DELAY_MILLIS = 60 * 60 * 1000L
     }
+}
+
+/**
+ * タスク一覧の表示フィルタ。複数選択時はOR条件(いずれか1つでも合致すれば表示)。
+ * トップレベルのタスクにのみ適用し、判定結果に応じてサブタスクツリーごと表示/非表示を切り替える
+ * (`selectedListId`/`showCompleted`と同じ考え方。サブタスク単体の合致では表示されない)。
+ */
+enum class TaskDisplayFilter {
+    /** URLが設定されている項目 */
+    HAS_URL,
+
+    /** 未完了かつ期限が今日、または期限切れの項目 */
+    DUE_TODAY_OR_OVERDUE
 }

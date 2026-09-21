@@ -214,6 +214,7 @@ class MainActivity : ComponentActivity() {
                     val updateLastCheckedAt by taskViewModel.updateLastCheckedAt.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
+                    val activeDisplayFilters by taskViewModel.activeDisplayFilters.collectAsState()
                     val context = LocalContext.current
                     val lifecycleOwner = LocalLifecycleOwner.current
                     var currentScreen by remember { mutableStateOf(MainScreen.Tasks) }
@@ -305,6 +306,8 @@ class MainActivity : ComponentActivity() {
                             onSelectList = taskViewModel::selectList,
                             showCompleted = showCompleted,
                             onSetShowCompleted = taskViewModel::setShowCompleted,
+                            activeDisplayFilters = activeDisplayFilters,
+                            onToggleDisplayFilter = taskViewModel::toggleDisplayFilter,
                             onAddTask = taskViewModel::addTask,
                             onToggleDone = taskViewModel::toggleDone,
                             onUpdateTask = taskViewModel::updateTask,
@@ -524,6 +527,8 @@ fun TaskScreen(
     onSelectList: (Long?) -> Unit,
     showCompleted: Boolean,
     onSetShowCompleted: (Boolean) -> Unit,
+    activeDisplayFilters: Set<TaskDisplayFilter>,
+    onToggleDisplayFilter: (TaskDisplayFilter) -> Unit,
     onAddTask: (String) -> Unit,
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, TaskEdits) -> Unit,
@@ -660,6 +665,34 @@ fun TaskScreen(
                 }
             }
 
+            Text(
+                text = "フィルタ",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    FilterChip(
+                        selected = TaskDisplayFilter.HAS_URL in activeDisplayFilters,
+                        onClick = { onToggleDisplayFilter(TaskDisplayFilter.HAS_URL) },
+                        label = { Text("リンクを含む") }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = TaskDisplayFilter.DUE_TODAY_OR_OVERDUE in activeDisplayFilters,
+                        onClick = { onToggleDisplayFilter(TaskDisplayFilter.DUE_TODAY_OR_OVERDUE) },
+                        label = { Text("今日期限・期限切れ") }
+                    )
+                }
+            }
+
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -710,7 +743,8 @@ fun TaskScreen(
             }
 
             // isOverdue/isDueTodayの判定基準となる「現在時刻」。タスク一覧を開いたままにしていても
-            // 期限切れ・当日期限の色分けが更新されるよう、1分おきに再コンポーズをトリガーする。
+            // 期限切れ・当日期限の色分け・「今日期限・期限切れ」フィルタが更新されるよう、
+            // 1分おきに再コンポーズをトリガーする。
             val nowMillis by produceState(initialValue = System.currentTimeMillis()) {
                 while (true) {
                     delay(60_000L)
@@ -718,8 +752,24 @@ fun TaskScreen(
                 }
             }
 
+            // 表示フィルタはトップレベルのタスクにのみ適用する(selectedListId/showCompletedと同じ考え方)。
+            // 合致したトップレベルタスクは、そのサブタスクツリーごとそのまま表示する。
+            val displayedTasks = if (activeDisplayFilters.isEmpty()) {
+                tasks
+            } else {
+                tasks.filter { task ->
+                    activeDisplayFilters.any { filter ->
+                        when (filter) {
+                            TaskDisplayFilter.HAS_URL -> !task.url.isNullOrBlank()
+                            TaskDisplayFilter.DUE_TODAY_OR_OVERDUE ->
+                                task.isOverdue(nowMillis) || task.isDueToday(nowMillis)
+                        }
+                    }
+                }
+            }
+
             LazyColumn {
-                items(tasks, key = { it.id }) { task ->
+                items(displayedTasks, key = { it.id }) { task ->
                     TaskTreeRow(
                         task = task,
                         allTasks = allTasks,
@@ -762,6 +812,16 @@ fun TaskScreen(
     }
 }
 
+/** 未完了かつ期限([Task.dueAt])が[nowMillis]より過去のタスクか。 */
+fun Task.isOverdue(nowMillis: Long): Boolean =
+    dueAt != null && !isDone && dueAt < nowMillis
+
+/** 未完了・期限切れではなく、かつ期限が[nowMillis]と同じ日(端末のタイムゾーン基準)のタスクか。 */
+fun Task.isDueToday(nowMillis: Long): Boolean =
+    dueAt != null && !isDone && !isOverdue(nowMillis) &&
+        Instant.ofEpochMilli(dueAt).atZone(ZoneId.systemDefault()).toLocalDate() ==
+            Instant.ofEpochMilli(nowMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TaskTreeRow(
@@ -774,14 +834,8 @@ fun TaskTreeRow(
     onDeleteTask: (Task) -> Unit
 ) {
     val children = allTasks.filter { it.parentTaskId == task.id }
-    val isOverdue = task.dueAt != null &&
-        !task.isDone &&
-        task.dueAt < nowMillis
-    val isDueToday = task.dueAt != null &&
-        !task.isDone &&
-        !isOverdue &&
-        Instant.ofEpochMilli(task.dueAt).atZone(ZoneId.systemDefault()).toLocalDate() ==
-            Instant.ofEpochMilli(nowMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+    val isOverdue = task.isOverdue(nowMillis)
+    val isDueToday = task.isDueToday(nowMillis)
 
     Column {
         Row(
@@ -2814,6 +2868,8 @@ fun TaskScreenPreview() {
             onSelectList = {},
             showCompleted = true,
             onSetShowCompleted = {},
+            activeDisplayFilters = emptySet(),
+            onToggleDisplayFilter = {},
             onAddTask = {},
             onToggleDone = {},
             onUpdateTask = { _, _ -> },
