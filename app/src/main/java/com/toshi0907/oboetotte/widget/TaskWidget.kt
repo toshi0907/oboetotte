@@ -3,8 +3,10 @@ package com.toshi0907.oboetotte.widget
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -19,6 +21,7 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
@@ -38,7 +41,14 @@ import com.toshi0907.oboetotte.TaskDisplayFilter
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.formatDueAt
+import com.toshi0907.oboetotte.isDueToday
+import com.toshi0907.oboetotte.isOverdue
 import com.toshi0907.oboetotte.matches
+import com.toshi0907.oboetotte.ui.theme.Green40
+import com.toshi0907.oboetotte.ui.theme.Green80
+import com.toshi0907.oboetotte.ui.theme.Purple40
+import com.toshi0907.oboetotte.ui.theme.Red40
+import com.toshi0907.oboetotte.ui.theme.Red80
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -47,10 +57,11 @@ import kotlinx.coroutines.withContext
  * ホーム画面ウィジェット。トップレベルの未完了タスクを、メイン画面と同じ並び順
  * (期限が近い順。[com.toshi0907.oboetotte.data.TaskDao.getAll]のクエリ順序をそのまま利用)で
  * 一覧表示する。各行はタイトルに加え、期限があれば期限日時(メイン画面と同じ
- * [com.toshi0907.oboetotte.formatDueAt]の書式)を表示する。URLがあれば、表示を
- * コンパクトに保つためURL文字列そのものではなく「[LINK_LABEL]」というラベルを表示し、
- * 期限がある場合は期限日時と同じ行に、無い場合は単独の行に表示する。
- * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開き、リンク部分をタップすると
+ * [com.toshi0907.oboetotte.formatDueAt]の書式)を表示し、メイン画面([com.toshi0907.oboetotte.TaskTreeRow])
+ * と同じく期限切れは赤系・当日期限は緑系で色分けする([dueTextColor])。URLがあれば、表示を
+ * コンパクトに保つためURL文字列そのものではなく「[LINK_LABEL]」というラベルをボタン状(背景色・
+ * 角丸付き)に表示し、期限がある場合は期限日時と同じ行に、無い場合は単独の行に表示する。
+ * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開き、リンクボタンをタップすると
  * ブラウザ等でURLを直接開く。ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに
  * 各所から呼ばれる[refreshTaskWidget]で再描画される。
  *
@@ -66,6 +77,8 @@ class TaskWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val tasks = AppDatabase.getInstance(context).taskDao().getAll().first()
             .filter { it.parentTaskId == null && !it.isDone }
+        val isDarkTheme = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
 
         provideContent {
             val prefs = currentState<Preferences>()
@@ -99,7 +112,7 @@ class TaskWidget : GlanceAppWidget() {
                     Text(text = "未完了タスクはありません", style = textStyle)
                 } else {
                     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-                        items(filteredTasks, itemId = { it.widgetItemId() }) { task ->
+                        items(filteredTasks, itemId = { it.widgetItemId(nowMillis) }) { task ->
                             Column(
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
@@ -110,26 +123,39 @@ class TaskWidget : GlanceAppWidget() {
                                 val url = task.url?.takeIf { it.isNotBlank() }
                                 val dueAt = task.dueAt
                                 if (dueAt != null) {
+                                    val dueStyle = dueTextColor(
+                                        background = background,
+                                        isOverdue = task.isOverdue(nowMillis),
+                                        isDueToday = task.isDueToday(nowMillis),
+                                        isDarkTheme = isDarkTheme
+                                    )?.let { TextStyle(color = ColorProvider(it)) } ?: textStyle
                                     Row(modifier = GlanceModifier.fillMaxWidth()) {
-                                        Text(text = formatDueAt(dueAt), style = textStyle)
+                                        Text(text = formatDueAt(dueAt), style = dueStyle)
                                         if (url != null) {
                                             Text(
-                                                text = " $LINK_LABEL",
-                                                style = textStyle,
-                                                modifier = GlanceModifier.clickable(
-                                                    actionRunCallback<OpenTaskUrlAction>(
-                                                        actionParametersOf(URL_PARAM_KEY to url)
+                                                text = LINK_LABEL,
+                                                style = LINK_BUTTON_TEXT_STYLE,
+                                                modifier = GlanceModifier
+                                                    .padding(start = 8.dp)
+                                                    .background(LINK_BUTTON_COLOR)
+                                                    .cornerRadius(8.dp)
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                    .clickable(
+                                                        actionRunCallback<OpenTaskUrlAction>(
+                                                            actionParametersOf(URL_PARAM_KEY to url)
+                                                        )
                                                     )
-                                                )
                                             )
                                         }
                                     }
                                 } else if (url != null) {
                                     Text(
                                         text = LINK_LABEL,
-                                        style = textStyle,
+                                        style = LINK_BUTTON_TEXT_STYLE,
                                         modifier = GlanceModifier
-                                            .fillMaxWidth()
+                                            .background(LINK_BUTTON_COLOR)
+                                            .cornerRadius(8.dp)
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
                                             .clickable(
                                                 actionRunCallback<OpenTaskUrlAction>(
                                                     actionParametersOf(URL_PARAM_KEY to url)
@@ -172,16 +198,20 @@ class TaskWidget : GlanceAppWidget() {
 }
 
 /**
- * [LazyColumn]の`itemId`に使う、タスクIDと表示内容(タイトル・期限・URL)を組み合わせた複合キー。
- * Jetpack Glanceの`LazyColumn`には、`itemId`が変わらないまま一部フィールドだけを更新した場合に
- * 再描画が反映されないという既知の不具合がある(Google Issue Tracker #240300611)。タスクIDのみを
+ * [LazyColumn]の`itemId`に使う、タスクIDと表示内容(タイトル・期限・URL・期限の色分け状態)を
+ * 組み合わせた複合キー。Jetpack Glanceの`LazyColumn`には、`itemId`が変わらないまま一部フィールドだけを
+ * 更新した場合に再描画が反映されないという既知の不具合がある(Google Issue Tracker #240300611)。タスクIDのみを
  * `itemId`にすると、タイトル変更では新しいitemとして再描画される一方、期限のみの変更では同じ
  * itemIdのままとなりこの不具合を踏んでしまう(Issue #105)。そのため上位32bitにタスクID、下位32bitに
  * 表示内容のハッシュ値を詰めた値を`itemId`とし、表示内容が変わった場合は常に別itemとして扱わせる
- * (異なるタスクID同士は上位32bitの時点で必ず別の値になるため衝突しない)。
+ * (異なるタスクID同士は上位32bitの時点で必ず別の値になるため衝突しない)。[dueTextColor]が参照する
+ * [Task.isOverdue]/[Task.isDueToday]は他のフィールドが変わらないまま時刻の経過だけで結果が変わるため、
+ * それらもハッシュに含め、期限切れ・当日期限への切り替わり時にも同じ不具合で再描画が反映されない
+ * ことがないようにする。
  */
-private fun Task.widgetItemId(): Long {
-    val contentHash = (title.hashCode() * 31 + (dueAt?.hashCode() ?: 0)) * 31 + (url?.hashCode() ?: 0)
+private fun Task.widgetItemId(nowMillis: Long): Long {
+    val contentHash = ((title.hashCode() * 31 + (dueAt?.hashCode() ?: 0)) * 31 + (url?.hashCode() ?: 0)) * 31 +
+        (isOverdue(nowMillis).hashCode() * 31 + isDueToday(nowMillis).hashCode())
     return (id shl 32) or (contentHash.toLong() and 0xFFFFFFFFL)
 }
 
@@ -190,6 +220,41 @@ private val URL_PARAM_KEY = ActionParameters.Key<String>("task_url")
 
 /** タスクにURLがある場合、URL文字列の代わりに表示するラベル。 */
 private const val LINK_LABEL = "リンク"
+
+/**
+ * 「[LINK_LABEL]」の背景色。タップ可能であることが見た目でわかるようボタン状にするための色で、
+ * [WidgetBackground]の選択(透過/白/黒)に関わらず常に同じ配色にする(ボタン自体が背景色を持つため、
+ * ウィジェットの背景色設定の影響を受けない)。
+ */
+private val LINK_BUTTON_COLOR = Purple40
+
+/** [LINK_BUTTON_COLOR]の背景上で読みやすいよう固定した、「[LINK_LABEL]」の文字色・スタイル。 */
+private val LINK_BUTTON_TEXT_STYLE = TextStyle(color = ColorProvider(Color.White))
+
+/**
+ * 期限表示の文字色。メイン画面([com.toshi0907.oboetotte.TaskTreeRow])と同じく、期限切れは赤系
+ * ([Red40]/[Red80])、当日期限は緑系([Green40]/[Green80])で強調し、それ以外は[textStyle]どおりの
+ * 既定色(`null`)とする。ウィジェットではメイン画面のように`MaterialTheme.colorScheme`を参照できない
+ * ため、赤・緑とも固定値を使う。どちらの濃淡を使うかは[background]の選択に合わせて選ぶ
+ * (WHITE/BLACKは常にその配色向けの濃淡、TRANSPARENTは端末のダークテーマ設定[isDarkTheme]に従う)。
+ */
+private fun dueTextColor(
+    background: WidgetBackground,
+    isOverdue: Boolean,
+    isDueToday: Boolean,
+    isDarkTheme: Boolean
+): Color? {
+    val useDarkPalette = when (background) {
+        WidgetBackground.WHITE -> false
+        WidgetBackground.BLACK -> true
+        WidgetBackground.TRANSPARENT -> isDarkTheme
+    }
+    return when {
+        isOverdue -> if (useDarkPalette) Red80 else Red40
+        isDueToday -> if (useDarkPalette) Green80 else Green40
+        else -> null
+    }
+}
 
 /**
  * ウィジェットのリンク行をタップした際にタスクの[Task.url][com.toshi0907.oboetotte.data.Task.url]を
