@@ -36,6 +36,7 @@ import androidx.glance.unit.ColorProvider
 import com.toshi0907.oboetotte.MainActivity
 import com.toshi0907.oboetotte.TaskDisplayFilter
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.formatDueAt
 import com.toshi0907.oboetotte.matches
 import kotlinx.coroutines.Dispatchers
@@ -98,7 +99,7 @@ class TaskWidget : GlanceAppWidget() {
                     Text(text = "未完了タスクはありません", style = textStyle)
                 } else {
                     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-                        items(filteredTasks, itemId = { it.id }) { task ->
+                        items(filteredTasks, itemId = { it.widgetItemId() }) { task ->
                             Column(
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
@@ -168,6 +169,20 @@ class TaskWidget : GlanceAppWidget() {
          */
         val DISPLAY_FILTER_KEY = stringSetPreferencesKey("display_filter")
     }
+}
+
+/**
+ * [LazyColumn]の`itemId`に使う、タスクIDと表示内容(タイトル・期限・URL)を組み合わせた複合キー。
+ * Jetpack Glanceの`LazyColumn`には、`itemId`が変わらないまま一部フィールドだけを更新した場合に
+ * 再描画が反映されないという既知の不具合がある(Google Issue Tracker #240300611)。タスクIDのみを
+ * `itemId`にすると、タイトル変更では新しいitemとして再描画される一方、期限のみの変更では同じ
+ * itemIdのままとなりこの不具合を踏んでしまう(Issue #105)。そのため上位32bitにタスクID、下位32bitに
+ * 表示内容のハッシュ値を詰めた値を`itemId`とし、表示内容が変わった場合は常に別itemとして扱わせる
+ * (異なるタスクID同士は上位32bitの時点で必ず別の値になるため衝突しない)。
+ */
+private fun Task.widgetItemId(): Long {
+    val contentHash = (title.hashCode() * 31 + (dueAt?.hashCode() ?: 0)) * 31 + (url?.hashCode() ?: 0)
+    return (id shl 32) or (contentHash.toLong() and 0xFFFFFFFFL)
 }
 
 /** [OpenTaskUrlAction]に開くURLを渡すための[ActionParameters.Key]。 */
