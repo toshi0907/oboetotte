@@ -424,7 +424,7 @@ private fun todayAsDatePickerMillis(): Long {
         .toEpochMilli()
 }
 
-private fun formatDueAt(millis: Long): String {
+internal fun formatDueAt(millis: Long): String {
     val zoned = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
     return "%04d/%02d/%02d %02d:%02d".format(
         zoned.year,

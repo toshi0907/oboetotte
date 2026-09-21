@@ -1,9 +1,12 @@
 package com.toshi0907.oboetotte.widget
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.action.actionStartActivity
@@ -24,19 +27,27 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.toshi0907.oboetotte.MainActivity
+import com.toshi0907.oboetotte.TaskDisplayFilter
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.formatDueAt
+import com.toshi0907.oboetotte.isDueToday
+import com.toshi0907.oboetotte.isOverdue
 import kotlinx.coroutines.flow.first
 
 /**
  * ホーム画面ウィジェット。トップレベルの未完了タスクを、メイン画面と同じ並び順
  * (期限が近い順。[com.toshi0907.oboetotte.data.TaskDao.getAll]のクエリ順序をそのまま利用)で
- * 一覧表示する。タップするとアプリ(MainActivity)を開くのみで、ウィジェット上での完了操作は
- * 行わない。表示内容はDB更新のたびに各所から呼ばれる[refreshTaskWidget]で再描画される。
+ * 一覧表示する。各行はタイトルに加え、期限があれば期限日時(メイン画面と同じ
+ * [com.toshi0907.oboetotte.formatDueAt]の書式)を、URLがあればその下にリンクを表示する。
+ * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開き、リンク部分をタップすると
+ * ブラウザ等でURLを直接開く。ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに
+ * 各所から呼ばれる[refreshTaskWidget]で再描画される。
  *
- * 背景色([WidgetBackground])・表示するリスト([LIST_FILTER_KEY])は[TaskWidgetConfigureActivity]で
- * ウィジェットごとに選択でき、[PreferencesGlanceStateDefinition]によりウィジェットインスタンス
- * 単位で永続化される(`stateDefinition`を指定すると、Glanceが[GlanceId]ごとに`Preferences`の
- * DataStoreを自動的に用意してくれる)。
+ * 背景色([WidgetBackground])・表示するリスト([LIST_FILTER_KEY])・表示フィルタ
+ * ([DISPLAY_FILTER_KEY])は[TaskWidgetConfigureActivity]でウィジェットごとに選択でき、
+ * [PreferencesGlanceStateDefinition]によりウィジェットインスタンス単位で永続化される
+ * (`stateDefinition`を指定すると、Glanceが[GlanceId]ごとに`Preferences`のDataStoreを
+ * 自動的に用意してくれる)。
  */
 class TaskWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
@@ -51,10 +62,28 @@ class TaskWidget : GlanceAppWidget() {
             val textStyle = background.textColor?.let { TextStyle(color = ColorProvider(it)) } ?: TextStyle()
 
             val listFilter = prefs[LIST_FILTER_KEY]
-            val filteredTasks = when (listFilter) {
+            val listFilteredTasks = when (listFilter) {
                 null, ALL_LISTS_VALUE -> tasks
                 UNASSIGNED_LIST_VALUE -> tasks.filter { it.listId == null }
                 else -> tasks.filter { it.listId == listFilter.toLongOrNull() }
+            }
+
+            val activeDisplayFilters = (prefs[DISPLAY_FILTER_KEY] ?: emptySet())
+                .mapNotNull { name -> TaskDisplayFilter.entries.find { it.name == name } }
+                .toSet()
+            val nowMillis = System.currentTimeMillis()
+            val filteredTasks = if (activeDisplayFilters.isEmpty()) {
+                listFilteredTasks
+            } else {
+                listFilteredTasks.filter { task ->
+                    activeDisplayFilters.any { filter ->
+                        when (filter) {
+                            TaskDisplayFilter.HAS_URL -> !task.url.isNullOrBlank()
+                            TaskDisplayFilter.DUE_TODAY_OR_OVERDUE ->
+                                task.isOverdue(nowMillis) || task.isDueToday(nowMillis)
+                        }
+                    }
+                }
             }
 
             var modifier = GlanceModifier.fillMaxSize().padding(8.dp)
@@ -66,14 +95,30 @@ class TaskWidget : GlanceAppWidget() {
                 } else {
                     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
                         items(filteredTasks, itemId = { it.id }) { task ->
-                            Text(
-                                text = task.title,
-                                style = textStyle,
+                            Column(
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
                                     .clickable(actionStartActivity<MainActivity>())
-                            )
+                            ) {
+                                Text(text = task.title, style = textStyle, modifier = GlanceModifier.fillMaxWidth())
+                                task.dueAt?.let { dueAt ->
+                                    Text(
+                                        text = formatDueAt(dueAt),
+                                        style = textStyle,
+                                        modifier = GlanceModifier.fillMaxWidth()
+                                    )
+                                }
+                                task.url?.takeIf { it.isNotBlank() }?.let { url ->
+                                    Text(
+                                        text = url,
+                                        style = textStyle,
+                                        modifier = GlanceModifier
+                                            .fillMaxWidth()
+                                            .clickable(actionStartActivity(openUrlIntent(url)))
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -97,8 +142,21 @@ class TaskWidget : GlanceAppWidget() {
 
         /** [LIST_FILTER_KEY]で「リスト未登録」(`listId == null`のタスクのみ)を表す値。 */
         const val UNASSIGNED_LIST_VALUE = "UNASSIGNED"
+
+        /**
+         * 表示フィルタ([TaskDisplayFilter])の絞り込みを保存するPreferencesキー。値は選択中の
+         * [TaskDisplayFilter.name]の集合。空集合・キー未設定はメイン画面と同じく「絞り込みなし
+         * (すべて表示)」を意味する。複数選択時はメイン画面と同じくOR判定。
+         */
+        val DISPLAY_FILTER_KEY = stringSetPreferencesKey("display_filter")
     }
 }
+
+/** タスクの[url]をブラウザ等で直接開くACTION_VIEWの[Intent]。ウィジェットのプロセス外から起動するため`FLAG_ACTIVITY_NEW_TASK`を付与する。 */
+private fun openUrlIntent(url: String): Intent =
+    Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    }
 
 /** [TaskWidget]をシステムに公開するための`AppWidgetProvider`。AndroidManifest.xmlに登録している。 */
 class TaskWidgetReceiver : GlanceAppWidgetReceiver() {
