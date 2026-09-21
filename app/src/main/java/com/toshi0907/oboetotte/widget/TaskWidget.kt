@@ -112,7 +112,7 @@ class TaskWidget : GlanceAppWidget() {
                     Text(text = "未完了タスクはありません", style = textStyle)
                 } else {
                     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-                        items(filteredTasks, itemId = { it.widgetItemId() }) { task ->
+                        items(filteredTasks, itemId = { it.widgetItemId(nowMillis) }) { task ->
                             Column(
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
@@ -139,7 +139,7 @@ class TaskWidget : GlanceAppWidget() {
                                                     .padding(start = 8.dp)
                                                     .background(LINK_BUTTON_COLOR)
                                                     .cornerRadius(8.dp)
-                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
                                                     .clickable(
                                                         actionRunCallback<OpenTaskUrlAction>(
                                                             actionParametersOf(URL_PARAM_KEY to url)
@@ -155,7 +155,7 @@ class TaskWidget : GlanceAppWidget() {
                                         modifier = GlanceModifier
                                             .background(LINK_BUTTON_COLOR)
                                             .cornerRadius(8.dp)
-                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
                                             .clickable(
                                                 actionRunCallback<OpenTaskUrlAction>(
                                                     actionParametersOf(URL_PARAM_KEY to url)
@@ -198,16 +198,20 @@ class TaskWidget : GlanceAppWidget() {
 }
 
 /**
- * [LazyColumn]の`itemId`に使う、タスクIDと表示内容(タイトル・期限・URL)を組み合わせた複合キー。
- * Jetpack Glanceの`LazyColumn`には、`itemId`が変わらないまま一部フィールドだけを更新した場合に
- * 再描画が反映されないという既知の不具合がある(Google Issue Tracker #240300611)。タスクIDのみを
+ * [LazyColumn]の`itemId`に使う、タスクIDと表示内容(タイトル・期限・URL・期限の色分け状態)を
+ * 組み合わせた複合キー。Jetpack Glanceの`LazyColumn`には、`itemId`が変わらないまま一部フィールドだけを
+ * 更新した場合に再描画が反映されないという既知の不具合がある(Google Issue Tracker #240300611)。タスクIDのみを
  * `itemId`にすると、タイトル変更では新しいitemとして再描画される一方、期限のみの変更では同じ
  * itemIdのままとなりこの不具合を踏んでしまう(Issue #105)。そのため上位32bitにタスクID、下位32bitに
  * 表示内容のハッシュ値を詰めた値を`itemId`とし、表示内容が変わった場合は常に別itemとして扱わせる
- * (異なるタスクID同士は上位32bitの時点で必ず別の値になるため衝突しない)。
+ * (異なるタスクID同士は上位32bitの時点で必ず別の値になるため衝突しない)。[dueTextColor]が参照する
+ * [Task.isOverdue]/[Task.isDueToday]は他のフィールドが変わらないまま時刻の経過だけで結果が変わるため、
+ * それらもハッシュに含め、期限切れ・当日期限への切り替わり時にも同じ不具合で再描画が反映されない
+ * ことがないようにする。
  */
-private fun Task.widgetItemId(): Long {
-    val contentHash = (title.hashCode() * 31 + (dueAt?.hashCode() ?: 0)) * 31 + (url?.hashCode() ?: 0)
+private fun Task.widgetItemId(nowMillis: Long): Long {
+    val contentHash = ((title.hashCode() * 31 + (dueAt?.hashCode() ?: 0)) * 31 + (url?.hashCode() ?: 0)) * 31 +
+        (isOverdue(nowMillis).hashCode() * 31 + isDueToday(nowMillis).hashCode())
     return (id shl 32) or (contentHash.toLong() and 0xFFFFFFFFL)
 }
 
