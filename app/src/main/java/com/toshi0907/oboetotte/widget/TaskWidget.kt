@@ -25,6 +25,7 @@ import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.currentState
 import androidx.glance.layout.Column
+import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
@@ -45,7 +46,9 @@ import kotlinx.coroutines.withContext
  * ホーム画面ウィジェット。トップレベルの未完了タスクを、メイン画面と同じ並び順
  * (期限が近い順。[com.toshi0907.oboetotte.data.TaskDao.getAll]のクエリ順序をそのまま利用)で
  * 一覧表示する。各行はタイトルに加え、期限があれば期限日時(メイン画面と同じ
- * [com.toshi0907.oboetotte.formatDueAt]の書式)を、URLがあればその下にリンクを表示する。
+ * [com.toshi0907.oboetotte.formatDueAt]の書式)を表示する。URLがあれば、表示を
+ * コンパクトに保つためURL文字列そのものではなく「[LINK_LABEL]」というラベルを表示し、
+ * 期限がある場合は期限日時と同じ行に、無い場合は単独の行に表示する。
  * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開き、リンク部分をタップすると
  * ブラウザ等でURLを直接開く。ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに
  * 各所から呼ばれる[refreshTaskWidget]で再描画される。
@@ -103,16 +106,26 @@ class TaskWidget : GlanceAppWidget() {
                                     .clickable(actionStartActivity<MainActivity>())
                             ) {
                                 Text(text = task.title, style = textStyle, modifier = GlanceModifier.fillMaxWidth())
-                                task.dueAt?.let { dueAt ->
+                                val url = task.url?.takeIf { it.isNotBlank() }
+                                val dueAt = task.dueAt
+                                if (dueAt != null) {
+                                    Row(modifier = GlanceModifier.fillMaxWidth()) {
+                                        Text(text = formatDueAt(dueAt), style = textStyle)
+                                        if (url != null) {
+                                            Text(
+                                                text = " $LINK_LABEL",
+                                                style = textStyle,
+                                                modifier = GlanceModifier.clickable(
+                                                    actionRunCallback<OpenTaskUrlAction>(
+                                                        actionParametersOf(URL_PARAM_KEY to url)
+                                                    )
+                                                )
+                                            )
+                                        }
+                                    }
+                                } else if (url != null) {
                                     Text(
-                                        text = formatDueAt(dueAt),
-                                        style = textStyle,
-                                        modifier = GlanceModifier.fillMaxWidth()
-                                    )
-                                }
-                                task.url?.takeIf { it.isNotBlank() }?.let { url ->
-                                    Text(
-                                        text = url,
+                                        text = LINK_LABEL,
                                         style = textStyle,
                                         modifier = GlanceModifier
                                             .fillMaxWidth()
@@ -159,6 +172,9 @@ class TaskWidget : GlanceAppWidget() {
 
 /** [OpenTaskUrlAction]に開くURLを渡すための[ActionParameters.Key]。 */
 private val URL_PARAM_KEY = ActionParameters.Key<String>("task_url")
+
+/** タスクにURLがある場合、URL文字列の代わりに表示するラベル。 */
+private const val LINK_LABEL = "リンク"
 
 /**
  * ウィジェットのリンク行をタップした際にタスクの[Task.url][com.toshi0907.oboetotte.data.Task.url]を
