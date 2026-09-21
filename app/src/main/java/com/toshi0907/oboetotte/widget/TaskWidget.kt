@@ -21,7 +21,6 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
-import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
@@ -34,6 +33,7 @@ import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.Text
+import androidx.glance.text.TextDecoration
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.toshi0907.oboetotte.MainActivity
@@ -47,6 +47,7 @@ import com.toshi0907.oboetotte.matches
 import com.toshi0907.oboetotte.ui.theme.Green40
 import com.toshi0907.oboetotte.ui.theme.Green80
 import com.toshi0907.oboetotte.ui.theme.Purple40
+import com.toshi0907.oboetotte.ui.theme.Purple80
 import com.toshi0907.oboetotte.ui.theme.Red40
 import com.toshi0907.oboetotte.ui.theme.Red80
 import kotlinx.coroutines.Dispatchers
@@ -59,10 +60,12 @@ import kotlinx.coroutines.withContext
  * 一覧表示する。各行はタイトルに加え、期限があれば期限日時(メイン画面と同じ
  * [com.toshi0907.oboetotte.formatDueAt]の書式)を表示し、メイン画面([com.toshi0907.oboetotte.TaskTreeRow])
  * と同じく期限切れは赤系・当日期限は緑系で色分けする([dueTextColor])。URLがあれば、表示を
- * コンパクトに保つためURL文字列そのものではなく「[LINK_LABEL]」というラベルをボタン状(背景色・
- * 角丸付き)に表示し、期限がある場合は期限日時と同じ行に、無い場合は単独の行に表示する。
- * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開き、リンクボタンをタップすると
- * ブラウザ等でURLを直接開く。ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに
+ * コンパクトに保つためURL文字列そのものではなく「[LINK_LABEL]」というラベルを、メイン画面の
+ * URLリンク表示([com.toshi0907.oboetotte.MainActivity]内のタスク詳細と同じ`colorScheme.primary`相当)
+ * にならいリンク色+下線のテキストとして表示し(背景・枠線・角丸は持たない)、期限がある場合は
+ * 期限日時と同じ行に、無い場合は単独の行に表示する。行(タイトル・期限部分)をタップすると
+ * アプリ(MainActivity)を開き、リンクラベルをタップするとブラウザ等でURLを直接開く。
+ * ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに
  * 各所から呼ばれる[refreshTaskWidget]で再描画される。
  *
  * 背景色([WidgetBackground])・表示するリスト([LIST_FILTER_KEY])・表示フィルタ
@@ -84,6 +87,10 @@ class TaskWidget : GlanceAppWidget() {
             val prefs = currentState<Preferences>()
             val background = WidgetBackground.fromName(prefs[BACKGROUND_KEY])
             val textStyle = background.textColor?.let { TextStyle(color = ColorProvider(it)) } ?: TextStyle()
+            val linkTextStyle = TextStyle(
+                color = ColorProvider(linkTextColor(background, isDarkTheme)),
+                textDecoration = TextDecoration.Underline
+            )
 
             val listFilter = prefs[LIST_FILTER_KEY]
             val listFilteredTasks = when (listFilter) {
@@ -134,12 +141,9 @@ class TaskWidget : GlanceAppWidget() {
                                         if (url != null) {
                                             Text(
                                                 text = LINK_LABEL,
-                                                style = LINK_BUTTON_TEXT_STYLE,
+                                                style = linkTextStyle,
                                                 modifier = GlanceModifier
                                                     .padding(start = 8.dp)
-                                                    .background(LINK_BUTTON_COLOR)
-                                                    .cornerRadius(8.dp)
-                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
                                                     .clickable(
                                                         actionRunCallback<OpenTaskUrlAction>(
                                                             actionParametersOf(URL_PARAM_KEY to url)
@@ -151,11 +155,8 @@ class TaskWidget : GlanceAppWidget() {
                                 } else if (url != null) {
                                     Text(
                                         text = LINK_LABEL,
-                                        style = LINK_BUTTON_TEXT_STYLE,
+                                        style = linkTextStyle,
                                         modifier = GlanceModifier
-                                            .background(LINK_BUTTON_COLOR)
-                                            .cornerRadius(8.dp)
-                                            .padding(horizontal = 10.dp, vertical = 6.dp)
                                             .clickable(
                                                 actionRunCallback<OpenTaskUrlAction>(
                                                     actionParametersOf(URL_PARAM_KEY to url)
@@ -222,21 +223,22 @@ private val URL_PARAM_KEY = ActionParameters.Key<String>("task_url")
 private const val LINK_LABEL = "リンク"
 
 /**
- * 「[LINK_LABEL]」の背景色。タップ可能であることが見た目でわかるようボタン状にするための色で、
- * [WidgetBackground]の選択(透過/白/黒)に関わらず常に同じ配色にする(ボタン自体が背景色を持つため、
- * ウィジェットの背景色設定の影響を受けない)。
+ * [background]・[isDarkTheme]から、赤([Red40]/[Red80])・緑([Green40]/[Green80])・
+ * リンク色([Purple40]/[Purple80])が濃淡どちらの色を使うべきかを判定する共通ロジック。
+ * WHITE/BLACKは常にその配色向けの濃淡を、TRANSPARENTは端末のダークテーマ設定に従う。
  */
-private val LINK_BUTTON_COLOR = Purple40
-
-/** [LINK_BUTTON_COLOR]の背景上で読みやすいよう固定した、「[LINK_LABEL]」の文字色・スタイル。 */
-private val LINK_BUTTON_TEXT_STYLE = TextStyle(color = ColorProvider(Color.White))
+private fun useDarkPalette(background: WidgetBackground, isDarkTheme: Boolean): Boolean =
+    when (background) {
+        WidgetBackground.WHITE -> false
+        WidgetBackground.BLACK -> true
+        WidgetBackground.TRANSPARENT -> isDarkTheme
+    }
 
 /**
  * 期限表示の文字色。メイン画面([com.toshi0907.oboetotte.TaskTreeRow])と同じく、期限切れは赤系
  * ([Red40]/[Red80])、当日期限は緑系([Green40]/[Green80])で強調し、それ以外は[textStyle]どおりの
  * 既定色(`null`)とする。ウィジェットではメイン画面のように`MaterialTheme.colorScheme`を参照できない
- * ため、赤・緑とも固定値を使う。どちらの濃淡を使うかは[background]の選択に合わせて選ぶ
- * (WHITE/BLACKは常にその配色向けの濃淡、TRANSPARENTは端末のダークテーマ設定[isDarkTheme]に従う)。
+ * ため、赤・緑とも固定値を使う。どちらの濃淡を使うかは[useDarkPalette]で判定する。
  */
 private fun dueTextColor(
     background: WidgetBackground,
@@ -244,17 +246,23 @@ private fun dueTextColor(
     isDueToday: Boolean,
     isDarkTheme: Boolean
 ): Color? {
-    val useDarkPalette = when (background) {
-        WidgetBackground.WHITE -> false
-        WidgetBackground.BLACK -> true
-        WidgetBackground.TRANSPARENT -> isDarkTheme
-    }
+    val darkPalette = useDarkPalette(background, isDarkTheme)
     return when {
-        isOverdue -> if (useDarkPalette) Red80 else Red40
-        isDueToday -> if (useDarkPalette) Green80 else Green40
+        isOverdue -> if (darkPalette) Red80 else Red40
+        isDueToday -> if (darkPalette) Green80 else Green40
         else -> null
     }
 }
+
+/**
+ * 「[LINK_LABEL]」の文字色。メイン画面(タスク詳細の`current.url`表示)と同じくテーマの
+ * プライマリカラー相当([Purple40]/[Purple80]。`ui/theme/Theme.kt`の`LightColorScheme`/
+ * `DarkColorScheme`の`primary`と同じ値)を使い、下線([TextDecoration.Underline])と合わせて
+ * リンクであることを示す。ウィジェットでは`MaterialTheme.colorScheme.primary`を参照できないため
+ * 固定値を使い、どちらの濃淡を使うかは[useDarkPalette]で判定する。
+ */
+private fun linkTextColor(background: WidgetBackground, isDarkTheme: Boolean): Color =
+    if (useDarkPalette(background, isDarkTheme)) Purple80 else Purple40
 
 /**
  * ウィジェットのリンク行をタップした際にタスクの[Task.url][com.toshi0907.oboetotte.data.Task.url]を
