@@ -29,12 +29,10 @@ import androidx.glance.background
 import androidx.glance.currentState
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
-import androidx.glance.layout.defaultWeight
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
 import androidx.glance.state.PreferencesGlanceStateDefinition
-import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextDecoration
 import androidx.glance.text.TextStyle
@@ -104,8 +102,6 @@ class TaskWidget : GlanceAppWidget() {
                 textDecoration = TextDecoration.Underline
             )
 
-            val refreshButtonStyle = textStyle.copy(fontWeight = FontWeight.Bold)
-
             val listFilter = prefs[LIST_FILTER_KEY]
             val listFilteredTasks = when (listFilter) {
                 null, ALL_LISTS_VALUE -> tasks
@@ -138,11 +134,11 @@ class TaskWidget : GlanceAppWidget() {
                             "最終更新: まだ更新していません"
                         },
                         style = textStyle,
-                        modifier = GlanceModifier.defaultWeight()
+                        modifier = GlanceModifier.padding(end = 8.dp)
                     )
                     Text(
                         text = "[更新]",
-                        style = refreshButtonStyle,
+                        style = linkTextStyle,
                         modifier = GlanceModifier
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                             .clickable(actionRunCallback<RefreshTaskWidgetAction>())
