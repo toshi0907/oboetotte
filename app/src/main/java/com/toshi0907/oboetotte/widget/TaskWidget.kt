@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.glance.GlanceId
@@ -28,10 +29,12 @@ import androidx.glance.background
 import androidx.glance.currentState
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
+import androidx.glance.layout.defaultWeight
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
 import androidx.glance.state.PreferencesGlanceStateDefinition
+import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextDecoration
 import androidx.glance.text.TextStyle
@@ -50,6 +53,8 @@ import com.toshi0907.oboetotte.ui.theme.Purple40
 import com.toshi0907.oboetotte.ui.theme.Purple80
 import com.toshi0907.oboetotte.ui.theme.Red40
 import com.toshi0907.oboetotte.ui.theme.Red80
+import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -68,7 +73,11 @@ import kotlinx.coroutines.withContext
  * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開き、リンクラベルをタップすると
  * ブラウザ等でURLを直接開く。
  * ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに
- * 各所から呼ばれる[refreshTaskWidget]で再描画される。
+ * 各所から呼ばれる[refreshTaskWidget]で再描画される。上部には最終更新日時
+ * ([TaskWidget.LAST_UPDATED_AT_KEY]。[refreshTaskWidget]がウィジェットインスタンスごとに更新)と、
+ * タップすると手動で再取得・再描画・最終更新日時の更新を行う「[更新]」ラベル
+ * ([RefreshTaskWidgetAction]。[LINK_LABEL]と同じくクリックアクション付きの`Text`として実装)を
+ * 表示する(原因調査・手動復旧用。Issue #111)。
  *
  * 背景色([WidgetBackground])・表示するリスト([LIST_FILTER_KEY])・表示フィルタ
  * ([DISPLAY_FILTER_KEY])は[TaskWidgetConfigureActivity]でウィジェットごとに選択でき、
@@ -95,6 +104,8 @@ class TaskWidget : GlanceAppWidget() {
                 textDecoration = TextDecoration.Underline
             )
 
+            val refreshButtonStyle = textStyle.copy(fontWeight = FontWeight.Bold)
+
             val listFilter = prefs[LIST_FILTER_KEY]
             val listFilteredTasks = when (listFilter) {
                 null, ALL_LISTS_VALUE -> tasks
@@ -118,6 +129,25 @@ class TaskWidget : GlanceAppWidget() {
             background.color?.let { modifier = modifier.background(it) }
 
             Column(modifier = modifier) {
+                val lastUpdatedAt = prefs[LAST_UPDATED_AT_KEY]
+                Row(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                    Text(
+                        text = if (lastUpdatedAt != null) {
+                            "最終更新: ${formatLastUpdatedAt(lastUpdatedAt)}"
+                        } else {
+                            "最終更新: まだ更新していません"
+                        },
+                        style = textStyle,
+                        modifier = GlanceModifier.defaultWeight()
+                    )
+                    Text(
+                        text = "[更新]",
+                        style = refreshButtonStyle,
+                        modifier = GlanceModifier
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .clickable(actionRunCallback<RefreshTaskWidgetAction>())
+                    )
+                }
                 if (filteredTasks.isEmpty()) {
                     Text(text = "未完了タスクはありません", style = textStyle)
                 } else {
@@ -203,6 +233,13 @@ class TaskWidget : GlanceAppWidget() {
          * (すべて表示)」を意味する。複数選択時はメイン画面と同じくOR判定。
          */
         val DISPLAY_FILTER_KEY = stringSetPreferencesKey("display_filter")
+
+        /**
+         * ウィジェットが最後に再描画された日時(epoch millis)を保存するPreferencesキー。
+         * [refreshTaskWidget]がウィジェットインスタンスごとに更新する。未設定(`null`)は
+         * まだ一度も更新されていないことを表す。
+         */
+        val LAST_UPDATED_AT_KEY = longPreferencesKey("last_updated_at")
     }
 }
 
@@ -222,6 +259,23 @@ private fun Task.widgetItemId(nowMillis: Long): Long {
     val contentHash = ((title.hashCode() * 31 + (dueAt?.hashCode() ?: 0)) * 31 + (url?.hashCode() ?: 0)) * 31 +
         (isOverdue(nowMillis).hashCode() * 31 + isDueToday(nowMillis).hashCode())
     return (id shl 32) or (contentHash.toLong() and 0xFFFFFFFFL)
+}
+
+/**
+ * [TaskWidget.LAST_UPDATED_AT_KEY]の値(epoch millis)を「yyyy/MM/dd HH:mm:ss」形式(端末のローカル
+ * タイムゾーン)に整形する。メイン画面等で使う[formatDueAt]は秒を含まないため、原因調査用に秒まで
+ * 区別できるようここでは専用の書式を使う。
+ */
+private fun formatLastUpdatedAt(millis: Long): String {
+    val zoned = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
+    return "%04d/%02d/%02d %02d:%02d:%02d".format(
+        zoned.year,
+        zoned.monthValue,
+        zoned.dayOfMonth,
+        zoned.hour,
+        zoned.minute,
+        zoned.second
+    )
 }
 
 /** [OpenTaskUrlAction]に開くURLを渡すための[ActionParameters.Key]。 */
@@ -293,6 +347,17 @@ class OpenTaskUrlAction : ActionCallback {
                 Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+}
+
+/**
+ * ウィジェット上部の「[更新]」ラベル([TaskWidget.provideGlance]内のクリックアクション付き`Text`)
+ * から呼ばれる[ActionCallback]。原因調査・手動復旧用に、[refreshTaskWidget]を呼び即座に再描画と
+ * 最終更新日時の更新を行う(Issue #111)。
+ */
+class RefreshTaskWidgetAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        refreshTaskWidget(context)
     }
 }
 
