@@ -63,8 +63,10 @@ import kotlinx.coroutines.withContext
  * コンパクトに保つためURL文字列そのものではなく「[LINK_LABEL]」というラベルを、メイン画面の
  * URLリンク表示([com.toshi0907.oboetotte.MainActivity]内のタスク詳細と同じ`colorScheme.primary`相当)
  * にならいリンク色+下線のテキストとして表示し(背景・枠線・角丸は持たない)、期限がある場合は
- * 期限日時と同じ行に、無い場合は単独の行に表示する。行(タイトル・期限部分)をタップすると
- * アプリ(MainActivity)を開き、リンクラベルをタップするとブラウザ等でURLを直接開く。
+ * 期限日時と同じ行に、無い場合は単独の行に表示する。リンクラベルはタップ領域確保のため上下に
+ * パディングを持つため、同じ行に並ぶ期限日時にも同じ縦パディングを付けて表示位置を揃えている。
+ * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開き、リンクラベルをタップすると
+ * ブラウザ等でURLを直接開く。
  * ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに
  * 各所から呼ばれる[refreshTaskWidget]で再描画される。
  *
@@ -137,13 +139,17 @@ class TaskWidget : GlanceAppWidget() {
                                         isDarkTheme = isDarkTheme
                                     )?.let { TextStyle(color = ColorProvider(it)) } ?: textStyle
                                     Row(modifier = GlanceModifier.fillMaxWidth()) {
-                                        Text(text = formatDueAt(dueAt), style = dueStyle)
+                                        Text(
+                                            text = formatDueAt(dueAt),
+                                            style = dueStyle,
+                                            modifier = GlanceModifier.padding(vertical = 6.dp)
+                                        )
                                         if (url != null) {
                                             Text(
                                                 text = LINK_LABEL,
                                                 style = linkTextStyle,
                                                 modifier = GlanceModifier
-                                                    .padding(start = 8.dp)
+                                                    .padding(start = 8.dp, top = 6.dp, bottom = 6.dp)
                                                     .clickable(
                                                         actionRunCallback<OpenTaskUrlAction>(
                                                             actionParametersOf(URL_PARAM_KEY to url)
@@ -157,6 +163,7 @@ class TaskWidget : GlanceAppWidget() {
                                         text = LINK_LABEL,
                                         style = linkTextStyle,
                                         modifier = GlanceModifier
+                                            .padding(horizontal = 8.dp, vertical = 6.dp)
                                             .clickable(
                                                 actionRunCallback<OpenTaskUrlAction>(
                                                     actionParametersOf(URL_PARAM_KEY to url)
