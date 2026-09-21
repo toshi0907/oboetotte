@@ -79,6 +79,7 @@ import kotlinx.coroutines.withContext
 class TaskWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
 
+    /** ウィジェットの表示内容を組み立てる。詳細はクラスのKDocを参照。 */
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val tasks = AppDatabase.getInstance(context).taskDao().getAll().first()
             .filter { it.parentTaskId == null && !it.isDone }
