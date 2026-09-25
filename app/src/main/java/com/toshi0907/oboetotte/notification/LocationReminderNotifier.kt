@@ -26,7 +26,8 @@ object LocationReminderNotifier {
     /**
      * @param vibrationPattern タスクに設定されたバイブレーションパターン。非nullならバイブ無効の
      * 専用チャンネルに投稿し、[VibrationPatternPlayer]でパターンどおりに振動させる。
-     * @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。
+     * @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無い、通知が無効化されている、
+     * 投稿先チャンネルがブロックされている場合はfalse)。
      */
     fun showNotification(
         context: Context,
@@ -95,12 +96,21 @@ object LocationReminderNotifier {
         ) {
             return false
         }
+        // 通知自体が無効化されている、または投稿先チャンネルの重要度がIMPORTANCE_NONEの場合は
+        // notify()しても表示されない。表示されないのにパターン振動だけ鳴る(通知履歴にも残る)
+        // ことを避けるため、ReminderReceiverと同様にここで弾く。
+        val notifier = NotificationManagerCompat.from(context)
+        val channelBlocked =
+            notificationManager.getNotificationChannel(channelId)?.importance ==
+                NotificationManager.IMPORTANCE_NONE
+        if (!notifier.areNotificationsEnabled() || channelBlocked) {
+            return false
+        }
         // 期限日時通知(ReminderReceiver)と同じ taskId.toInt() をIDに使うため、
         // 「完了」ボタン(CompleteReceiver)からはどちらの通知でも正しく消去できる。
         // タグは期限日時通知と分けており、両方のリマインダーが発火しても片方がもう片方を
         // 上書きせず別々の通知として表示される。
-        NotificationManagerCompat.from(context)
-            .notify(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt(), notification)
+        notifier.notify(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt(), notification)
         vibrationPattern?.let { VibrationPatternPlayer.play(context, it) }
         return true
     }
