@@ -1,10 +1,12 @@
 package com.toshi0907.oboetotte.backup
 
 import android.content.Context
+import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.Operation
 import androidx.work.PeriodicWorkRequest
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -24,6 +26,7 @@ import java.util.concurrent.TimeUnit
  * 定期実行は正確なアラームではないため、実際の発火時刻が多少前後することはある)。
  */
 object CloudBackupScheduler {
+    private const val TAG = "CloudBackup"
     private const val WORK_NAME = "cloud_backup_periodic"
     private const val INTERVAL_HOURS = 24L
 
@@ -73,12 +76,24 @@ object CloudBackupScheduler {
      * 自動バックアップの有効化時、および有効化中に保存時刻設定を変更した際に呼ぶ。
      */
     fun reschedule(context: Context) {
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+        val appContext = context.applicationContext
+        val operation = WorkManager.getInstance(appContext).enqueueUniquePeriodicWork(
             WORK_NAME,
             ExistingPeriodicWorkPolicy.REPLACE,
-            buildRequest(context)
+            buildRequest(appContext)
         )
-        CloudBackupSettings.setScheduleVersion(context, SCHEDULE_VERSION)
+        // enqueueは非同期のため、置き換えの完了を確認してから版を記録する。完了前にプロセスが
+        // 終了したり置き換えが失敗したりした場合は古い版のままにしておき、次回起動時の
+        // ensureScheduledで改めて置き換えを試みる。
+        operation.result.addListener({
+            try {
+                if (operation.result.get() is Operation.State.SUCCESS) {
+                    CloudBackupSettings.setScheduleVersion(appContext, SCHEDULE_VERSION)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "クラウドバックアップの定期実行の登録に失敗しました", e)
+            }
+        }, Runnable::run)
     }
 
     fun cancel(context: Context) {

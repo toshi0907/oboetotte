@@ -67,6 +67,12 @@ object CloudBackupRunner {
 
     private suspend fun runLocked(context: Context, folderUri: Uri): Boolean {
         val staging = File(context.cacheDir, STAGING_FILE_NAME)
+        // 失敗した試行で作成されたものの削除できなかった(または作成に成功したか不明な)
+        // ファイル名。空/不完全なファイルをpruneOldBackupsが正常なバックアップとして数えて
+        // しまうと、その分だけ正常な古いバックアップが余分に削除されるため、保持件数の計算
+        // から除外した上で削除を再試行する。今回の実行中に削除しきれなかった分は次回以降の
+        // 実行に引き継ぐため、CloudBackupSettingsに永続化する。
+        val orphanNames = CloudBackupSettings.getOrphanFileNames(context).toMutableSet()
         try {
             // まずZIPの実体を端末内の一時ファイルへ書き出す。保存先フォルダにはまだ一切
             // 触れないため、ここで失敗しても既存の古いバックアップはそのまま残る。
@@ -78,11 +84,6 @@ object CloudBackupRunner {
                 return recordFailure(context, "バックアップデータの作成に失敗しました", e)
             }
 
-            // 失敗した試行で作成されたものの削除できなかった(または作成に成功したか不明な)
-            // ファイル名。空/不完全なファイルを後続の試行のpruneOldBackupsが正常なバックアップと
-            // して数えてしまうと、その分だけ正常な古いバックアップが余分に削除されるため、
-            // 保持件数の計算から除外した上で削除を再試行する。
-            val orphanNames = mutableSetOf<String>()
             var lastError: Exception? = null
             for (attempt in 1..MAX_WRITE_ATTEMPTS) {
                 if (attempt > 1) {
@@ -116,6 +117,7 @@ object CloudBackupRunner {
             return recordFailure(context, "$reason(${MAX_WRITE_ATTEMPTS}回試行)", error)
         } finally {
             staging.delete()
+            CloudBackupSettings.setOrphanFileNames(context, orphanNames)
         }
     }
 

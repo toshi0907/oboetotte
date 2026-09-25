@@ -35,6 +35,7 @@ object CloudBackupSettings {
     private const val KEY_BACKUP_HOUR = "backup_hour"
     private const val KEY_BACKUP_MINUTE = "backup_minute"
     private const val KEY_SCHEDULE_VERSION = "schedule_version"
+    private const val KEY_ORPHAN_FILE_NAMES = "orphan_file_names"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -81,6 +82,18 @@ object CloudBackupSettings {
 
     fun setScheduleVersion(context: Context, version: Int) {
         prefs(context).edit().putInt(KEY_SCHEDULE_VERSION, version).apply()
+    }
+
+    /**
+     * 失敗したバックアップの試行が保存先フォルダに残した(削除できなかった)不完全なファイルの名前。
+     * 実行をまたいで保持し、保持件数の計算から除外しつつ次回以降に削除を再試行するために使う。
+     */
+    fun getOrphanFileNames(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_ORPHAN_FILE_NAMES, null)?.toSet() ?: emptySet()
+
+    fun setOrphanFileNames(context: Context, names: Set<String>) {
+        // getStringSetが返すインスタンスを直接変更してはいけないため、常にコピーを保存する。
+        prefs(context).edit().putStringSet(KEY_ORPHAN_FILE_NAMES, HashSet(names)).apply()
     }
 
     fun getLastBackupAt(context: Context): Long? {
