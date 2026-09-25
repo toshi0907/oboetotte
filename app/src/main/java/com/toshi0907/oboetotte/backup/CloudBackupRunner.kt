@@ -98,7 +98,7 @@ object CloudBackupRunner {
                     // 既存コードの`CancellationException`は特別扱いする方針と同じ)。
                     throw e
                 } catch (e: Exception) {
-                    Log.w(TAG, "クラウドバックアップの書き込みに失敗しました($attempt/$MAX_WRITE_ATTEMPTS回目)", e)
+                    Log.w(TAG, "クラウドバックアップの書き込みに失敗しました(${attempt}/${MAX_WRITE_ATTEMPTS}回目)", e)
                     lastError = e
                 }
             }
@@ -221,7 +221,7 @@ object CloudBackupRunner {
         folder.listFiles()
             .filter { it.name?.startsWith(BACKUP_FILE_PREFIX) == true && it.name?.endsWith(".zip") == true }
             // 失敗した試行が残した不完全なファイルは正常なバックアップとして数えない。
-            .filterNot { it.name in excludedNames }
+            .filterNot { file -> file.name?.let { it in excludedNames } == true }
             // DocumentFile.lastModified()はSAFプロバイダによっては未対応で0を返すことがあり、
             // その場合ソート順が不定になって今作成したばかりのファイルが削除されうる。
             // ファイル名はゼロ埋めの日時を埋め込んで生成しているため、辞書順=時系列順になる。
@@ -233,7 +233,9 @@ object CloudBackupRunner {
     /** [orphanNames]のファイルの削除を試み、削除できた(または既に存在しない)ものを集合から除く。 */
     private fun deleteOrphans(folder: DocumentFile, orphanNames: MutableSet<String>) {
         if (orphanNames.isEmpty()) return
-        val existing = folder.listFiles().filter { it.name in orphanNames }.associateBy { it.name }
+        val existing = folder.listFiles()
+            .mapNotNull { file -> file.name?.takeIf { it in orphanNames }?.let { it to file } }
+            .toMap()
         orphanNames.removeAll { name ->
             val file = existing[name] ?: return@removeAll true
             try {
