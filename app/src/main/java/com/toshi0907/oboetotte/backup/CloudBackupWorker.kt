@@ -17,6 +17,18 @@ class CloudBackupWorker(
     override suspend fun doWork(): Result {
         if (!CloudBackupSettings.isEnabled(applicationContext)) return Result.success()
         val succeeded = CloudBackupRunner.run(applicationContext)
-        return if (succeeded) Result.success() else Result.failure()
+        return when {
+            succeeded -> Result.success()
+            // 保存先のプロバイダやネットワークの一時的な不調で失敗した場合に、次の定期実行
+            // (24時間後)まで待たずにWorkManagerのバックオフ(CloudBackupSchedulerで指定)で
+            // 時間を置いて再試行する。恒久的な失敗(権限の失効等)で無限に再試行し続けないよう、
+            // 回数に上限を設ける。
+            runAttemptCount < MAX_RETRY_COUNT -> Result.retry()
+            else -> Result.failure()
+        }
+    }
+
+    private companion object {
+        const val MAX_RETRY_COUNT = 3
     }
 }

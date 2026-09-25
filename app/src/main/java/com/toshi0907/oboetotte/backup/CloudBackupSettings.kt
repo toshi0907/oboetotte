@@ -31,8 +31,10 @@ object CloudBackupSettings {
     private const val KEY_RETENTION_COUNT = "retention_count"
     private const val KEY_LAST_BACKUP_AT = "last_backup_at"
     private const val KEY_LAST_BACKUP_RESULT = "last_backup_result"
+    private const val KEY_LAST_BACKUP_ERROR = "last_backup_error"
     private const val KEY_BACKUP_HOUR = "backup_hour"
     private const val KEY_BACKUP_MINUTE = "backup_minute"
+    private const val KEY_SCHEDULE_VERSION = "schedule_version"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -71,6 +73,16 @@ object CloudBackupSettings {
             .apply()
     }
 
+    /**
+     * 登録済みの定期実行がどの版の[CloudBackupScheduler]の設定(実行条件・再試行方針)で
+     * 登録されたか。未記録(この仕組みの導入前に登録された)場合は0。
+     */
+    fun getScheduleVersion(context: Context): Int = prefs(context).getInt(KEY_SCHEDULE_VERSION, 0)
+
+    fun setScheduleVersion(context: Context, version: Int) {
+        prefs(context).edit().putInt(KEY_SCHEDULE_VERSION, version).apply()
+    }
+
     fun getLastBackupAt(context: Context): Long? {
         val value = prefs(context).getLong(KEY_LAST_BACKUP_AT, -1L)
         return if (value < 0) null else value
@@ -81,10 +93,19 @@ object CloudBackupSettings {
         return CloudBackupResult.entries.find { it.name == name }
     }
 
-    fun recordResult(context: Context, result: CloudBackupResult, at: Long) {
+    /** 直近の実行が失敗した場合の失敗理由(どの段階で何が起きたか)。成功時・未実行時は`null`。 */
+    fun getLastBackupError(context: Context): String? =
+        prefs(context).getString(KEY_LAST_BACKUP_ERROR, null)
+
+    /**
+     * [error]は失敗時の理由(設定画面にそのまま表示する)。成功時は`null`を渡すことで、
+     * 以前の失敗理由を消去する。
+     */
+    fun recordResult(context: Context, result: CloudBackupResult, at: Long, error: String? = null) {
         prefs(context).edit()
             .putLong(KEY_LAST_BACKUP_AT, at)
             .putString(KEY_LAST_BACKUP_RESULT, result.name)
+            .putString(KEY_LAST_BACKUP_ERROR, error)
             .apply()
     }
 
