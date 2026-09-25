@@ -183,9 +183,11 @@ class ReminderReceiver : BroadcastReceiver() {
         // (update/AppUpdateNotifier.showNotificationと同じ確認方法)。通知のみタスクは
         // この戻り値を見て実際に表示できた場合のみ自動完了するため、ここで確実に弾く。
         val notifier = NotificationManagerCompat.from(context)
-        val channelBlocked =
-            notificationManager.getNotificationChannel(channelId)?.importance ==
-                NotificationManager.IMPORTANCE_NONE
+        // パターン用の専用チャンネルに投稿する場合も、ユーザーが元のチャンネル(リマインダー)を
+        // 無効化していれば、その設定を尊重して表示しない。
+        val channelBlocked = listOf(CHANNEL_ID, channelId).distinct().any {
+            notificationManager.getNotificationChannel(it)?.importance == NotificationManager.IMPORTANCE_NONE
+        }
         if (!notifier.areNotificationsEnabled() || channelBlocked) {
             return false
         }
