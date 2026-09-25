@@ -78,13 +78,18 @@ object CloudBackupRunner {
                 return recordFailure(context, "バックアップデータの作成に失敗しました", e)
             }
 
+            // 失敗した試行で作成されたものの削除できなかった(または作成に成功したか不明な)
+            // ファイル名。空/不完全なファイルを後続の試行のpruneOldBackupsが正常なバックアップと
+            // して数えてしまうと、その分だけ正常な古いバックアップが余分に削除されるため、
+            // 保持件数の計算から除外した上で削除を再試行する。
+            val orphanNames = mutableSetOf<String>()
             var lastError: Exception? = null
             for (attempt in 1..MAX_WRITE_ATTEMPTS) {
                 if (attempt > 1) {
                     delay(RETRY_DELAYS_MILLIS[(attempt - 2).coerceAtMost(RETRY_DELAYS_MILLIS.size - 1)])
                 }
                 try {
-                    writeToFolder(context, folderUri, staging)
+                    writeToFolder(context, folderUri, staging, orphanNames)
                     CloudBackupSettings.recordResult(context, CloudBackupResult.SUCCESS, System.currentTimeMillis())
                     return true
                 } catch (e: CancellationException) {
@@ -95,6 +100,15 @@ object CloudBackupRunner {
                 } catch (e: Exception) {
                     Log.w(TAG, "クラウドバックアップの書き込みに失敗しました($attempt/$MAX_WRITE_ATTEMPTS回目)", e)
                     lastError = e
+                }
+            }
+            // 全試行が失敗した場合も、残った不完全なファイルを次回以降の実行に持ち越さないよう
+            // 最後にもう一度削除を試みる。
+            if (orphanNames.isNotEmpty()) {
+                try {
+                    DocumentFile.fromTreeUri(context, folderUri)?.let { deleteOrphans(it, orphanNames) }
+                } catch (e: Exception) {
+                    Log.w(TAG, "不完全なバックアップファイルの削除に失敗しました", e)
                 }
             }
             val error = lastError ?: IOException("不明なエラー")
@@ -119,9 +133,10 @@ object CloudBackupRunner {
     /**
      * 一時ファイル[staging]の内容を保存先フォルダ[folderUri]へ新規ファイルとして書き込む。
      * 失敗した場合は作成途中のファイルを削除した上で、どの段階で失敗したかを表す
-     * [BackupStepException]等を投げる(呼び出し元が再試行する)。
+     * [BackupStepException]等を投げる(呼び出し元が再試行する)。作成途中のファイルを削除
+     * できなかった場合は、そのファイル名を[orphanNames]に追加する。
      */
-    private fun writeToFolder(context: Context, folderUri: Uri, staging: File) {
+    private fun writeToFolder(context: Context, folderUri: Uri, staging: File, orphanNames: MutableSet<String>) {
         // 再試行のたびにDocumentFileを作り直し、プロバイダから最新のフォルダ情報を取得し直す。
         val folder = DocumentFile.fromTreeUri(context, folderUri)
             ?: throw BackupStepException("保存先フォルダを開けませんでした")
@@ -146,7 +161,8 @@ object CloudBackupRunner {
         // 再試行時に繰り返し呼ばれても、保持件数-1件より多い分だけを消すので結果は変わらない。
         val retention = CloudBackupSettings.getRetentionCount(context)
         try {
-            pruneOldBackups(folder, retention - 1)
+            deleteOrphans(folder, orphanNames)
+            pruneOldBackups(folder, retention - 1, orphanNames)
         } catch (e: Exception) {
             throw BackupStepException("古いバックアップの削除に失敗しました", e)
         }
@@ -164,6 +180,8 @@ object CloudBackupRunner {
         val created = try {
             folder.createFile("application/zip", fileName)
         } catch (e: Exception) {
+            // 例外が投げられても、プロバイダ側ではファイルが作成済みの可能性がある。
+            orphanNames.add(fileName)
             throw BackupStepException("バックアップファイルを作成できませんでした", e)
         } ?: throw BackupStepException("バックアップファイルを作成できませんでした")
 
@@ -181,10 +199,15 @@ object CloudBackupRunner {
             if (!written) {
                 // 書き込みが完了しなかった場合、作成済みの空/不完全なファイルを残すと
                 // 次回以降の保持件数の計算に混ざってしまうため削除しておく。
-                try {
+                val deleted = try {
                     created.delete()
                 } catch (e: Exception) {
                     Log.w(TAG, "失敗したバックアップファイルの削除に失敗しました", e)
+                    false
+                }
+                if (!deleted) {
+                    // プロバイダが重複回避でリネームしている場合もあるため、実際の名前を優先する。
+                    orphanNames.add(created.name ?: fileName)
                 }
             }
         }
@@ -192,16 +215,33 @@ object CloudBackupRunner {
 
     /**
      * [keepCount]件を超える分を、生成したファイル名の降順(=新しい順)で削除する。
-     * [keepCount]が0以下の場合は全件削除する。
+     * [keepCount]が0以下の場合は全件削除する。[excludedNames]のファイルは数えず、削除もしない。
      */
-    private fun pruneOldBackups(folder: DocumentFile, keepCount: Int) {
+    private fun pruneOldBackups(folder: DocumentFile, keepCount: Int, excludedNames: Set<String>) {
         folder.listFiles()
             .filter { it.name?.startsWith(BACKUP_FILE_PREFIX) == true && it.name?.endsWith(".zip") == true }
+            // 失敗した試行が残した不完全なファイルは正常なバックアップとして数えない。
+            .filterNot { it.name in excludedNames }
             // DocumentFile.lastModified()はSAFプロバイダによっては未対応で0を返すことがあり、
             // その場合ソート順が不定になって今作成したばかりのファイルが削除されうる。
             // ファイル名はゼロ埋めの日時を埋め込んで生成しているため、辞書順=時系列順になる。
             .sortedByDescending { it.name.orEmpty() }
             .drop(keepCount.coerceAtLeast(0))
             .forEach { it.delete() }
+    }
+
+    /** [orphanNames]のファイルの削除を試み、削除できた(または既に存在しない)ものを集合から除く。 */
+    private fun deleteOrphans(folder: DocumentFile, orphanNames: MutableSet<String>) {
+        if (orphanNames.isEmpty()) return
+        val existing = folder.listFiles().filter { it.name in orphanNames }.associateBy { it.name }
+        orphanNames.removeAll { name ->
+            val file = existing[name] ?: return@removeAll true
+            try {
+                file.delete()
+            } catch (e: Exception) {
+                Log.w(TAG, "不完全なバックアップファイルの削除に失敗しました: $name", e)
+                false
+            }
+        }
     }
 }
