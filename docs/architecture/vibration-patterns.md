@@ -1,0 +1,9 @@
+# 通知時のバイブレーションパターン
+
+**データ**: `data/VibrationPattern`(`id`/`name`/`onMs`/`offMs`/`durationMs`、テーブル`vibration_patterns`、DB version 22の`MIGRATION_21_22`で追加)として、タスクとは独立に複数登録できます。タスク側は`Task.vibrationPatternId`(任意)で参照し、`null`ならパターン未使用(従来どおりチャンネル標準のバイブレーション)です。「パターンを有効にするか」と「どのパターンか」を1つのカラムで表しており、`EditTaskDialog`の「バイブレーションパターン」で有効化チップをオンにしてパターンを選んだ場合のみ保存されます(有効なのに未選択なら保存ボタンを無効化)。パターンを削除すると`TaskViewModel.deleteVibrationPattern`が`TaskDao.clearVibrationPatternId`で参照していたタスクを`null`に戻します。繰り返しタスクの次回分は`task.copy`で生成されるためそのまま引き継がれます。
+
+**振動の仕組み**: Android 8.0以降、通知のバイブレーションはチャンネル作成時に固定され通知ごとに変えられないため、パターンを使うタスクの通知(`ReminderReceiver`の期限日時通知〈スヌーズ・オートスヌーズ経由を含む〉と`LocationReminderNotifier`の位置情報通知)は、元のチャンネルID+`_custom_vibration`というバイブレーション無効の専用チャンネル(`VibrationPatternPlayer.ensureCustomVibrationChannel`、重要度は元と同じ`IMPORTANCE_HIGH`)に投稿し、`notify`した直後に`VibrationPatternPlayer.play`で`Vibrator`を直接鳴らします(標準バイブとパターンが重ならないようにするため)。着信モード(サイレント・マナー)に関わらず常に振動させる仕様のため、用途は`USAGE_ALARM`(API 33以降は`VibrationAttributes`、それ未満は`AudioAttributes`)で再生します。パターンが見つからない場合(削除済み等)は通常のチャンネルで通知します。テスト通知は対象外です。`AndroidManifest.xml`に`VIBRATE`権限を追加しています。
+
+**パターンの意味**: `VibrationPatternPlayer.buildTimings`が「オン`onMs`→オフ`offMs`」を`durationMs`に達するまで並べた`VibrationEffect.createWaveform`用の配列(先頭は待ち時間0)を作り、最後の周期は`durationMs`で打ち切ります(例: オン1000・オフ500・継続5000なら`[0,1000,500,1000,500,1000,500,500]`)。`offMs == 0`は継続時間の間ずっと振動します。入力値は`VibrationPatternPlayer.isValid`(オン10ms以上、オフは0か10ms以上、継続1〜60000ms)で検証し、極端に細かい値で配列が膨大になるのを防いでいます。
+
+**設定画面**: 「場所」の次の「バイブレーション」セクションから`ManageVibrationPatternsDialog`を開き、パターンの追加・編集(名称のタップ)・削除と、「試す」ボタンによる振動の確認(`TaskViewModel.previewVibrationPattern`)ができます。バックアップのJSONには`vibrationPatterns`配列として含まれます(詳細は`docs/architecture/local-backup.md`)。

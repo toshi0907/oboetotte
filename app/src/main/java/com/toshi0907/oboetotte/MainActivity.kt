@@ -100,11 +100,13 @@ import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.data.VibrationPattern
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.LocationTrackingMode
 import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.notification.VibrationPatternPlayer
 import com.toshi0907.oboetotte.ui.theme.Green40
 import com.toshi0907.oboetotte.ui.theme.Green80
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
@@ -198,6 +200,7 @@ class MainActivity : ComponentActivity() {
                     val allTasks by taskViewModel.allTasks.collectAsState()
                     val lists by taskViewModel.lists.collectAsState()
                     val savedLocations by taskViewModel.savedLocations.collectAsState()
+                    val vibrationPatterns by taskViewModel.vibrationPatterns.collectAsState()
                     val attachments by taskViewModel.attachments.collectAsState()
                     val notificationLogs by taskViewModel.notificationLogs.collectAsState()
                     val locationUpdateLogs by taskViewModel.locationUpdateLogs.collectAsState()
@@ -314,6 +317,7 @@ class MainActivity : ComponentActivity() {
                             onDeleteTask = taskViewModel::deleteTask,
                             onAddSubtask = taskViewModel::addSubtask,
                             savedLocations = savedLocations,
+                            vibrationPatterns = vibrationPatterns,
                             allAttachments = attachments,
                             onAddAttachment = taskViewModel::addAttachment,
                             onDeleteAttachment = taskViewModel::deleteAttachment,
@@ -346,6 +350,11 @@ class MainActivity : ComponentActivity() {
                             onAddSavedLocation = taskViewModel::addSavedLocation,
                             onUpdateSavedLocation = taskViewModel::updateSavedLocation,
                             onDeleteSavedLocation = taskViewModel::deleteSavedLocation,
+                            vibrationPatterns = vibrationPatterns,
+                            onAddVibrationPattern = taskViewModel::addVibrationPattern,
+                            onUpdateVibrationPattern = taskViewModel::updateVibrationPattern,
+                            onDeleteVibrationPattern = taskViewModel::deleteVibrationPattern,
+                            onPreviewVibrationPattern = taskViewModel::previewVibrationPattern,
                             allTasks = allTasks,
                             notificationLogs = notificationLogs,
                             locationUpdateLogs = locationUpdateLogs,
@@ -498,6 +507,9 @@ private fun autoSnoozeLabel(task: Task): String? {
     return "オートスヌーズ: $label"
 }
 
+private fun vibrationPatternSummary(pattern: VibrationPattern): String =
+    "オン${pattern.onMs}ms・オフ${pattern.offMs}ms・継続${pattern.durationMs}ms"
+
 private val URL_SCHEME_PREFIX = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
 
 /**
@@ -535,6 +547,7 @@ fun TaskScreen(
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
     savedLocations: List<SavedLocation> = emptyList(),
+    vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
     onAddAttachment: (Task, Uri) -> Unit = { _, _ -> },
     onDeleteAttachment: (TaskAttachment) -> Unit = {},
@@ -784,6 +797,7 @@ fun TaskScreen(
             allTasks = allTasks,
             lists = lists,
             savedLocations = savedLocations,
+            vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
@@ -913,6 +927,7 @@ fun TaskDetailDialog(
     allTasks: List<Task>,
     lists: List<TaskList> = emptyList(),
     savedLocations: List<SavedLocation> = emptyList(),
+    vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, TaskEdits) -> Unit,
@@ -985,6 +1000,12 @@ fun TaskDetailDialog(
                     Text(text = "通知のみタスク(通知表示で自動完了・スヌーズ不可)")
                 }
                 autoSnoozeLabel(current)?.let { Text(text = it) }
+                current.vibrationPatternId?.let { patternId ->
+                    val pattern = vibrationPatterns.find { it.id == patternId }
+                    if (pattern != null) {
+                        Text(text = "バイブレーション: ${pattern.name}(${vibrationPatternSummary(pattern)})")
+                    }
+                }
                 locationLabel(current)?.let { Text(text = it) }
                 if (!current.memo.isNullOrBlank()) {
                     Text(text = "メモ", style = MaterialTheme.typography.titleSmall)
@@ -1035,6 +1056,7 @@ fun TaskDetailDialog(
             allTasks = allTasks,
             lists = lists,
             savedLocations = savedLocations,
+            vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
             onConfirm = { t, edits ->
                 onUpdateTask(t, edits)
@@ -1054,6 +1076,7 @@ fun TaskDetailDialog(
             allTasks = allTasks,
             lists = lists,
             savedLocations = savedLocations,
+            vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
@@ -1083,6 +1106,11 @@ fun SettingsScreen(
     onAddSavedLocation: (String, Double, Double, Int) -> Unit,
     onUpdateSavedLocation: (SavedLocation, String, Int) -> Unit,
     onDeleteSavedLocation: (SavedLocation) -> Unit,
+    vibrationPatterns: List<VibrationPattern> = emptyList(),
+    onAddVibrationPattern: (String, Long, Long, Long) -> Unit = { _, _, _, _ -> },
+    onUpdateVibrationPattern: (VibrationPattern, String, Long, Long, Long) -> Unit = { _, _, _, _, _ -> },
+    onDeleteVibrationPattern: (VibrationPattern) -> Unit = {},
+    onPreviewVibrationPattern: (Long, Long, Long) -> Unit = { _, _, _ -> },
     allTasks: List<Task>,
     notificationLogs: List<NotificationLog> = emptyList(),
     locationUpdateLogs: List<LocationUpdateLog> = emptyList(),
@@ -1115,6 +1143,7 @@ fun SettingsScreen(
 ) {
     var showManageLists by remember { mutableStateOf(false) }
     var showManageLocations by remember { mutableStateOf(false) }
+    var showManageVibrationPatterns by remember { mutableStateOf(false) }
     var showLocationDebug by remember { mutableStateOf(false) }
     var showNotificationLogs by remember { mutableStateOf(false) }
     var showBackupTimePicker by remember { mutableStateOf(false) }
@@ -1197,6 +1226,15 @@ fun SettingsScreen(
             )
             TextButton(onClick = { showManageLocations = true }) {
                 Text("場所を編集")
+            }
+
+            Text(
+                text = "バイブレーション",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            TextButton(onClick = { showManageVibrationPatterns = true }) {
+                Text("バイブレーションパターンを編集")
             }
 
             Text(
@@ -1431,6 +1469,17 @@ fun SettingsScreen(
             onUpdateSavedLocation = onUpdateSavedLocation,
             onDeleteSavedLocation = onDeleteSavedLocation,
             onDismiss = { showManageLocations = false }
+        )
+    }
+
+    if (showManageVibrationPatterns) {
+        ManageVibrationPatternsDialog(
+            patterns = vibrationPatterns,
+            onAdd = onAddVibrationPattern,
+            onUpdate = onUpdateVibrationPattern,
+            onDelete = onDeleteVibrationPattern,
+            onPreview = onPreviewVibrationPattern,
+            onDismiss = { showManageVibrationPatterns = false }
         )
     }
 
@@ -2073,6 +2122,217 @@ fun ManageLocationsDialog(
     )
 }
 
+/**
+ * バイブレーションパターン1件分の入力欄(名称・オン時間・オフ時間・継続時間)。追加フォームと
+ * 既存パターンの編集フォームで共通に使う。
+ */
+@Composable
+private fun VibrationPatternFields(
+    name: String,
+    onNameChange: (String) -> Unit,
+    onMs: String,
+    onOnMsChange: (String) -> Unit,
+    offMs: String,
+    onOffMsChange: (String) -> Unit,
+    durationMs: String,
+    onDurationMsChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = name,
+        onValueChange = onNameChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text("パターン名") },
+        singleLine = true
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf(
+            Triple("オン(ms)", onMs, onOnMsChange),
+            Triple("オフ(ms)", offMs, onOffMsChange),
+            Triple("継続(ms)", durationMs, onDurationMsChange)
+        ).forEach { (label, value, onChange) ->
+            OutlinedTextField(
+                value = value,
+                onValueChange = { onChange(it.filter { c -> c.isDigit() }.take(6)) },
+                modifier = Modifier.weight(1f),
+                label = { Text(label) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+        }
+    }
+}
+
+/** 入力文字列が妥当なパターンなら(オン, オフ, 継続)のms値を返す。 */
+private fun parseVibrationPatternInput(onMs: String, offMs: String, durationMs: String): Triple<Long, Long, Long>? {
+    val on = onMs.toLongOrNull() ?: return null
+    val off = offMs.toLongOrNull() ?: return null
+    val duration = durationMs.toLongOrNull() ?: return null
+    return if (VibrationPatternPlayer.isValid(on, off, duration)) Triple(on, off, duration) else null
+}
+
+private val VIBRATION_PATTERN_INPUT_HINT =
+    "オン${VibrationPatternPlayer.MIN_ON_MS}ms以上、オフは0(連続振動)か${VibrationPatternPlayer.MIN_OFF_MS}ms以上、" +
+        "継続は1〜${VibrationPatternPlayer.MAX_DURATION_MS}msで入力してください"
+
+@Composable
+fun ManageVibrationPatternsDialog(
+    patterns: List<VibrationPattern>,
+    onAdd: (String, Long, Long, Long) -> Unit,
+    onUpdate: (VibrationPattern, String, Long, Long, Long) -> Unit,
+    onDelete: (VibrationPattern) -> Unit,
+    onPreview: (Long, Long, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var newName by remember { mutableStateOf("") }
+    var newOnMs by remember { mutableStateOf("1000") }
+    var newOffMs by remember { mutableStateOf("500") }
+    var newDurationMs by remember { mutableStateOf("5000") }
+    var editingPatternId by remember { mutableStateOf<Long?>(null) }
+    var editName by remember { mutableStateOf("") }
+    var editOnMs by remember { mutableStateOf("") }
+    var editOffMs by remember { mutableStateOf("") }
+    var editDurationMs by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("バイブレーションパターンを編集") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "オン時間振動・オフ時間停止を、継続時間の間繰り返します(単位はms)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                patterns.forEach { pattern ->
+                    if (editingPatternId == pattern.id) {
+                        val parsed = parseVibrationPatternInput(editOnMs, editOffMs, editDurationMs)
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            VibrationPatternFields(
+                                name = editName,
+                                onNameChange = { editName = it },
+                                onMs = editOnMs,
+                                onOnMsChange = { editOnMs = it },
+                                offMs = editOffMs,
+                                onOffMsChange = { editOffMs = it },
+                                durationMs = editDurationMs,
+                                onDurationMsChange = { editDurationMs = it }
+                            )
+                            if (parsed == null) {
+                                Text(
+                                    text = VIBRATION_PATTERN_INPUT_HINT,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            Row {
+                                TextButton(
+                                    enabled = parsed != null,
+                                    onClick = { parsed?.let { (on, off, duration) -> onPreview(on, off, duration) } }
+                                ) {
+                                    Text("試す")
+                                }
+                                TextButton(
+                                    enabled = parsed != null && editName.isNotBlank(),
+                                    onClick = {
+                                        val (on, off, duration) = parsed ?: return@TextButton
+                                        onUpdate(pattern, editName, on, off, duration)
+                                        editingPatternId = null
+                                    }
+                                ) {
+                                    Text("保存")
+                                }
+                                TextButton(onClick = { editingPatternId = null }) {
+                                    Text("キャンセル")
+                                }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        editingPatternId = pattern.id
+                                        editName = pattern.name
+                                        editOnMs = pattern.onMs.toString()
+                                        editOffMs = pattern.offMs.toString()
+                                        editDurationMs = pattern.durationMs.toString()
+                                    }
+                            ) {
+                                Text(pattern.name)
+                                Text(
+                                    text = vibrationPatternSummary(pattern),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = { onPreview(pattern.onMs, pattern.offMs, pattern.durationMs) }) {
+                                Text("試す")
+                            }
+                            TextButton(onClick = { onDelete(pattern) }) {
+                                Text("削除")
+                            }
+                        }
+                    }
+                }
+
+                Text(text = "新しいパターンを追加", style = MaterialTheme.typography.titleSmall)
+                val newParsed = parseVibrationPatternInput(newOnMs, newOffMs, newDurationMs)
+                VibrationPatternFields(
+                    name = newName,
+                    onNameChange = { newName = it },
+                    onMs = newOnMs,
+                    onOnMsChange = { newOnMs = it },
+                    offMs = newOffMs,
+                    onOffMsChange = { newOffMs = it },
+                    durationMs = newDurationMs,
+                    onDurationMsChange = { newDurationMs = it }
+                )
+                if (newParsed == null) {
+                    Text(
+                        text = VIBRATION_PATTERN_INPUT_HINT,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Row {
+                    TextButton(
+                        enabled = newParsed != null,
+                        onClick = { newParsed?.let { (on, off, duration) -> onPreview(on, off, duration) } }
+                    ) {
+                        Text("試す")
+                    }
+                    TextButton(
+                        enabled = newParsed != null && newName.isNotBlank(),
+                        onClick = {
+                            val (on, off, duration) = newParsed ?: return@TextButton
+                            onAdd(newName, on, off, duration)
+                            newName = ""
+                        }
+                    ) {
+                        Text("このパターンを登録")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("閉じる")
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditTaskDialog(
@@ -2080,6 +2340,7 @@ fun EditTaskDialog(
     allTasks: List<Task>,
     lists: List<TaskList> = emptyList(),
     savedLocations: List<SavedLocation> = emptyList(),
+    vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
     onConfirm: (task: Task, edits: TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
@@ -2108,6 +2369,10 @@ fun EditTaskDialog(
     }
     var autoSnoozeMinutes by remember(task.id) { mutableStateOf(task.autoSnoozeMinutes) }
     var notifyOnlyMode by remember(task.id) { mutableStateOf(task.notifyOnlyMode) }
+    var vibrationPatternId by remember(task.id) { mutableStateOf(task.vibrationPatternId) }
+    var vibrationEnabled by remember(task.id) { mutableStateOf(task.vibrationPatternId != null) }
+    // 選択中のIDが登録済みパターンに無い(削除済み等)場合は未選択として扱う。
+    val vibrationPatternSelected = vibrationPatterns.any { it.id == vibrationPatternId }
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var subtaskInput by remember(task.id) { mutableStateOf("") }
@@ -2289,6 +2554,48 @@ fun EditTaskDialog(
                                 selected = autoSnoozeMinutes == option.minutes,
                                 onClick = { autoSnoozeMinutes = option.minutes },
                                 label = { Text(option.label) }
+                            )
+                        }
+                    }
+                }
+
+                Text(text = "バイブレーションパターン", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "有効にすると、このタスクの通知(期限日時・位置情報)で標準のバイブレーションの代わりに" +
+                        "選択したパターンで振動します(マナーモード中も振動します)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FilterChip(
+                    selected = vibrationEnabled,
+                    onClick = { vibrationEnabled = !vibrationEnabled },
+                    label = { Text("バイブレーションパターンを有効にする") }
+                )
+                if (vibrationEnabled) {
+                    if (vibrationPatterns.isEmpty()) {
+                        Text(
+                            text = "パターンが登録されていません。設定画面の「バイブレーション」から登録してください",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(vibrationPatterns, key = { it.id }) { pattern ->
+                                FilterChip(
+                                    selected = vibrationPatternId == pattern.id,
+                                    onClick = { vibrationPatternId = pattern.id },
+                                    label = { Text(pattern.name) }
+                                )
+                            }
+                        }
+                        if (!vibrationPatternSelected) {
+                            Text(
+                                text = "使用するパターンを選択してください",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
                             )
                         }
                     }
@@ -2513,7 +2820,8 @@ fun EditTaskDialog(
         confirmButton = {
             val repeatValid = repeatRule != RepeatRule.WEEKLY_DAYS || selectedDays.isNotEmpty()
             val locationValid = resolvedLocation == null || notifyOnArrival || notifyOnDeparture
-            val canSave = repeatValid && locationValid
+            val vibrationValid = !vibrationEnabled || vibrationPatternSelected
+            val canSave = repeatValid && locationValid && vibrationValid
             TextButton(
                 enabled = canSave,
                 onClick = {
@@ -2540,7 +2848,8 @@ fun EditTaskDialog(
                             url = normalizeUrl(url),
                             memo = memo.trim().ifBlank { null },
                             autoSnoozeMinutes = if (notifyOnlyMode) null else autoSnoozeMinutes,
-                            notifyOnlyMode = notifyOnlyMode
+                            notifyOnlyMode = notifyOnlyMode,
+                            vibrationPatternId = if (vibrationEnabled) vibrationPatternId else null
                         )
                     )
                 }
@@ -2613,6 +2922,7 @@ fun EditTaskDialog(
             allTasks = allTasks,
             lists = lists,
             savedLocations = savedLocations,
+            vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
             onConfirm = { t, edits ->
                 onConfirm(t, edits)

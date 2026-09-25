@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.toshi0907.oboetotte.MainActivity
 import com.toshi0907.oboetotte.R
+import com.toshi0907.oboetotte.data.VibrationPattern
 
 /**
  * 位置情報リマインダー(到着・離脱)の通知チャンネル・通知そのものの組み立てを担う。
@@ -20,20 +21,39 @@ import com.toshi0907.oboetotte.R
  */
 object LocationReminderNotifier {
     const val CHANNEL_ID = "location_reminders"
+    private const val CHANNEL_NAME = "位置リマインダー"
 
-    /** @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。 */
-    fun showNotification(context: Context, taskId: Long, title: String, url: String?): Boolean {
+    /**
+     * @param vibrationPattern タスクに設定されたバイブレーションパターン。非nullならバイブ無効の
+     * 専用チャンネルに投稿し、[VibrationPatternPlayer]でパターンどおりに振動させる。
+     * @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無ければfalse)。
+     */
+    fun showNotification(
+        context: Context,
+        taskId: Long,
+        title: String,
+        url: String?,
+        vibrationPattern: VibrationPattern? = null
+    ): Boolean {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        var channelId = CHANNEL_ID
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "位置リマインダー",
+                CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "登録した場所への到着・離脱の通知"
             }
             notificationManager.createNotificationChannel(channel)
+            if (vibrationPattern != null) {
+                channelId = VibrationPatternPlayer.ensureCustomVibrationChannel(
+                    notificationManager,
+                    CHANNEL_ID,
+                    CHANNEL_NAME
+                )
+            }
         }
 
         val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -46,7 +66,7 @@ object LocationReminderNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("位置リマインダー")
             .setContentText(title)
@@ -81,6 +101,7 @@ object LocationReminderNotifier {
         // 上書きせず別々の通知として表示される。
         NotificationManagerCompat.from(context)
             .notify(ReminderScheduler.NOTIFICATION_TAG_LOCATION, taskId.toInt(), notification)
+        vibrationPattern?.let { VibrationPatternPlayer.play(context, it) }
         return true
     }
 }

@@ -10,7 +10,9 @@ import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.data.VibrationPattern
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.notification.VibrationPatternPlayer
 import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
@@ -44,6 +46,7 @@ object BackupManager {
         val tasks = db.taskDao().getAll().first()
         val savedLocations = db.savedLocationDao().getAll().first()
         val attachments = db.taskAttachmentDao().getAll().first()
+        val vibrationPatterns = db.vibrationPatternDao().getAll().first()
 
         val json = JSONObject().apply {
             put("version", FORMAT_VERSION)
@@ -83,6 +86,7 @@ object BackupManager {
                             put("seriesId", task.seriesId ?: JSONObject.NULL)
                             put("autoSnoozeMinutes", task.autoSnoozeMinutes ?: JSONObject.NULL)
                             put("notifyOnlyMode", task.notifyOnlyMode)
+                            put("vibrationPatternId", task.vibrationPatternId ?: JSONObject.NULL)
                         }
                     }
                 )
@@ -97,6 +101,20 @@ object BackupManager {
                             put("latitude", location.latitude)
                             put("longitude", location.longitude)
                             put("radiusMeters", location.radiusMeters)
+                        }
+                    }
+                )
+            )
+            put(
+                "vibrationPatterns",
+                JSONArray(
+                    vibrationPatterns.map { pattern ->
+                        JSONObject().apply {
+                            put("id", pattern.id)
+                            put("name", pattern.name)
+                            put("onMs", pattern.onMs)
+                            put("offMs", pattern.offMs)
+                            put("durationMs", pattern.durationMs)
                         }
                     }
                 )
@@ -175,6 +193,25 @@ object BackupManager {
             TaskList(id = obj.getLong("id"), name = obj.getString("name"))
         }
 
+        // 旧形式のバックアップにはvibrationPatternsキーが無いため、無ければ空扱いにする。
+        // 設定画面で入力できない範囲の値(不正・改ざんされたファイル)は取り込まない。
+        val vibrationPatternsJson = json.optJSONArray("vibrationPatterns")
+        val vibrationPatterns = if (vibrationPatternsJson == null) {
+            emptyList()
+        } else {
+            (0 until vibrationPatternsJson.length()).map { i ->
+                val obj = vibrationPatternsJson.getJSONObject(i)
+                VibrationPattern(
+                    id = obj.getLong("id"),
+                    name = obj.getString("name"),
+                    onMs = obj.getLong("onMs"),
+                    offMs = obj.getLong("offMs"),
+                    durationMs = obj.getLong("durationMs")
+                )
+            }.filter { VibrationPatternPlayer.isValid(it.onMs, it.offMs, it.durationMs) }
+        }
+        val vibrationPatternIds = vibrationPatterns.map { it.id }.toSet()
+
         val tasksJson = json.getJSONArray("tasks")
         val tasks = (0 until tasksJson.length()).map { i ->
             val obj = tasksJson.getJSONObject(i)
@@ -200,7 +237,10 @@ object BackupManager {
                 // 含まれていた場合、想定外の間隔で再通知が繰り返されてしまうため無視してnullにする。
                 autoSnoozeMinutes = (if (obj.isNull("autoSnoozeMinutes")) null else obj.getLong("autoSnoozeMinutes"))
                     ?.takeIf { minutes -> ReminderScheduler.SNOOZE_OPTIONS.any { it.minutes == minutes } },
-                notifyOnlyMode = obj.optBoolean("notifyOnlyMode", false)
+                notifyOnlyMode = obj.optBoolean("notifyOnlyMode", false),
+                // 参照先のパターンがバックアップに含まれていなければ、パターン未使用として取り込む。
+                vibrationPatternId = (if (obj.isNull("vibrationPatternId")) null else obj.getLong("vibrationPatternId"))
+                    ?.takeIf { it in vibrationPatternIds }
             )
         }
 
@@ -296,10 +336,12 @@ object BackupManager {
                     db.taskListDao().deleteAll()
                     db.savedLocationDao().deleteAll()
                     db.taskAttachmentDao().deleteAll()
+                    db.vibrationPatternDao().deleteAll()
                     db.taskListDao().insertAll(lists)
                     db.taskDao().insertAll(tasks)
                     db.savedLocationDao().insertAll(savedLocations)
                     db.taskAttachmentDao().insertAll(attachments)
+                    db.vibrationPatternDao().insertAll(vibrationPatterns)
                 }
             } catch (e: Exception) {
                 // DB側が失敗した場合は、直前で入れ替えたディレクトリを元に戻す
