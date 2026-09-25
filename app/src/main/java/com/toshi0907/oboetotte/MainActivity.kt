@@ -214,6 +214,8 @@ class MainActivity : ComponentActivity() {
                     val cloudBackupMinute by taskViewModel.cloudBackupMinute.collectAsState()
                     val cloudBackupLastBackupAt by taskViewModel.cloudBackupLastBackupAt.collectAsState()
                     val cloudBackupLastResult by taskViewModel.cloudBackupLastResult.collectAsState()
+                    val cloudBackupLastError by taskViewModel.cloudBackupLastError.collectAsState()
+                    val cloudBackupRunning by taskViewModel.cloudBackupRunning.collectAsState()
                     val updateLastCheckedAt by taskViewModel.updateLastCheckedAt.collectAsState()
                     val selectedListId by taskViewModel.selectedListId.collectAsState()
                     val showCompleted by taskViewModel.showCompleted.collectAsState()
@@ -395,6 +397,8 @@ class MainActivity : ComponentActivity() {
                             onSetCloudBackupTime = taskViewModel::setCloudBackupTime,
                             cloudBackupLastBackupAt = cloudBackupLastBackupAt,
                             cloudBackupLastResult = cloudBackupLastResult,
+                            cloudBackupLastError = cloudBackupLastError,
+                            cloudBackupRunning = cloudBackupRunning,
                             onRunCloudBackupNow = {
                                 taskViewModel.runCloudBackupNow { success ->
                                     val message = if (success) "バックアップしました" else "バックアップに失敗しました"
@@ -1132,6 +1136,8 @@ fun SettingsScreen(
     onSetCloudBackupTime: (Int, Int) -> Unit = { _, _ -> },
     cloudBackupLastBackupAt: Long? = null,
     cloudBackupLastResult: CloudBackupResult? = null,
+    cloudBackupLastError: String? = null,
+    cloudBackupRunning: Boolean = false,
     onRunCloudBackupNow: () -> Unit = {},
     updateCheckResult: AppUpdateChecker.Result? = null,
     updateLastCheckedAt: Long? = null,
@@ -1414,8 +1420,8 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                TextButton(onClick = onRunCloudBackupNow) {
-                    Text("今すぐバックアップ")
+                TextButton(onClick = onRunCloudBackupNow, enabled = !cloudBackupRunning) {
+                    Text(if (cloudBackupRunning) "バックアップ中…" else "今すぐバックアップ")
                 }
                 if (cloudBackupLastBackupAt != null) {
                     val resultLabel = when (cloudBackupLastResult) {
@@ -1432,6 +1438,13 @@ fun SettingsScreen(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
+                    if (cloudBackupLastResult == CloudBackupResult.FAILURE && cloudBackupLastError != null) {
+                        Text(
+                            text = "失敗理由: $cloudBackupLastError",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             }
 

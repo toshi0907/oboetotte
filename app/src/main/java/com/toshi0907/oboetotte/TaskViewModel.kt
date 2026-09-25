@@ -129,6 +129,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _cloudBackupLastResult = MutableStateFlow(CloudBackupSettings.getLastBackupResult(application))
     val cloudBackupLastResult: StateFlow<CloudBackupResult?> = _cloudBackupLastResult
 
+    private val _cloudBackupLastError = MutableStateFlow(CloudBackupSettings.getLastBackupError(application))
+    val cloudBackupLastError: StateFlow<String?> = _cloudBackupLastError
+
+    // 「今すぐバックアップ」の実行中かどうか。保存先への書き込みは失敗時に待機を挟んで再試行する
+    // ため完了まで数十秒かかることがあり、その間ボタンを無効化して実行中であることを表示する。
+    private val _cloudBackupRunning = MutableStateFlow(false)
+    val cloudBackupRunning: StateFlow<Boolean> = _cloudBackupRunning
+
     private val _updateLastCheckedAt = MutableStateFlow(AppUpdateCheckSettings.getLastCheckedAt(application))
     val updateLastCheckedAt: StateFlow<Long?> = _updateLastCheckedAt
 
@@ -142,6 +150,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
             _cloudBackupLastBackupAt.value = CloudBackupSettings.getLastBackupAt(appContext)
             _cloudBackupLastResult.value = CloudBackupSettings.getLastBackupResult(appContext)
+            _cloudBackupLastError.value = CloudBackupSettings.getLastBackupError(appContext)
         }
 
     // AppUpdateCheckWorker(定期実行)がrecordCheckedAtでSharedPreferencesを更新しても、
@@ -518,9 +527,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
      * [cloudBackupPrefsListener]がSharedPreferencesの変更を検知して自動的に行う。
      */
     fun runCloudBackupNow(onResult: (Boolean) -> Unit = {}) {
+        if (_cloudBackupRunning.value) return
+        _cloudBackupRunning.value = true
         viewModelScope.launch {
-            val success = CloudBackupRunner.run(appContext)
-            onResult(success)
+            try {
+                val success = CloudBackupRunner.run(appContext)
+                onResult(success)
+            } finally {
+                _cloudBackupRunning.value = false
+            }
         }
     }
 
