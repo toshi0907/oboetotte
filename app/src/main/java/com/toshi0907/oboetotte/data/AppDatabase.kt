@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TaskAttachment::class,
         NotificationLog::class,
         LocationUpdateLog::class,
-        GeofenceState::class
+        GeofenceState::class,
+        VibrationPattern::class
     ],
-    version = 21,
+    version = 22,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun notificationLogDao(): NotificationLogDao
     abstract fun locationUpdateLogDao(): LocationUpdateLogDao
     abstract fun geofenceStateDao(): GeofenceStateDao
+    abstract fun vibrationPatternDao(): VibrationPatternDao
 
     companion object {
         @Volatile
@@ -211,6 +213,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `vibration_patterns` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`onMs` INTEGER NOT NULL, " +
+                        "`offMs` INTEGER NOT NULL, " +
+                        "`durationMs` INTEGER NOT NULL)"
+                )
+                db.execSQL("ALTER TABLE tasks ADD COLUMN vibrationPatternId INTEGER")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -233,7 +249,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_17_18,
                         MIGRATION_18_19,
                         MIGRATION_19_20,
-                        MIGRATION_20_21
+                        MIGRATION_20_21,
+                        MIGRATION_21_22
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }

@@ -42,7 +42,14 @@ class GeofenceConfirmWorker(
         val matches = if (isEnter) task.notifyOnArrival else task.notifyOnDeparture
         if (!matches) return Result.success()
 
-        val posted = LocationReminderNotifier.showNotification(applicationContext, taskId, task.title, task.url)
+        val vibrationPattern = task.vibrationPatternId?.let { db.vibrationPatternDao().getById(it) }
+        val posted = LocationReminderNotifier.showNotification(
+            applicationContext,
+            taskId,
+            task.title,
+            task.url,
+            vibrationPattern
+        )
         if (posted) {
             val transitionLabel = if (isEnter) "到着" else "離脱"
             val locationLabel = task.locationName?.let { "$it・" } ?: ""

@@ -27,7 +27,10 @@ data class Task(
     // trueの場合、期限日時通知(ReminderReceiver)を実際に表示できた時点で自動的にタスクを完了扱いにする
     // (通知されること自体が重要で、完了操作の確認は不要なタスク向け)。この場合、通知には「完了」/「スヌーズ」
     // ボタンを出さず、オートスヌーズ(autoSnoozeMinutes)も併用しない(TaskViewModel.updateTaskがnullへ正規化する)。
-    val notifyOnlyMode: Boolean = false
+    val notifyOnlyMode: Boolean = false,
+    // 通知時に使うバイブレーションパターン(VibrationPattern.id)。nullならパターンを使わず、
+    // 通知チャンネル標準のバイブレーションのまま(詳細はdocs/architecture/vibration-patterns.md)。
+    val vibrationPatternId: Long? = null
 )
 
 /**

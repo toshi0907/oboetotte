@@ -18,11 +18,13 @@ import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.data.VibrationPattern
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.LocationTrackingMode
 import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.notification.VibrationPatternPlayer
 import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
@@ -65,7 +67,8 @@ data class TaskEdits(
     val url: String?,
     val memo: String?,
     val autoSnoozeMinutes: Long?,
-    val notifyOnlyMode: Boolean
+    val notifyOnlyMode: Boolean,
+    val vibrationPatternId: Long?
 )
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
@@ -76,11 +79,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val taskAttachmentDao = AppDatabase.getInstance(application).taskAttachmentDao()
     private val notificationLogDao = AppDatabase.getInstance(application).notificationLogDao()
     private val locationUpdateLogDao = AppDatabase.getInstance(application).locationUpdateLogDao()
+    private val vibrationPatternDao = AppDatabase.getInstance(application).vibrationPatternDao()
 
     val lists: StateFlow<List<TaskList>> = taskListDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val savedLocations: StateFlow<List<SavedLocation>> = savedLocationDao.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val vibrationPatterns: StateFlow<List<VibrationPattern>> = vibrationPatternDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val attachments: StateFlow<List<TaskAttachment>> = taskAttachmentDao.getAll()
@@ -257,7 +264,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 // オートスヌーズの間隔設定を強制的にクリアする(EditTaskDialog側で選択UIを
                 // 隠していても、ここで正規化することでデータの整合性を保証する)。
                 autoSnoozeMinutes = if (edits.notifyOnlyMode) null else edits.autoSnoozeMinutes,
-                notifyOnlyMode = edits.notifyOnlyMode
+                notifyOnlyMode = edits.notifyOnlyMode,
+                vibrationPatternId = edits.vibrationPatternId
             )
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
@@ -378,6 +386,43 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             savedLocationDao.delete(location)
         }
+    }
+
+    fun addVibrationPattern(name: String, onMs: Long, offMs: Long, durationMs: Long) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || !VibrationPatternPlayer.isValid(onMs, offMs, durationMs)) return
+        viewModelScope.launch {
+            vibrationPatternDao.insert(
+                VibrationPattern(name = trimmed, onMs = onMs, offMs = offMs, durationMs = durationMs)
+            )
+        }
+    }
+
+    fun updateVibrationPattern(pattern: VibrationPattern, name: String, onMs: Long, offMs: Long, durationMs: Long) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || !VibrationPatternPlayer.isValid(onMs, offMs, durationMs)) return
+        viewModelScope.launch {
+            vibrationPatternDao.update(
+                pattern.copy(name = trimmed, onMs = onMs, offMs = offMs, durationMs = durationMs)
+            )
+        }
+    }
+
+    /** パターンを削除し、それを使っていたタスクはパターン未使用(標準のバイブレーション)に戻す。 */
+    fun deleteVibrationPattern(pattern: VibrationPattern) {
+        viewModelScope.launch {
+            taskDao.clearVibrationPatternId(pattern.id)
+            vibrationPatternDao.delete(pattern)
+        }
+    }
+
+    /** 設定画面の「試す」ボタン用。保存前の入力値でもそのまま再生できるよう値で受け取る。 */
+    fun previewVibrationPattern(onMs: Long, offMs: Long, durationMs: Long) {
+        if (!VibrationPatternPlayer.isValid(onMs, offMs, durationMs)) return
+        VibrationPatternPlayer.play(
+            appContext,
+            VibrationPattern(name = "", onMs = onMs, offMs = offMs, durationMs = durationMs)
+        )
     }
 
     /** 位置情報リマインダーの確認方式を切り替える(Geofencing API/連続追跡方式)。 */

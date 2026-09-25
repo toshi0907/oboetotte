@@ -44,6 +44,9 @@ interface TaskDao {
     @Query("UPDATE tasks SET listId = NULL WHERE listId = :listId")
     suspend fun clearListId(listId: Long)
 
+    @Query("UPDATE tasks SET vibrationPatternId = NULL WHERE vibrationPatternId = :patternId")
+    suspend fun clearVibrationPatternId(patternId: Long)
+
     /**
      * [groupId]をattachmentGroupId()(=seriesId ?: id)として持つタスクの件数。
      * タスク削除時、同じ繰り返しシリーズの他のインスタンスがまだ残っているかどうかを判定し、

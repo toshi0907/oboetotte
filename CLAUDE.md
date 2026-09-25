@@ -72,6 +72,7 @@ GitHub Issueに対応する形で実装を行った場合は、対応内容のPR
 - 位置情報の更新履歴(デバッグ): `docs/architecture/location-update-log.md`
 - 通知履歴(デバッグ): `docs/architecture/notification-log.md`
 - 保存済みの場所: `docs/architecture/saved-locations.md`
+- 通知時のバイブレーションパターン: `docs/architecture/vibration-patterns.md`
 - タスクのURL・メモ: `docs/architecture/task-url-memo.md`
 - タスクへのファイル添付: `docs/architecture/task-attachments.md`
 - ローカルバックアップ(エクスポート/インポート): `docs/architecture/local-backup.md`

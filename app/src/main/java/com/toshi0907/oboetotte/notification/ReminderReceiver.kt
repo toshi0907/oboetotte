@@ -17,6 +17,7 @@ import com.toshi0907.oboetotte.R
 import com.toshi0907.oboetotte.TaskCompletion
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.NotificationLog
+import com.toshi0907.oboetotte.data.VibrationPattern
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,7 +26,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.getBooleanExtra(ReminderScheduler.EXTRA_IS_TEST, false)) {
-            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showTaskActions = false, url = null, dueAt = null)
+            showNotification(context, TEST_NOTIFICATION_ID, "テスト通知です。これが届けば設定は正しく動作しています。", showTaskActions = false, url = null, dueAt = null, vibrationPattern = null)
             return
         }
 
@@ -40,13 +41,16 @@ class ReminderReceiver : BroadcastReceiver() {
                 val db = AppDatabase.getInstance(context)
                 val task = db.taskDao().getById(taskId)
                 if (task != null && !task.isDone) {
+                    // パターンが削除済み等で見つからない場合は、通常のチャンネル(標準バイブレーション)で通知する。
+                    val vibrationPattern = task.vibrationPatternId?.let { db.vibrationPatternDao().getById(it) }
                     val posted = showNotification(
                         context,
                         taskId,
                         task.title,
                         showTaskActions = !task.notifyOnlyMode,
                         url = task.url,
-                        dueAt = task.dueAt
+                        dueAt = task.dueAt,
+                        vibrationPattern = vibrationPattern
                     )
                     if (posted) {
                         val notifyOnlySuffix = if (task.notifyOnlyMode) "(通知のみ・自動完了)" else ""
@@ -96,19 +100,29 @@ class ReminderReceiver : BroadcastReceiver() {
         title: String,
         showTaskActions: Boolean,
         url: String?,
-        dueAt: Long?
+        dueAt: Long?,
+        vibrationPattern: VibrationPattern?
     ): Boolean {
         val notificationManager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        var channelId = CHANNEL_ID
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "リマインダー",
+                CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "タスクの期限リマインダー通知"
             }
             notificationManager.createNotificationChannel(channel)
+            if (vibrationPattern != null) {
+                // チャンネル標準のバイブレーションとパターンが重ならないよう、バイブ無効の専用チャンネルに投稿する。
+                channelId = VibrationPatternPlayer.ensureCustomVibrationChannel(
+                    notificationManager,
+                    CHANNEL_ID,
+                    CHANNEL_NAME
+                )
+            }
         }
 
         val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -121,7 +135,7 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("リマインダー")
             .setContentText(title)
@@ -169,18 +183,22 @@ class ReminderReceiver : BroadcastReceiver() {
         // (update/AppUpdateNotifier.showNotificationと同じ確認方法)。通知のみタスクは
         // この戻り値を見て実際に表示できた場合のみ自動完了するため、ここで確実に弾く。
         val notifier = NotificationManagerCompat.from(context)
-        val channelBlocked =
-            notificationManager.getNotificationChannel(CHANNEL_ID)?.importance ==
-                NotificationManager.IMPORTANCE_NONE
+        // パターン用の専用チャンネルに投稿する場合も、ユーザーが元のチャンネル(リマインダー)を
+        // 無効化していれば、その設定を尊重して表示しない。
+        val channelBlocked = listOf(CHANNEL_ID, channelId).distinct().any {
+            notificationManager.getNotificationChannel(it)?.importance == NotificationManager.IMPORTANCE_NONE
+        }
         if (!notifier.areNotificationsEnabled() || channelBlocked) {
             return false
         }
         notifier.notify(ReminderScheduler.NOTIFICATION_TAG_DUE, notificationId.toInt(), notification)
+        vibrationPattern?.let { VibrationPatternPlayer.play(context, it) }
         return true
     }
 
     companion object {
         const val CHANNEL_ID = "task_reminders"
+        private const val CHANNEL_NAME = "リマインダー"
         private const val TEST_NOTIFICATION_ID = -1L
     }
 }
