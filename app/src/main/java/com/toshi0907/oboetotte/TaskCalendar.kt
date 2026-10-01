@@ -3,6 +3,7 @@ package com.toshi0907.oboetotte
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,13 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -68,6 +65,9 @@ data class CalendarEntry(val task: Task, val dueAt: Long, val isProjected: Boole
 
 /** 繰り返しの将来の予定を計算する際の、1タスクあたりの反復回数の上限(無限ループ防止の保険)。 */
 private const val MAX_PROJECTION_STEPS = 10_000
+
+/** 月を移動するのに必要な、左右スワイプの最小移動量。 */
+private val SWIPE_THRESHOLD = 48.dp
 
 private val SUPPORTED_REPEAT_RULES = setOf(
     RepeatRule.DAILY,
@@ -131,9 +131,11 @@ private fun LocalDate.dayOfWeekLabel(): String = DAY_OF_WEEK_LABELS[dayOfWeek.va
  * マス内の文字のスタイル。fontSizeだけを指定するとテーマ既定の大きなlineHeight(約24sp)が残り、
  * 小さいマスの中で文字の下半分が切れてしまうため、lineHeightもfontSizeに合わせて中央寄せにする。
  */
+private val CELL_ENTRY_FONT_SIZE = 10.sp
+
 private val CellEntryTextStyle = TextStyle(
-    fontSize = 9.sp,
-    lineHeight = 9.sp,
+    fontSize = CELL_ENTRY_FONT_SIZE,
+    lineHeight = CELL_ENTRY_FONT_SIZE,
     lineHeightStyle = LineHeightStyle(
         alignment = LineHeightStyle.Alignment.Center,
         trim = LineHeightStyle.Trim.None
@@ -177,7 +179,33 @@ fun TaskCalendar(
         buildCalendarEntries(candidates, gridStart, gridEnd, today, zone)
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    val density = LocalDensity.current
+    val swipeThresholdPx = with(density) { SWIPE_THRESHOLD.toPx() }
+    var dragTotal by remember { mutableFloatStateOf(0f) }
+
+    // 左右スワイプで月を移動する(左へスワイプで翌月、右へスワイプで前月)。ドラッグがタッチスロップを
+    // 超えた時点でマスのタップはキャンセルされるため、スワイプで日付のボトムシートが開くことはない。
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .pointerInput(swipeThresholdPx) {
+                detectHorizontalDragGestures(
+                    onDragStart = { dragTotal = 0f },
+                    onDragEnd = {
+                        when {
+                            dragTotal <= -swipeThresholdPx -> displayedMonth = displayedMonth.plusMonths(1)
+                            dragTotal >= swipeThresholdPx -> displayedMonth = displayedMonth.minusMonths(1)
+                        }
+                        dragTotal = 0f
+                    },
+                    onDragCancel = { dragTotal = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragTotal += dragAmount
+                    }
+                )
+            }
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -285,7 +313,7 @@ private fun CalendarDayCell(
     ) {
         val density = LocalDensity.current
         val dateLabelHeight = with(density) { 11.sp.toDp() } + 6.dp
-        val lineHeight = with(density) { 9.sp.toDp() } + 5.dp
+        val lineHeight = with(density) { CELL_ENTRY_FONT_SIZE.toDp() } + 5.dp
         val maxLines = ((maxHeight - dateLabelHeight) / lineHeight).toInt().coerceAtLeast(0)
         val shownCount = if (entries.size > maxLines) (maxLines - 1).coerceAtLeast(0) else entries.size
         val hiddenCount = entries.size - shownCount
@@ -363,33 +391,17 @@ private fun entryColors(entry: CalendarEntry, nowMillis: Long): EntryColors {
     }
 }
 
-/** 繰り返しの将来の予定であることを示す点線枠。 */
-private fun Modifier.dashedBorder(color: Color): Modifier = drawBehind {
-    val strokeWidth = 1.dp.toPx()
-    drawRoundRect(
-        color = color,
-        topLeft = Offset(strokeWidth / 2, strokeWidth / 2),
-        size = Size(size.width - strokeWidth, size.height - strokeWidth),
-        cornerRadius = CornerRadius(2.dp.toPx()),
-        style = Stroke(
-            width = strokeWidth,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 2.dp.toPx()))
-        )
-    )
-}
-
 @Composable
 private fun CalendarEntryLabel(entry: CalendarEntry, nowMillis: Long, modifier: Modifier = Modifier) {
     val colors = entryColors(entry, nowMillis)
     val shape = RoundedCornerShape(2.dp)
-    val decorated = if (entry.isProjected) {
-        modifier.dashedBorder(colors.content)
-    } else {
-        modifier
+    // 将来の予定は背景なし(透明)で、文字色と「↻」で区別する。
+    Box(
+        modifier = modifier
             .clip(shape)
-            .background(colors.container)
-    }
-    Box(modifier = decorated, contentAlignment = Alignment.CenterStart) {
+            .background(colors.container),
+        contentAlignment = Alignment.CenterStart
+    ) {
         Text(
             text = if (entry.isProjected) "↻${entry.task.title}" else entry.task.title,
             style = CellEntryTextStyle,
@@ -461,9 +473,7 @@ private fun CalendarDaySheetContent(
                             text = "↻ 予定",
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.content,
-                            modifier = Modifier
-                                .dashedBorder(colors.content)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
