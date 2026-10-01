@@ -100,7 +100,9 @@ fun buildCalendarEntries(
 
         val rule = task.repeatRule ?: continue
         if (rule !in SUPPORTED_REPEAT_RULES) continue
-        val daysOfWeek = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek)
+        // 不正な曜日番号(バックアップの破損等)が混ざっていてもnextDueAtの`first`で例外にならないよう、
+        // 描画処理で使う以上は1〜7の範囲だけに絞っておく。
+        val daysOfWeek = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek).filter { it in 1..7 }.toSet()
         if (rule == RepeatRule.WEEKLY_DAYS && daysOfWeek.isEmpty()) continue
 
         var current = dueAt
