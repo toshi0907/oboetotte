@@ -30,7 +30,11 @@ data class Task(
     val notifyOnlyMode: Boolean = false,
     // 通知時に使うバイブレーションパターン(VibrationPattern.id)。nullならパターンを使わず、
     // 通知チャンネル標準のバイブレーションのまま(詳細はdocs/architecture/vibration-patterns.md)。
-    val vibrationPatternId: Long? = null
+    val vibrationPatternId: Long? = null,
+    // 完了日時(epoch millis)。完了状態にした時点で記録し、未完了に戻すとnullに戻す。完了から一定期間
+    // 経過したタスクの自動削除(CompletedTaskCleanup)の判定に使う。
+    // 詳細はdocs/architecture/completed-task-cleanup.md。
+    val completedAt: Long? = null
 )
 
 /**

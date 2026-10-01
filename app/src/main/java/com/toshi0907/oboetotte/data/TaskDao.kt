@@ -33,10 +33,21 @@ interface TaskDao {
      * [com.toshi0907.oboetotte.TaskCompletion.complete]が、同じタスクへ同時に
      * 呼ばれた複数の完了処理(例: 通知のみタスクの自動完了とアプリ内の手動完了が
      * ほぼ同時に発生した場合)のうち片方だけを実処理させ、繰り返しタスクの次回分が
-     * 重複生成されないようにするために使う。
+     * 重複生成されないようにするために使う。完了日時([Task.completedAt])もあわせて更新する
+     * (完了にする場合は[completedAt]に現在時刻、未完了に戻す場合はnullを渡す)。
      */
-    @Query("UPDATE tasks SET isDone = :isDone WHERE id = :taskId AND isDone != :isDone")
-    suspend fun setDone(taskId: Long, isDone: Boolean): Int
+    @Query(
+        "UPDATE tasks SET isDone = :isDone, completedAt = :completedAt " +
+            "WHERE id = :taskId AND isDone != :isDone"
+    )
+    suspend fun setDone(taskId: Long, isDone: Boolean, completedAt: Long?): Int
+
+    /**
+     * 完了日時が[cutoff]より前の完了済みタスク(トップレベル・サブタスクの両方)。完了済みタスクの
+     * 自動削除([com.toshi0907.oboetotte.CompletedTaskCleanup])で削除対象を求めるために使う。
+     */
+    @Query("SELECT * FROM tasks WHERE isDone = 1 AND completedAt IS NOT NULL AND completedAt < :cutoff")
+    suspend fun getCompletedBefore(cutoff: Long): List<Task>
 
     @Update
     suspend fun update(task: Task)

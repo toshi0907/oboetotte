@@ -87,6 +87,7 @@ object BackupManager {
                             put("autoSnoozeMinutes", task.autoSnoozeMinutes ?: JSONObject.NULL)
                             put("notifyOnlyMode", task.notifyOnlyMode)
                             put("vibrationPatternId", task.vibrationPatternId ?: JSONObject.NULL)
+                            put("completedAt", task.completedAt ?: JSONObject.NULL)
                         }
                     }
                 )
@@ -213,12 +214,14 @@ object BackupManager {
         val vibrationPatternIds = vibrationPatterns.map { it.id }.toSet()
 
         val tasksJson = json.getJSONArray("tasks")
+        val importedAt = System.currentTimeMillis()
         val tasks = (0 until tasksJson.length()).map { i ->
             val obj = tasksJson.getJSONObject(i)
+            val isDone = obj.getBoolean("isDone")
             Task(
                 id = obj.getLong("id"),
                 title = obj.getString("title"),
-                isDone = obj.getBoolean("isDone"),
+                isDone = isDone,
                 dueAt = if (obj.isNull("dueAt")) null else obj.getLong("dueAt"),
                 listId = if (obj.isNull("listId")) null else obj.getLong("listId"),
                 parentTaskId = if (obj.isNull("parentTaskId")) null else obj.getLong("parentTaskId"),
@@ -240,7 +243,17 @@ object BackupManager {
                 notifyOnlyMode = obj.optBoolean("notifyOnlyMode", false),
                 // 参照先のパターンがバックアップに含まれていなければ、パターン未使用として取り込む。
                 vibrationPatternId = (if (obj.isNull("vibrationPatternId")) null else obj.getLong("vibrationPatternId"))
-                    ?.takeIf { it in vibrationPatternIds }
+                    ?.takeIf { it in vibrationPatternIds },
+                // completedAtキーの無い旧形式のバックアップの完了済みタスクは、DBマイグレーション
+                // (MIGRATION_22_23)と同じ考え方でインポート時点を完了日時とみなす。未完了タスクには
+                // 完了日時を持たせない。
+                completedAt = if (!isDone) {
+                    null
+                } else if (obj.isNull("completedAt")) {
+                    importedAt
+                } else {
+                    obj.getLong("completedAt")
+                }
             )
         }
 

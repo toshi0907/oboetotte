@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GeofenceState::class,
         VibrationPattern::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -227,6 +227,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN completedAt INTEGER")
+                // 既存の完了済みタスクは完了日時が記録されていないため、このマイグレーションを実行した
+                // 時点(アプリ更新時)を完了日時とみなす。更新直後に過去の完了済みタスクがまとめて
+                // 自動削除されてしまわないよう、そこから設定日数経過後に削除対象とする。
+                db.execSQL(
+                    "UPDATE tasks SET completedAt = ? WHERE isDone = 1",
+                    arrayOf<Any>(System.currentTimeMillis())
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -250,7 +263,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_18_19,
                         MIGRATION_19_20,
                         MIGRATION_20_21,
-                        MIGRATION_21_22
+                        MIGRATION_21_22,
+                        MIGRATION_22_23
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }

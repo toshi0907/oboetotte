@@ -66,6 +66,7 @@ GitHub Issueに対応する形で実装を行った場合は、対応内容のPR
 - カレンダー表示: `docs/architecture/calendar-view.md`
 - 設定画面(SettingsScreen): `docs/architecture/settings-screen.md`
 - サブタスクのツリー表示: `docs/architecture/subtask-tree.md`
+- 完了済みタスクの自動削除: `docs/architecture/completed-task-cleanup.md`
 - 期限ピッカー・DBマイグレーション: `docs/architecture/due-picker-db-migration.md`
 - リマインダー通知: `docs/architecture/reminder-notifications.md`
 - 位置情報リマインダー: `docs/architecture/location-reminders.md`
