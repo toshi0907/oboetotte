@@ -45,9 +45,11 @@ object RepeatRule {
     const val MONTHLY = "MONTHLY"
 
     // 曜日はISO-8601に合わせて月曜=1〜日曜=7の数値をカンマ区切りで保存する。
+    // バックアップの破損等で範囲外の値が混ざっていても、呼び出し側の`isNotEmpty()`チェックが
+    // 有効な曜日の有無として正しく働くよう、1〜7以外は捨てる。
     fun parseDaysOfWeek(value: String?): Set<Int> {
         if (value.isNullOrBlank()) return emptySet()
-        return value.split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
+        return value.split(",").mapNotNull { it.trim().toIntOrNull() }.filter { it in 1..7 }.toSet()
     }
 
     fun formatDaysOfWeek(days: Set<Int>): String = days.sorted().joinToString(",")
@@ -56,16 +58,18 @@ object RepeatRule {
      * [current]の次回の期限(ローカルタイムゾーン基準)。繰り返しタスクを完了した際の次回分生成
      * ([TaskCompletion.complete])と、カレンダー表示での将来の予定の計算の両方から使い、
      * 両者の日付が必ず一致するようにしている。[WEEKLY_DAYS]は[daysOfWeek]が空でないこと、
-     * それ以外の未知のルールは呼び出し側で除外しておくこと(その場合は[current]をそのまま返す)。
+     * それ以外の未知のルールは呼び出し側で除外しておくこと(いずれも[current]をそのまま返す)。
      */
     fun nextDueAt(current: Long, rule: String, daysOfWeek: Set<Int>): Long {
         val zoned = Instant.ofEpochMilli(current).atZone(ZoneId.systemDefault())
         val next = when (rule) {
             DAILY -> zoned.plusDays(1)
             WEEKLY -> zoned.plusWeeks(1)
+            // 一致する曜日が無い(daysOfWeekが空・範囲外のみ)場合も例外にせず、currentをそのまま返す。
             WEEKLY_DAYS -> (1..7)
                 .map { zoned.plusDays(it.toLong()) }
-                .first { it.dayOfWeek.value in daysOfWeek }
+                .firstOrNull { it.dayOfWeek.value in daysOfWeek }
+                ?: zoned
             MONTHLY -> zoned.plusMonths(1)
             else -> zoned
         }
