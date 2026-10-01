@@ -11,6 +11,8 @@ import com.toshi0907.oboetotte.backup.CloudBackupResult
 import com.toshi0907.oboetotte.backup.CloudBackupRunner
 import com.toshi0907.oboetotte.backup.CloudBackupScheduler
 import com.toshi0907.oboetotte.backup.CloudBackupSettings
+import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanup
+import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanupSettings
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.NotificationLog
@@ -133,6 +135,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         MutableStateFlow(LocationTrackingSettings.getIntervalMinutes(application))
     val locationTrackingIntervalMinutes: StateFlow<Int> = _locationTrackingIntervalMinutes
 
+    private val _completedTaskCleanupEnabled =
+        MutableStateFlow(CompletedTaskCleanupSettings.isEnabled(application))
+    val completedTaskCleanupEnabled: StateFlow<Boolean> = _completedTaskCleanupEnabled
+
+    private val _completedTaskCleanupRetentionDays =
+        MutableStateFlow(CompletedTaskCleanupSettings.getRetentionDays(application))
+    val completedTaskCleanupRetentionDays: StateFlow<Int> = _completedTaskCleanupRetentionDays
+
     private val _cloudBackupEnabled = MutableStateFlow(CloudBackupSettings.isEnabled(application))
     val cloudBackupEnabled: StateFlow<Boolean> = _cloudBackupEnabled
 
@@ -253,8 +263,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleDone(task: Task) {
         viewModelScope.launch {
             if (task.isDone) {
-                taskDao.setDone(task.id, false)
-                val updated = task.copy(isDone = false)
+                taskDao.setDone(task.id, false, null)
+                val updated = task.copy(isDone = false, completedAt = null)
                 ReminderScheduler.schedule(appContext, updated)
                 LocationReminderManager.register(appContext, updated)
                 refreshTaskWidget(appContext)
@@ -306,19 +316,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteTask(task: Task) {
         viewModelScope.launch {
-            val groupId = task.attachmentGroupId()
-            taskDao.delete(task)
-            ReminderScheduler.cancel(appContext, task.id)
-            LocationReminderManager.unregister(appContext, task.id)
-            // 添付ファイルは繰り返しシリーズ全体で共有しているため、同じシリーズの他のインスタンスが
-            // まだ残っている場合は削除しない(まだ参照されているため)。
-            if (taskDao.countByAttachmentGroup(groupId) == 0) {
-                val attachmentsToDelete = taskAttachmentDao.getForTask(groupId)
-                taskAttachmentDao.deleteForTask(groupId)
-                withContext(Dispatchers.IO) {
-                    attachmentsToDelete.forEach { AttachmentStorage.delete(appContext, it.storedFileName) }
-                }
-            }
+            TaskDeletion.delete(appContext, task)
             refreshTaskWidget(appContext)
         }
     }
@@ -469,6 +467,26 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             LocationReminderManager.updateContinuousTrackingInterval(appContext, minutes)
             _locationTrackingIntervalMinutes.value = LocationTrackingSettings.getIntervalMinutes(appContext)
         }
+    }
+
+    /**
+     * 完了済みタスクの自動削除の有効/無効を切り替える。有効にした場合は、その時点で既に削除日数を
+     * 経過している完了済みタスクを(次回の定期実行を待たずに)すぐ削除する。
+     */
+    fun setCompletedTaskCleanupEnabled(enabled: Boolean) {
+        CompletedTaskCleanupSettings.setEnabled(appContext, enabled)
+        _completedTaskCleanupEnabled.value = enabled
+        viewModelScope.launch { CompletedTaskCleanup.run(appContext) }
+    }
+
+    /**
+     * 完了から自動削除までの日数を変更する。1〜3650日の範囲に丸められる。日数を短くした場合に
+     * 新たに対象となった完了済みタスクは、次回の定期実行を待たずにすぐ削除する。
+     */
+    fun setCompletedTaskCleanupRetentionDays(days: Int) {
+        CompletedTaskCleanupSettings.setRetentionDays(appContext, days)
+        _completedTaskCleanupRetentionDays.value = CompletedTaskCleanupSettings.getRetentionDays(appContext)
+        viewModelScope.launch { CompletedTaskCleanup.run(appContext) }
     }
 
     /**

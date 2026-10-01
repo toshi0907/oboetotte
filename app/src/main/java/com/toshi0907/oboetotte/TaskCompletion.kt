@@ -34,7 +34,7 @@ object TaskCompletion {
         // 0件超の更新件数を得る。他方はここで早期returnし、繰り返しタスクの次回分が
         // 重複生成されるのを防ぐ(呼び出し元から渡されたtaskスナップショットのisDoneは
         // 古い可能性があるため、DBへの書き込み結果そのものを正としてチェックする)。
-        val updatedRows = taskDao.setDone(task.id, true)
+        val updatedRows = taskDao.setDone(task.id, true, System.currentTimeMillis())
         if (updatedRows == 0) return
         ReminderScheduler.cancel(context, task.id)
         LocationReminderManager.unregister(context, task.id)
@@ -48,6 +48,7 @@ object TaskCompletion {
             val nextTask = task.copy(
                 id = 0,
                 isDone = false,
+                completedAt = null,
                 dueAt = RepeatRule.nextDueAt(dueAt, rule, daysOfWeek),
                 seriesId = task.attachmentGroupId()
             )

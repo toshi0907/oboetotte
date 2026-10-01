@@ -94,6 +94,9 @@ import com.toshi0907.oboetotte.backup.BackupManager
 import com.toshi0907.oboetotte.backup.CloudBackupResult
 import com.toshi0907.oboetotte.backup.CloudBackupScheduler
 import com.toshi0907.oboetotte.backup.CloudBackupSettings
+import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanup
+import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanupScheduler
+import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanupSettings
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.NotificationLog
@@ -206,6 +209,9 @@ class MainActivity : ComponentActivity() {
                     val notificationLogs by taskViewModel.notificationLogs.collectAsState()
                     val locationUpdateLogs by taskViewModel.locationUpdateLogs.collectAsState()
                     val locationTrackingMode by taskViewModel.locationTrackingMode.collectAsState()
+                    val completedTaskCleanupEnabled by taskViewModel.completedTaskCleanupEnabled.collectAsState()
+                    val completedTaskCleanupRetentionDays by
+                        taskViewModel.completedTaskCleanupRetentionDays.collectAsState()
                     val locationTrackingIntervalMinutes by
                         taskViewModel.locationTrackingIntervalMinutes.collectAsState()
                     val cloudBackupEnabled by taskViewModel.cloudBackupEnabled.collectAsState()
@@ -276,6 +282,13 @@ class MainActivity : ComponentActivity() {
                         // アプリを開いていない間も定期的にチェックできるよう、バックグラウンドの
                         // 定期実行(AppUpdateCheckWorker)を起動する。既に動作中なら何もしない。
                         AppUpdateCheckScheduler.ensureScheduled(context)
+                    }
+                    LaunchedEffect(Unit) {
+                        // 完了から設定日数を経過した完了済みタスクを起動のたびに削除し、アプリを
+                        // 開いていない間も削除が進むよう1日1回の定期実行(CompletedTaskCleanupWorker)
+                        // を起動する。既に動作中なら何もしない。
+                        CompletedTaskCleanup.run(context)
+                        CompletedTaskCleanupScheduler.ensureScheduled(context)
                     }
                     LaunchedEffect(Unit) {
                         // クラウド自動バックアップが有効なら、定期実行(CloudBackupWorker)が
@@ -396,6 +409,10 @@ class MainActivity : ComponentActivity() {
                             cloudBackupHour = cloudBackupHour,
                             cloudBackupMinute = cloudBackupMinute,
                             onSetCloudBackupTime = taskViewModel::setCloudBackupTime,
+                            completedTaskCleanupEnabled = completedTaskCleanupEnabled,
+                            onSetCompletedTaskCleanupEnabled = taskViewModel::setCompletedTaskCleanupEnabled,
+                            completedTaskCleanupRetentionDays = completedTaskCleanupRetentionDays,
+                            onSetCompletedTaskCleanupRetentionDays = taskViewModel::setCompletedTaskCleanupRetentionDays,
                             cloudBackupLastBackupAt = cloudBackupLastBackupAt,
                             cloudBackupLastResult = cloudBackupLastResult,
                             cloudBackupLastError = cloudBackupLastError,
@@ -1184,6 +1201,10 @@ fun SettingsScreen(
     cloudBackupLastError: String? = null,
     cloudBackupRunning: Boolean = false,
     onRunCloudBackupNow: () -> Unit = {},
+    completedTaskCleanupEnabled: Boolean = true,
+    onSetCompletedTaskCleanupEnabled: (Boolean) -> Unit = {},
+    completedTaskCleanupRetentionDays: Int = CompletedTaskCleanupSettings.DEFAULT_RETENTION_DAYS,
+    onSetCompletedTaskCleanupRetentionDays: (Int) -> Unit = {},
     updateCheckResult: AppUpdateChecker.Result? = null,
     updateLastCheckedAt: Long? = null,
     isDownloadingUpdate: Boolean = false,
@@ -1491,6 +1512,62 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+
+            Text(
+                text = "完了タスク",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                text = "完了してから指定した日数が経過したタスクを自動的に削除します" +
+                    "(配下のサブタスクも一緒に削除されます)。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            FilterChip(
+                selected = completedTaskCleanupEnabled,
+                onClick = { onSetCompletedTaskCleanupEnabled(!completedTaskCleanupEnabled) },
+                label = { Text("完了タスクを自動削除") }
+            )
+            if (completedTaskCleanupEnabled) {
+                var retentionDaysInput by remember(completedTaskCleanupRetentionDays) {
+                    mutableStateOf(completedTaskCleanupRetentionDays.toString())
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    OutlinedTextField(
+                        value = retentionDaysInput,
+                        onValueChange = { retentionDaysInput = it.filter { c -> c.isDigit() } },
+                        label = { Text("削除までの日数") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.width(140.dp)
+                    )
+                    TextButton(onClick = {
+                        val days = retentionDaysInput.toIntOrNull()?.coerceIn(
+                            CompletedTaskCleanupSettings.MIN_RETENTION_DAYS,
+                            CompletedTaskCleanupSettings.MAX_RETENTION_DAYS
+                        )
+                        if (days != null) {
+                            // 範囲外の値を丸めた結果が保存済みの値と同じだとrememberのキーが変わらず
+                            // 入力欄が更新されないため、丸めた値を明示的に反映する。
+                            retentionDaysInput = days.toString()
+                            onSetCompletedTaskCleanupRetentionDays(days)
+                        }
+                    }) {
+                        Text("保存")
+                    }
+                }
+                Text(
+                    text = "${CompletedTaskCleanupSettings.MIN_RETENTION_DAYS}〜" +
+                        "${CompletedTaskCleanupSettings.MAX_RETENTION_DAYS}日の範囲で指定できます" +
+                        "(現在: ${completedTaskCleanupRetentionDays}日)。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Text(
