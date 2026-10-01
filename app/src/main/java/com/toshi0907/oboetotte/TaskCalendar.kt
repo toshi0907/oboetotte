@@ -45,7 +45,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -124,6 +126,21 @@ fun buildCalendarEntries(
 private val DAY_OF_WEEK_LABELS = listOf("日", "月", "火", "水", "木", "金", "土")
 
 private fun LocalDate.dayOfWeekLabel(): String = DAY_OF_WEEK_LABELS[dayOfWeek.value % 7]
+
+/**
+ * マス内の文字のスタイル。fontSizeだけを指定するとテーマ既定の大きなlineHeight(約24sp)が残り、
+ * 小さいマスの中で文字の下半分が切れてしまうため、lineHeightもfontSizeに合わせて中央寄せにする。
+ */
+private val CellEntryTextStyle = TextStyle(
+    fontSize = 9.sp,
+    lineHeight = 9.sp,
+    lineHeightStyle = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim = LineHeightStyle.Trim.None
+    )
+)
+
+private val CellDateTextStyle = CellEntryTextStyle.copy(fontSize = 11.sp, lineHeight = 11.sp)
 
 /**
  * メイン画面のカレンダー表示。[tasks]には全タスクを渡し、表示対象(未完了・期限ありの親タスクで
@@ -295,7 +312,7 @@ private fun CalendarDayCell(
                 Box(modifier = labelModifier, contentAlignment = Alignment.Center) {
                     Text(
                         text = date.dayOfMonth.toString(),
-                        fontSize = 11.sp,
+                        style = CellDateTextStyle,
                         fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
                         color = if (isToday) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                     )
@@ -320,7 +337,7 @@ private fun CalendarDayCell(
                 ) {
                     Text(
                         text = "+$hiddenCount",
-                        fontSize = 9.sp,
+                        style = CellEntryTextStyle,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         modifier = Modifier.padding(start = 2.dp)
@@ -375,7 +392,7 @@ private fun CalendarEntryLabel(entry: CalendarEntry, nowMillis: Long, modifier: 
     Box(modifier = decorated, contentAlignment = Alignment.CenterStart) {
         Text(
             text = if (entry.isProjected) "↻${entry.task.title}" else entry.task.title,
-            fontSize = 9.sp,
+            style = CellEntryTextStyle,
             color = colors.content,
             maxLines = 1,
             softWrap = false,
