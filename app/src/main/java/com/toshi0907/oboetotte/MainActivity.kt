@@ -70,6 +70,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -568,6 +569,10 @@ fun TaskScreen(
     var input by remember { mutableStateOf("") }
     var viewingTask by remember { mutableStateOf<Task?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
+    // 一覧表示とカレンダー表示の切り替え。カレンダー表示中はカレンダー本体の高さを確保するため、
+    // リストの絞り込み行を1行の要約に折りたたむ(filtersExpandedで展開)。
+    var showCalendar by rememberSaveable { mutableStateOf(false) }
+    var filtersExpanded by rememberSaveable { mutableStateOf(false) }
     val hasLocationTasks = allTasks.any {
         !it.isDone && it.latitude != null && it.longitude != null && it.radiusMeters != null &&
             (it.notifyOnArrival || it.notifyOnDeparture)
@@ -647,13 +652,41 @@ fun TaskScreen(
                 }
             }
 
-            Text(
-                text = "リスト",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 12.dp)
-            )
-            LazyRow(
+            // isOverdue/isDueTodayの判定基準となる「現在時刻」。タスク一覧を開いたままにしていても
+            // 期限切れ・当日期限の色分け・「今日期限・期限切れ」フィルタが更新されるよう、
+            // 1分おきに再コンポーズをトリガーする(カレンダー表示の「今日」の判定にも使う)。
+            val nowMillis by produceState(initialValue = System.currentTimeMillis()) {
+                while (true) {
+                    delay(60_000L)
+                    value = System.currentTimeMillis()
+                }
+            }
+
+            if (showCalendar) {
+                val selectedListName = when (selectedListId) {
+                    null -> "すべて"
+                    TaskViewModel.UNASSIGNED_LIST_ID -> "リスト未登録"
+                    else -> lists.find { it.id == selectedListId }?.name ?: "すべて"
+                }
+                Text(
+                    text = "${if (filtersExpanded) "▾" else "▸"} リスト: $selectedListName",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .clickable { filtersExpanded = !filtersExpanded }
+                        .padding(vertical = 4.dp)
+                )
+            } else {
+                Text(
+                    text = "リスト",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
+            if (!showCalendar || filtersExpanded) LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp),
@@ -682,13 +715,14 @@ fun TaskScreen(
                 }
             }
 
-            Text(
+            // 表示フィルタはカレンダー表示には適用しないため、カレンダー表示中は行ごと隠す。
+            if (!showCalendar) Text(
                 text = "フィルタ",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 12.dp)
             )
-            LazyRow(
+            if (!showCalendar) LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp),
@@ -716,11 +750,21 @@ fun TaskScreen(
                     .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // カレンダー表示では完了済みタスクを常に表示しないため、切り替えチップも隠す。
+                if (!showCalendar) {
+                    item {
+                        FilterChip(
+                            selected = showCompleted,
+                            onClick = { onSetShowCompleted(!showCompleted) },
+                            label = { Text("完了済みを表示") }
+                        )
+                    }
+                }
                 item {
                     FilterChip(
-                        selected = showCompleted,
-                        onClick = { onSetShowCompleted(!showCompleted) },
-                        label = { Text("完了済みを表示") }
+                        selected = showCalendar,
+                        onClick = { showCalendar = !showCalendar },
+                        label = { Text("📅 カレンダー") }
                     )
                 }
                 item {
@@ -731,7 +775,18 @@ fun TaskScreen(
                 }
             }
 
-            Row(
+            if (showCalendar) {
+                TaskCalendar(
+                    tasks = allTasks,
+                    selectedListId = selectedListId,
+                    nowMillis = nowMillis,
+                    onViewTask = { viewingTask = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(top = 8.dp)
+                )
+            }
+            if (!showCalendar) Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 16.dp)
@@ -759,16 +814,6 @@ fun TaskScreen(
                 }
             }
 
-            // isOverdue/isDueTodayの判定基準となる「現在時刻」。タスク一覧を開いたままにしていても
-            // 期限切れ・当日期限の色分け・「今日期限・期限切れ」フィルタが更新されるよう、
-            // 1分おきに再コンポーズをトリガーする。
-            val nowMillis by produceState(initialValue = System.currentTimeMillis()) {
-                while (true) {
-                    delay(60_000L)
-                    value = System.currentTimeMillis()
-                }
-            }
-
             // 表示フィルタはトップレベルのタスクにのみ適用する(selectedListId/showCompletedと同じ考え方)。
             // 合致したトップレベルタスクは、そのサブタスクツリーごとそのまま表示する。
             val displayedTasks = if (activeDisplayFilters.isEmpty()) {
@@ -779,7 +824,7 @@ fun TaskScreen(
                 }
             }
 
-            LazyColumn {
+            if (!showCalendar) LazyColumn {
                 items(displayedTasks, key = { it.id }) { task ->
                     TaskTreeRow(
                         task = task,

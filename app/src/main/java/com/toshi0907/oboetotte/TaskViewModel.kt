@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
+import java.time.ZoneId
 
 object RepeatRule {
     const val DAILY = "DAILY"
@@ -49,6 +51,26 @@ object RepeatRule {
     }
 
     fun formatDaysOfWeek(days: Set<Int>): String = days.sorted().joinToString(",")
+
+    /**
+     * [current]の次回の期限(ローカルタイムゾーン基準)。繰り返しタスクを完了した際の次回分生成
+     * ([TaskCompletion.complete])と、カレンダー表示での将来の予定の計算の両方から使い、
+     * 両者の日付が必ず一致するようにしている。[WEEKLY_DAYS]は[daysOfWeek]が空でないこと、
+     * それ以外の未知のルールは呼び出し側で除外しておくこと(その場合は[current]をそのまま返す)。
+     */
+    fun nextDueAt(current: Long, rule: String, daysOfWeek: Set<Int>): Long {
+        val zoned = Instant.ofEpochMilli(current).atZone(ZoneId.systemDefault())
+        val next = when (rule) {
+            DAILY -> zoned.plusDays(1)
+            WEEKLY -> zoned.plusWeeks(1)
+            WEEKLY_DAYS -> (1..7)
+                .map { zoned.plusDays(it.toLong()) }
+                .first { it.dayOfWeek.value in daysOfWeek }
+            MONTHLY -> zoned.plusMonths(1)
+            else -> zoned
+        }
+        return next.toInstant().toEpochMilli()
+    }
 }
 
 /** [EditTaskDialog]で編集可能な項目をまとめたもの。[TaskViewModel.updateTask]に渡す。 */
@@ -194,12 +216,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _selectedListId,
         _showCompleted
     ) { tasks, listId, showCompleted ->
-        val topLevel = tasks.filter { it.parentTaskId == null }
-        val byList = when (listId) {
-            null -> topLevel
-            UNASSIGNED_LIST_ID -> topLevel.filter { it.listId == null }
-            else -> topLevel.filter { it.listId == listId }
-        }
+        val byList = tasks.filter { it.parentTaskId == null && it.matchesListFilter(listId) }
         if (showCompleted) byList else byList.filter { !it.isDone }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -577,4 +594,14 @@ enum class TaskDisplayFilter {
 fun TaskDisplayFilter.matches(task: Task, nowMillis: Long): Boolean = when (this) {
     TaskDisplayFilter.HAS_URL -> !task.url.isNullOrBlank()
     TaskDisplayFilter.DUE_TODAY_OR_OVERDUE -> task.isOverdue(nowMillis) || task.isDueToday(nowMillis)
+}
+
+/**
+ * [task]がリストの絞り込み([listId]。`null`は「すべて」、[TaskViewModel.UNASSIGNED_LIST_ID]は
+ * 「リスト未登録」)に合致するか。メイン画面の一覧とカレンダー表示の両方から共通で使う。
+ */
+fun Task.matchesListFilter(listId: Long?): Boolean = when (listId) {
+    null -> true
+    TaskViewModel.UNASSIGNED_LIST_ID -> this.listId == null
+    else -> this.listId == listId
 }

@@ -63,6 +63,7 @@ GitHub Issueに対応する形で実装を行った場合は、対応内容のPR
 - 繰り返しタスク: `docs/architecture/repeat-tasks.md`
 - 画面構成(MainActivity): `docs/architecture/screen-structure.md`
 - タスク一覧画面(TaskScreen): `docs/architecture/task-list-screen.md`
+- カレンダー表示: `docs/architecture/calendar-view.md`
 - 設定画面(SettingsScreen): `docs/architecture/settings-screen.md`
 - サブタスクのツリー表示: `docs/architecture/subtask-tree.md`
 - 期限ピッカー・DBマイグレーション: `docs/architecture/due-picker-db-migration.md`
