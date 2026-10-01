@@ -8,8 +8,6 @@ import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
-import java.time.Instant
-import java.time.ZoneId
 
 /**
  * タスクを完了にする処理の実体。アプリ内(TaskViewModel)と通知の「完了」アクション
@@ -50,7 +48,7 @@ object TaskCompletion {
             val nextTask = task.copy(
                 id = 0,
                 isDone = false,
-                dueAt = nextDueAt(dueAt, rule, daysOfWeek),
+                dueAt = RepeatRule.nextDueAt(dueAt, rule, daysOfWeek),
                 seriesId = task.attachmentGroupId()
             )
             val newId = taskDao.insert(nextTask)
@@ -59,19 +57,5 @@ object TaskCompletion {
             LocationReminderManager.register(context, inserted)
         }
         refreshTaskWidget(context)
-    }
-
-    private fun nextDueAt(current: Long, rule: String, daysOfWeek: Set<Int>): Long {
-        val zoned = Instant.ofEpochMilli(current).atZone(ZoneId.systemDefault())
-        val next = when (rule) {
-            RepeatRule.DAILY -> zoned.plusDays(1)
-            RepeatRule.WEEKLY -> zoned.plusWeeks(1)
-            RepeatRule.WEEKLY_DAYS -> (1..7)
-                .map { zoned.plusDays(it.toLong()) }
-                .first { it.dayOfWeek.value in daysOfWeek }
-            RepeatRule.MONTHLY -> zoned.plusMonths(1)
-            else -> zoned
-        }
-        return next.toInstant().toEpochMilli()
     }
 }
