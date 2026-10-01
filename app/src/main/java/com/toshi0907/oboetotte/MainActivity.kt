@@ -1552,6 +1552,9 @@ fun SettingsScreen(
                             CompletedTaskCleanupSettings.MAX_RETENTION_DAYS
                         )
                         if (days != null) {
+                            // 範囲外の値を丸めた結果が保存済みの値と同じだとrememberのキーが変わらず
+                            // 入力欄が更新されないため、丸めた値を明示的に反映する。
+                            retentionDaysInput = days.toString()
                             onSetCompletedTaskCleanupRetentionDays(days)
                         }
                     }) {
