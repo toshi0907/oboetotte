@@ -242,7 +242,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _showCompleted.value = show
     }
 
-    fun addTask(title: String) {
+    /**
+     * タスクを登録する。登録完了後(IDが確定した状態)のタスクを[onAdded]でメインスレッドに返す。
+     * タスク一覧画面はこれを受けて、追加したタスクの編集ダイアログを開く。
+     */
+    fun addTask(title: String, onAdded: (Task) -> Unit = {}) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
@@ -255,8 +259,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 dueAt = System.currentTimeMillis() + DEFAULT_DUE_DELAY_MILLIS
             )
             val id = taskDao.insert(newTask)
-            ReminderScheduler.schedule(appContext, newTask.copy(id = id))
+            val inserted = newTask.copy(id = id)
+            ReminderScheduler.schedule(appContext, inserted)
             refreshTaskWidget(appContext)
+            onAdded(inserted)
         }
     }
 
