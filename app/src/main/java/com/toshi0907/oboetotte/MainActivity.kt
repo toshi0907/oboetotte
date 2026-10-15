@@ -563,7 +563,7 @@ fun TaskScreen(
     onSetShowCompleted: (Boolean) -> Unit,
     activeDisplayFilters: Set<TaskDisplayFilter>,
     onToggleDisplayFilter: (TaskDisplayFilter) -> Unit,
-    onAddTask: (String) -> Unit,
+    onAddTask: (title: String, onAdded: (Task) -> Unit) -> Unit,
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, TaskEdits) -> Unit,
     onDeleteTask: (Task) -> Unit,
@@ -585,6 +585,12 @@ fun TaskScreen(
 ) {
     var input by remember { mutableStateOf("") }
     var viewingTask by remember { mutableStateOf<Task?>(null) }
+    // 追加ボタン(またはキーボードの確定キー)で登録した直後のタスク。登録完了後にその編集ダイアログを開く。
+    var addedTask by remember { mutableStateOf<Task?>(null) }
+    val addTaskAndEdit: () -> Unit = {
+        onAddTask(input) { addedTask = it }
+        input = ""
+    }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     // 一覧表示とカレンダー表示の切り替え。カレンダー表示中はカレンダー本体の高さを確保するため、
     // リストの絞り込み行を1行の要約に折りたたむ(filtersExpandedで展開)。
@@ -815,16 +821,10 @@ fun TaskScreen(
                     label = { Text("タスクを入力") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        onAddTask(input)
-                        input = ""
-                    })
+                    keyboardActions = KeyboardActions(onDone = { addTaskAndEdit() })
                 )
                 Button(
-                    onClick = {
-                        onAddTask(input)
-                        input = ""
-                    },
+                    onClick = addTaskAndEdit,
                     modifier = Modifier.padding(start = 8.dp)
                 ) {
                     Text("追加")
@@ -871,6 +871,27 @@ fun TaskScreen(
             onAddAttachment = onAddAttachment,
             onDeleteAttachment = onDeleteAttachment,
             onDismiss = { viewingTask = null }
+        )
+    }
+
+    // 追加直後の編集ダイアログ。キャンセルしてもタスク自体は登録済みのまま残る。
+    addedTask?.let { task ->
+        EditTaskDialog(
+            task = allTasks.find { it.id == task.id } ?: task,
+            allTasks = allTasks,
+            lists = lists,
+            savedLocations = savedLocations,
+            vibrationPatterns = vibrationPatterns,
+            allAttachments = allAttachments,
+            onConfirm = { t, edits ->
+                onUpdateTask(t, edits)
+                addedTask = null
+            },
+            onAddSubtask = onAddSubtask,
+            onToggleDone = onToggleDone,
+            onAddAttachment = onAddAttachment,
+            onDeleteAttachment = onDeleteAttachment,
+            onDismiss = { addedTask = null }
         )
     }
 
@@ -3309,7 +3330,7 @@ fun TaskScreenPreview() {
             onSetShowCompleted = {},
             activeDisplayFilters = emptySet(),
             onToggleDisplayFilter = {},
-            onAddTask = {},
+            onAddTask = { _, _ -> },
             onToggleDone = {},
             onUpdateTask = { _, _ -> },
             onDeleteTask = {},
