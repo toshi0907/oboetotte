@@ -94,8 +94,14 @@ GitHub Issueに対応する形で実装を行った場合は、対応内容のPR
 スキルごとに登録されています(`.claude/skills` 自体はsymlinkではありません)。
 リポジトリ固有のローカルスキルがある場合は、同じ `.claude/skills/` 内に通常のディレクトリとして
 共存できます。
-Claude Code on the web のセッション開始時に、未登録のスキルsymlinkが自動で追加されます
-(`.claude/hooks/myskills-skills-sync.sh`。既存のsymlinkやローカルスキルは上書きしません)。
+Claude Code on the web のセッション開始時に、`.claude/hooks/myskills-skills-sync.sh` が
+`.myskills` を最新化し、未登録のスキルsymlinkの追加とリンク切れsymlinkの削除を行います
+(既存のsymlinkやローカルスキルは上書きしません)。
 
 実装作業を始める前に、`.claude/skills/` にあるスキルの一覧と各 `SKILL.md` の
 description を確認し、該当するものがあれば優先的に使ってください。
+
+フックが「myskills同期による未コミットの差分」を報告した場合(`.myskills` の更新、
+`.claude/skills/` 配下のsymlinkの追加・削除)は、作業内容のコミットに混ぜず、
+該当パスだけを専用のコミット(例: `chore: sync myskills`)として作業ブランチにコミットしてください
+(`git add -A` / `git commit -a` で作業コミットに巻き込まないこと)。
