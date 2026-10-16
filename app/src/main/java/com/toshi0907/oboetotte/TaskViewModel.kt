@@ -143,6 +143,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         MutableStateFlow(CompletedTaskCleanupSettings.getRetentionDays(application))
     val completedTaskCleanupRetentionDays: StateFlow<Int> = _completedTaskCleanupRetentionDays
 
+    private val _dueTimePresets = MutableStateFlow(DueTimePresetSettings.getAll(application))
+    /** 期限クイック選択「当日朝/昼/夕/夜」の時刻(0時からの分数)。 */
+    val dueTimePresets: StateFlow<Map<DueTimeSlot, Int>> = _dueTimePresets
+
     private val _cloudBackupEnabled = MutableStateFlow(CloudBackupSettings.isEnabled(application))
     val cloudBackupEnabled: StateFlow<Boolean> = _cloudBackupEnabled
 
@@ -557,6 +561,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
      * 新しい設定に基づいてすぐに再計算する([CloudBackupScheduler.reschedule])。無効化中は
      * 設定を保存するだけで、実際のスケジュール登録は次回有効化時に行われる。
      */
+    /** 期限クイック選択「当日朝/昼/夕/夜」のうち[slot]の時刻を変更する。 */
+    fun setDueTimePreset(slot: DueTimeSlot, hour: Int, minute: Int) {
+        DueTimePresetSettings.setTime(appContext, slot, hour, minute)
+        _dueTimePresets.value = DueTimePresetSettings.getAll(appContext)
+    }
+
     fun setCloudBackupTime(hour: Int, minute: Int) {
         CloudBackupSettings.setBackupTime(appContext, hour, minute)
         _cloudBackupHour.value = CloudBackupSettings.getBackupHour(appContext)

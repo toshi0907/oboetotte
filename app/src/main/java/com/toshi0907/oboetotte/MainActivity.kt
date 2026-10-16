@@ -214,6 +214,7 @@ class MainActivity : ComponentActivity() {
                         taskViewModel.completedTaskCleanupRetentionDays.collectAsState()
                     val locationTrackingIntervalMinutes by
                         taskViewModel.locationTrackingIntervalMinutes.collectAsState()
+                    val dueTimePresets by taskViewModel.dueTimePresets.collectAsState()
                     val cloudBackupEnabled by taskViewModel.cloudBackupEnabled.collectAsState()
                     val cloudBackupFolderUri by taskViewModel.cloudBackupFolderUri.collectAsState()
                     val cloudBackupRetentionCount by taskViewModel.cloudBackupRetentionCount.collectAsState()
@@ -409,6 +410,8 @@ class MainActivity : ComponentActivity() {
                             cloudBackupHour = cloudBackupHour,
                             cloudBackupMinute = cloudBackupMinute,
                             onSetCloudBackupTime = taskViewModel::setCloudBackupTime,
+                            dueTimePresets = dueTimePresets,
+                            onSetDueTimePreset = taskViewModel::setDueTimePreset,
                             completedTaskCleanupEnabled = completedTaskCleanupEnabled,
                             onSetCompletedTaskCleanupEnabled = taskViewModel::setCompletedTaskCleanupEnabled,
                             completedTaskCleanupRetentionDays = completedTaskCleanupRetentionDays,
@@ -1205,6 +1208,8 @@ fun SettingsScreen(
     onSetLocationTrackingMode: (LocationTrackingMode) -> Unit = {},
     locationTrackingIntervalMinutes: Int = LocationTrackingSettings.DEFAULT_INTERVAL_MINUTES,
     onSetLocationTrackingIntervalMinutes: (Int) -> Unit = {},
+    dueTimePresets: Map<DueTimeSlot, Int> = emptyMap(),
+    onSetDueTimePreset: (DueTimeSlot, Int, Int) -> Unit = { _, _, _ -> },
     onSendTestNotification: () -> Unit,
     onExportRequested: () -> Unit,
     onImportRequested: () -> Unit,
@@ -1240,6 +1245,7 @@ fun SettingsScreen(
     var showLocationDebug by remember { mutableStateOf(false) }
     var showNotificationLogs by remember { mutableStateOf(false) }
     var showBackupTimePicker by remember { mutableStateOf(false) }
+    var editingDueTimeSlot by remember { mutableStateOf<DueTimeSlot?>(null) }
 
     BackHandler(onBack = onBack)
 
@@ -1387,6 +1393,31 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            Text(
+                text = "期限のクイック選択",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                text = "タスク編集画面の「当日朝/昼/夕/夜」チップで設定される時刻です。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            DueTimeSlot.entries.forEach { slot ->
+                val minuteOfDay = dueTimePresets[slot] ?: slot.defaultMinuteOfDay
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "${slot.label}: ${formatMinuteOfDay(minuteOfDay)}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    TextButton(onClick = { editingDueTimeSlot = slot }) {
+                        Text("変更")
+                    }
+                }
             }
 
             Text(
@@ -1674,6 +1705,33 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showBackupTimePicker = false }) {
+                    Text("キャンセル")
+                }
+            }
+        )
+    }
+
+    editingDueTimeSlot?.let { slot ->
+        val minuteOfDay = dueTimePresets[slot] ?: slot.defaultMinuteOfDay
+        val timeState = rememberTimePickerState(
+            initialHour = minuteOfDay / 60,
+            initialMinute = minuteOfDay % 60,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { editingDueTimeSlot = null },
+            title = { Text("当日${slot.label}の時刻") },
+            text = { TimePicker(state = timeState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onSetDueTimePreset(slot, timeState.hour, timeState.minute)
+                    editingDueTimeSlot = null
+                }) {
+                    Text("設定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingDueTimeSlot = null }) {
                     Text("キャンセル")
                 }
             }
@@ -2529,6 +2587,8 @@ fun EditTaskDialog(
     var vibrationEnabled by remember(task.id) { mutableStateOf(task.vibrationPatternId != null) }
     // 選択中のIDが登録済みパターンに無い(削除済み等)場合は未選択として扱う。
     val vibrationPatternSelected = vibrationPatterns.any { it.id == vibrationPatternId }
+    // 設定画面で変更した時刻をダイアログを開くたびに反映するため、ここで直接読み込む。
+    val dueTimePresets = remember { DueTimePresetSettings.getAll(context) }
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var subtaskInput by remember(task.id) { mutableStateOf("") }
@@ -2616,6 +2676,20 @@ fun EditTaskDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // 当日朝/昼/夕/夜: 時刻を過ぎた時間帯は過去日時にならないよう無効化する。
+                    items(DueTimeSlot.entries) { slot ->
+                        val minuteOfDay = dueTimePresets[slot] ?: slot.defaultMinuteOfDay
+                        AssistChip(
+                            onClick = {
+                                val now = System.currentTimeMillis()
+                                val candidate = todayAtMinuteOfDay(now, minuteOfDay)
+                                if (candidate > now) dueAt = candidate
+                            },
+                            enabled = todayAtMinuteOfDay(System.currentTimeMillis(), minuteOfDay) >
+                                System.currentTimeMillis(),
+                            label = { Text("当日${slot.label} ${formatMinuteOfDay(minuteOfDay)}") }
+                        )
+                    }
                     items(DUE_QUICK_OPTIONS) { (label, computeDueAt) ->
                         AssistChip(
                             onClick = { dueAt = computeDueAt(System.currentTimeMillis()) },
