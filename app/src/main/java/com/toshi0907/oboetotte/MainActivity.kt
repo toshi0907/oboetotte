@@ -65,6 +65,7 @@ import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -2589,6 +2590,14 @@ fun EditTaskDialog(
     val vibrationPatternSelected = vibrationPatterns.any { it.id == vibrationPatternId }
     // 設定画面で変更した時刻をダイアログを開くたびに反映するため、ここで直接読み込む。
     val dueTimePresets = remember { DueTimePresetSettings.getAll(context) }
+    // 「当日朝/昼/夕/夜」チップの有効/無効を時刻の経過に追従させるため、現在時刻を定期的に更新する。
+    var dueSlotNowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            dueSlotNowMillis = System.currentTimeMillis()
+        }
+    }
     var showDatePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var subtaskInput by remember(task.id) { mutableStateOf("") }
@@ -2685,8 +2694,7 @@ fun EditTaskDialog(
                                 val candidate = todayAtMinuteOfDay(now, minuteOfDay)
                                 if (candidate > now) dueAt = candidate
                             },
-                            enabled = todayAtMinuteOfDay(System.currentTimeMillis(), minuteOfDay) >
-                                System.currentTimeMillis(),
+                            enabled = todayAtMinuteOfDay(dueSlotNowMillis, minuteOfDay) > dueSlotNowMillis,
                             label = { Text("当日${slot.label} ${formatMinuteOfDay(minuteOfDay)}") }
                         )
                     }

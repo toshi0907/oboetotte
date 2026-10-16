@@ -38,8 +38,8 @@ object DueTimePresetSettings {
     }
 }
 
-/** 0時からの分数を「7:00」形式の文字列にする。 */
-fun formatMinuteOfDay(minuteOfDay: Int): String = "%d:%02d".format(minuteOfDay / 60, minuteOfDay % 60)
+/** 0時からの分数を「07:00」形式の文字列にする。 */
+fun formatMinuteOfDay(minuteOfDay: Int): String = "%02d:%02d".format(minuteOfDay / 60, minuteOfDay % 60)
 
 /**
  * [now](epoch millis)と同じ日(端末のローカルタイムゾーン)の[minuteOfDay]時点のepoch millisを返す。

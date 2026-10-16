@@ -556,17 +556,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _cloudBackupRetentionCount.value = CloudBackupSettings.getRetentionCount(appContext)
     }
 
-    /**
-     * クラウド自動バックアップの保存時刻(時:分)を変更する。有効化中であれば、次回実行時刻を
-     * 新しい設定に基づいてすぐに再計算する([CloudBackupScheduler.reschedule])。無効化中は
-     * 設定を保存するだけで、実際のスケジュール登録は次回有効化時に行われる。
-     */
     /** 期限クイック選択「当日朝/昼/夕/夜」のうち[slot]の時刻を変更する。 */
     fun setDueTimePreset(slot: DueTimeSlot, hour: Int, minute: Int) {
         DueTimePresetSettings.setTime(appContext, slot, hour, minute)
         _dueTimePresets.value = DueTimePresetSettings.getAll(appContext)
     }
 
+    /**
+     * クラウド自動バックアップの保存時刻(時:分)を変更する。有効化中であれば、次回実行時刻を
+     * 新しい設定に基づいてすぐに再計算する([CloudBackupScheduler.reschedule])。無効化中は
+     * 設定を保存するだけで、実際のスケジュール登録は次回有効化時に行われる。
+     */
     fun setCloudBackupTime(hour: Int, minute: Int) {
         CloudBackupSettings.setBackupTime(appContext, hour, minute)
         _cloudBackupHour.value = CloudBackupSettings.getBackupHour(appContext)
