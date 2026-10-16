@@ -7,7 +7,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 /**
- * 編集画面の期限クイック選択「当日朝/昼/夕/夜」の時間帯。[defaultMinuteOfDay]は0時からの分数。
+ * 編集画面の期限クイック選択「当日朝/昼/夕/夜」「明日の朝/昼/夕/夜」の時間帯。[defaultMinuteOfDay]は0時からの分数。
  */
 enum class DueTimeSlot(val label: String, val prefsKey: String, val defaultMinuteOfDay: Int) {
     MORNING("朝", "morning", 7 * 60),
@@ -46,7 +46,14 @@ fun formatMinuteOfDay(minuteOfDay: Int): String = "%02d:%02d".format(minuteOfDay
  * DST切り替え日に存在しない時刻は`ZonedDateTime`の規則どおり後ろにずらされる。
  */
 fun todayAtMinuteOfDay(now: Long, minuteOfDay: Int, zone: ZoneId = ZoneId.systemDefault()): Long =
-    Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+    dayAtMinuteOfDay(now, minuteOfDay, 0, zone)
+
+/** [now](epoch millis)の翌日(端末のローカルタイムゾーン)の[minuteOfDay]時点のepoch millisを返す。 */
+fun tomorrowAtMinuteOfDay(now: Long, minuteOfDay: Int, zone: ZoneId = ZoneId.systemDefault()): Long =
+    dayAtMinuteOfDay(now, minuteOfDay, 1, zone)
+
+private fun dayAtMinuteOfDay(now: Long, minuteOfDay: Int, plusDays: Long, zone: ZoneId): Long =
+    Instant.ofEpochMilli(now).atZone(zone).toLocalDate().plusDays(plusDays)
         .atTime(LocalTime.of(minuteOfDay / 60, minuteOfDay % 60))
         .atZone(zone)
         .toInstant()

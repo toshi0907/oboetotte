@@ -1402,7 +1402,7 @@ fun SettingsScreen(
                 modifier = Modifier.padding(top = 8.dp)
             )
             Text(
-                text = "タスク編集画面の「当日朝/昼/夕/夜」チップで設定される時刻です。",
+                text = "タスク編集画面の「当日朝/昼/夕/夜」「明日の朝/昼/夕/夜」チップで設定される時刻です。",
                 style = MaterialTheme.typography.bodySmall
             )
             DueTimeSlot.entries.forEach { slot ->
@@ -1721,7 +1721,7 @@ fun SettingsScreen(
         )
         AlertDialog(
             onDismissRequest = { editingDueTimeSlot = null },
-            title = { Text("当日${slot.label}の時刻") },
+            title = { Text("${slot.label}の時刻") },
             text = { TimePicker(state = timeState) },
             confirmButton = {
                 TextButton(onClick = {
@@ -2696,6 +2696,14 @@ fun EditTaskDialog(
                             },
                             enabled = todayAtMinuteOfDay(dueSlotNowMillis, minuteOfDay) > dueSlotNowMillis,
                             label = { Text("当日${slot.label} ${formatMinuteOfDay(minuteOfDay)}") }
+                        )
+                    }
+                    // 明日の朝/昼/夕/夜: 翌日の日付なので常に未来日時になり、無効化はしない。
+                    items(DueTimeSlot.entries) { slot ->
+                        val minuteOfDay = dueTimePresets[slot] ?: slot.defaultMinuteOfDay
+                        AssistChip(
+                            onClick = { dueAt = tomorrowAtMinuteOfDay(System.currentTimeMillis(), minuteOfDay) },
+                            label = { Text("明日の${slot.label} ${formatMinuteOfDay(minuteOfDay)}") }
                         )
                     }
                     items(DUE_QUICK_OPTIONS) { (label, computeDueAt) ->
