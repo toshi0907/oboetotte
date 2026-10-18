@@ -2681,6 +2681,7 @@ fun EditTaskDialog(
                         }
                     }
                 }
+                // 当日・明日・相対時間の3グループをそれぞれ別の行に並べる(各行は幅が足りなければ横スクロール)。
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -2698,6 +2699,11 @@ fun EditTaskDialog(
                             label = { Text("当日${slot.label} ${formatMinuteOfDay(minuteOfDay)}") }
                         )
                     }
+                }
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     // 明日の朝/昼/夕/夜: 翌日の日付なので常に未来日時になり、無効化はしない。
                     items(DueTimeSlot.entries) { slot ->
                         val minuteOfDay = dueTimePresets[slot] ?: slot.defaultMinuteOfDay
@@ -2706,6 +2712,11 @@ fun EditTaskDialog(
                             label = { Text("明日の${slot.label} ${formatMinuteOfDay(minuteOfDay)}") }
                         )
                     }
+                }
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     items(DUE_QUICK_OPTIONS) { (label, computeDueAt) ->
                         AssistChip(
                             onClick = { dueAt = computeDueAt(System.currentTimeMillis()) },
