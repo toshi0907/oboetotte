@@ -1,6 +1,6 @@
 # カレンダー表示
 
-**画面**: `TaskScreen`(`MainActivity.kt`)の3段目のチップ行にある「📅 カレンダー」`FilterChip`で、`showCalendar`(`rememberSaveable`)を切り替えます。カレンダー表示中は一覧部分(タスク入力行・`LazyColumn`)の代わりに`TaskCalendar`(`TaskCalendar.kt`)を`Modifier.weight(1f)`で残りの高さいっぱいに表示します。カレンダー本体の高さを確保するため、「リスト」行は「▸ リスト: 〈選択中のリスト名〉」という1行の要約に折りたたみ(タップで`filtersExpanded`を切り替えて展開)、カレンダーには適用しない「フィルタ」行と「完了済みを表示」チップは非表示にします。
+**画面**: `TaskScreen`(`MainActivity.kt`)のドロワー(☰ボタン)の「表示」セクションにある「📅 カレンダー表示」スイッチで、`showCalendar`(`rememberSaveable`)を切り替えます。カレンダー表示中は一覧部分(タスク入力行・`LazyColumn`)の代わりに`TaskCalendar`(`TaskCalendar.kt`)を`Modifier.weight(1f)`で残りの高さいっぱいに表示し、ヘッダー右端に「📅 カレンダー」と表示します。カレンダーには適用しない表示フィルタと「完了済みを表示」は、ドロワー上で無効化(グレーアウト)します。カレンダーの左右スワイプ(月の移動)とドロワーの開閉ジェスチャーが競合しないよう、カレンダー表示中は`ModalNavigationDrawer`の`gesturesEnabled`を「ドロワーが開いているときのみ」にしています(☰ボタンからは開けます)。
 
 **表示対象**: `allTasks`のうち、親タスク(`parentTaskId == null`)・未完了・`dueAt`あり・リストの絞り込み(`Task.matchesListFilter`、`TaskViewModel.kt`。一覧と共通)に合致するものだけです。サブタスク・完了済み(`showCompleted`に関わらず)・表示フィルタ(`TaskDisplayFilter`)は対象外です。
 

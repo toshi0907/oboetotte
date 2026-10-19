@@ -40,6 +40,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -51,15 +53,24 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
@@ -80,9 +91,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -596,266 +611,197 @@ fun TaskScreen(
         input = ""
     }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
-    // 一覧表示とカレンダー表示の切り替え。カレンダー表示中はカレンダー本体の高さを確保するため、
-    // リストの絞り込み行を1行の要約に折りたたむ(filtersExpandedで展開)。
+    // 一覧表示とカレンダー表示の切り替え(ドロワーの「表示」セクションで切り替える)。
     var showCalendar by rememberSaveable { mutableStateOf(false) }
-    var filtersExpanded by rememberSaveable { mutableStateOf(false) }
+    // リスト選択・表示フィルタ・表示切り替え・設定への遷移は、左上の☰ボタンで開くドロワーにまとめる。
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
+    val closeDrawer: () -> Unit = { drawerScope.launch { drawerState.close() } }
     val hasLocationTasks = allTasks.any {
         !it.isDone && it.latitude != null && it.longitude != null && it.radiusMeters != null &&
             (it.notifyOnArrival || it.notifyOnDeparture)
     }
 
-    Surface(modifier = modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-        ) {
-            Text(text = "Oboetotte", style = MaterialTheme.typography.headlineMedium)
+    // ドロワーが開いている(開くアニメーション中・ドラッグ中を含む)間は、システムの「戻る」操作で
+    // まずドロワーを閉じる。
+    BackHandler(enabled = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open) {
+        closeDrawer()
+    }
 
-            if (showExactAlarmBanner) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "リマインダー通知を正確な時刻に届けるには、「アラームとリマインダー」の権限が必要です。",
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        TextButton(onClick = onRequestExactAlarmPermission) {
-                            Text("設定を開く")
-                        }
-                    }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        // カレンダーは左右スワイプで月を移動するため、カレンダー表示中はスワイプでドロワーを
+        // 開かない(☰ボタンからは開ける。開いた後はスワイプで閉じられる)。
+        gesturesEnabled = drawerState.isOpen || !showCalendar,
+        // ScaffoldのinnerPadding(modifier)は本体側にだけ適用する。ModalDrawerSheetは自前で
+        // システムバーのinsetsを適用するため、ドロワー全体に掛けると二重に余白が付く。
+        modifier = Modifier.fillMaxSize(),
+        drawerContent = {
+            TaskScreenDrawer(
+                lists = lists,
+                selectedListId = selectedListId,
+                onSelectList = {
+                    onSelectList(it)
+                    closeDrawer()
+                },
+                activeDisplayFilters = activeDisplayFilters,
+                onToggleDisplayFilter = onToggleDisplayFilter,
+                showCompleted = showCompleted,
+                onSetShowCompleted = onSetShowCompleted,
+                showCalendar = showCalendar,
+                onSetShowCalendar = { showCalendar = it },
+                onOpenSettings = {
+                    closeDrawer()
+                    onOpenSettings()
                 }
-            }
-
-            if (hasLocationTasks && !locationPermissionGranted) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "位置による通知を届けるには、位置情報の権限(常に許可)が必要です。",
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        TextButton(onClick = onRequestLocationSettings) {
-                            Text("設定を開く")
-                        }
-                    }
-                }
-            }
-
-            if (updateCheckResult is AppUpdateChecker.Result.UpdateAvailable) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "新しいバージョンが利用可能です。",
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        TextButton(
-                            onClick = { onDownloadUpdate(updateCheckResult.downloadUrl) },
-                            enabled = !isDownloadingUpdate
-                        ) {
-                            Text(if (isDownloadingUpdate) "ダウンロード中…" else "更新する")
-                        }
-                    }
-                }
-            }
-
-            // isOverdue/isDueTodayの判定基準となる「現在時刻」。タスク一覧を開いたままにしていても
-            // 期限切れ・当日期限の色分け・「今日期限・期限切れ」フィルタが更新されるよう、
-            // 1分おきに再コンポーズをトリガーする(カレンダー表示の「今日」の判定にも使う)。
-            val nowMillis by produceState(initialValue = System.currentTimeMillis()) {
-                while (true) {
-                    delay(60_000L)
-                    value = System.currentTimeMillis()
-                }
-            }
-
-            if (showCalendar) {
-                val selectedListName = when (selectedListId) {
-                    null -> "すべて"
-                    TaskViewModel.UNASSIGNED_LIST_ID -> "リスト未登録"
-                    else -> lists.find { it.id == selectedListId }?.name ?: "すべて"
-                }
-                Text(
-                    text = "${if (filtersExpanded) "▾" else "▸"} リスト: $selectedListName",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .clickable { filtersExpanded = !filtersExpanded }
-                        .padding(vertical = 4.dp)
-                )
-            } else {
-                Text(
-                    text = "リスト",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp)
-                )
-            }
-            if (!showCalendar || filtersExpanded) LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    FilterChip(
-                        selected = selectedListId == null,
-                        onClick = { onSelectList(null) },
-                        label = { Text("すべて") }
-                    )
-                }
-                item {
-                    FilterChip(
-                        selected = selectedListId == TaskViewModel.UNASSIGNED_LIST_ID,
-                        onClick = { onSelectList(TaskViewModel.UNASSIGNED_LIST_ID) },
-                        label = { Text("リスト未登録") }
-                    )
-                }
-                items(lists, key = { it.id }) { list ->
-                    FilterChip(
-                        selected = selectedListId == list.id,
-                        onClick = { onSelectList(list.id) },
-                        label = { Text(list.name) }
-                    )
-                }
-            }
-
-            // 表示フィルタはカレンダー表示には適用しないため、カレンダー表示中は行ごと隠す。
-            if (!showCalendar) Text(
-                text = "フィルタ",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 12.dp)
             )
-            if (!showCalendar) LazyRow(
+        }
+    ) {
+        Surface(modifier = modifier.fillMaxSize()) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .fillMaxSize()
+                    .padding(16.dp)
             ) {
-                item {
-                    FilterChip(
-                        selected = TaskDisplayFilter.HAS_URL in activeDisplayFilters,
-                        onClick = { onToggleDisplayFilter(TaskDisplayFilter.HAS_URL) },
-                        label = { Text("リンクを含む") }
-                    )
-                }
-                item {
-                    FilterChip(
-                        selected = TaskDisplayFilter.DUE_TODAY_OR_OVERDUE in activeDisplayFilters,
-                        onClick = { onToggleDisplayFilter(TaskDisplayFilter.DUE_TODAY_OR_OVERDUE) },
-                        label = { Text("今日期限・期限切れ") }
-                    )
-                }
-            }
+                TaskScreenHeader(
+                    lists = lists,
+                    selectedListId = selectedListId,
+                    activeDisplayFilters = activeDisplayFilters,
+                    showCalendar = showCalendar,
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } }
+                )
 
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // カレンダー表示では完了済みタスクを常に表示しないため、切り替えチップも隠す。
-                if (!showCalendar) {
-                    item {
-                        FilterChip(
-                            selected = showCompleted,
-                            onClick = { onSetShowCompleted(!showCompleted) },
-                            label = { Text("完了済みを表示") }
+                if (showExactAlarmBanner) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
                         )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "リマインダー通知を正確な時刻に届けるには、「アラームとリマインダー」の権限が必要です。",
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            TextButton(onClick = onRequestExactAlarmPermission) {
+                                Text("設定を開く")
+                            }
+                        }
                     }
                 }
-                item {
-                    FilterChip(
-                        selected = showCalendar,
-                        onClick = { showCalendar = !showCalendar },
-                        label = { Text("📅 カレンダー") }
-                    )
-                }
-                item {
-                    AssistChip(
-                        onClick = onOpenSettings,
-                        label = { Text("設定") }
-                    )
-                }
-            }
 
-            if (showCalendar) {
-                TaskCalendar(
-                    tasks = allTasks,
-                    selectedListId = selectedListId,
-                    nowMillis = nowMillis,
-                    onViewTask = { viewingTask = it },
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(top = 8.dp)
-                )
-            }
-            if (!showCalendar) Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 16.dp)
-            ) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
-                    label = { Text("タスクを入力") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { addTaskAndEdit() })
-                )
-                Button(
-                    onClick = addTaskAndEdit,
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    Text("追加")
+                if (hasLocationTasks && !locationPermissionGranted) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "位置による通知を届けるには、位置情報の権限(常に許可)が必要です。",
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            TextButton(onClick = onRequestLocationSettings) {
+                                Text("設定を開く")
+                            }
+                        }
+                    }
                 }
-            }
 
-            // 表示フィルタはトップレベルのタスクにのみ適用する(selectedListId/showCompletedと同じ考え方)。
-            // 合致したトップレベルタスクは、そのサブタスクツリーごとそのまま表示する。
-            val displayedTasks = if (activeDisplayFilters.isEmpty()) {
-                tasks
-            } else {
-                tasks.filter { task ->
-                    activeDisplayFilters.any { filter -> filter.matches(task, nowMillis) }
+                if (updateCheckResult is AppUpdateChecker.Result.UpdateAvailable) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "新しいバージョンが利用可能です。",
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            TextButton(
+                                onClick = { onDownloadUpdate(updateCheckResult.downloadUrl) },
+                                enabled = !isDownloadingUpdate
+                            ) {
+                                Text(if (isDownloadingUpdate) "ダウンロード中…" else "更新する")
+                            }
+                        }
+                    }
                 }
-            }
 
-            if (!showCalendar) LazyColumn {
-                items(displayedTasks, key = { it.id }) { task ->
-                    TaskTreeRow(
-                        task = task,
-                        allTasks = allTasks,
-                        depth = 0,
+                // isOverdue/isDueTodayの判定基準となる「現在時刻」。タスク一覧を開いたままにしていても
+                // 期限切れ・当日期限の色分け・「今日期限・期限切れ」フィルタが更新されるよう、
+                // 1分おきに再コンポーズをトリガーする(カレンダー表示の「今日」の判定にも使う)。
+                val nowMillis by produceState(initialValue = System.currentTimeMillis()) {
+                    while (true) {
+                        delay(60_000L)
+                        value = System.currentTimeMillis()
+                    }
+                }
+
+                if (showCalendar) {
+                    TaskCalendar(
+                        tasks = allTasks,
+                        selectedListId = selectedListId,
                         nowMillis = nowMillis,
-                        onToggleDone = onToggleDone,
                         onViewTask = { viewingTask = it },
-                        onDeleteTask = { deletingTask = it }
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(top = 8.dp)
                     )
+                }
+                if (!showCalendar) Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("タスクを入力") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { addTaskAndEdit() })
+                    )
+                    Button(
+                        onClick = addTaskAndEdit,
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        Text("追加")
+                    }
+                }
+
+                // 表示フィルタはトップレベルのタスクにのみ適用する(selectedListId/showCompletedと同じ考え方)。
+                // 合致したトップレベルタスクは、そのサブタスクツリーごとそのまま表示する。
+                val displayedTasks = if (activeDisplayFilters.isEmpty()) {
+                    tasks
+                } else {
+                    tasks.filter { task ->
+                        activeDisplayFilters.any { filter -> filter.matches(task, nowMillis) }
+                    }
+                }
+
+                if (!showCalendar) LazyColumn {
+                    items(displayedTasks, key = { it.id }) { task ->
+                        TaskTreeRow(
+                            task = task,
+                            allTasks = allTasks,
+                            depth = 0,
+                            nowMillis = nowMillis,
+                            onToggleDone = onToggleDone,
+                            onViewTask = { viewingTask = it },
+                            onDeleteTask = { deletingTask = it }
+                        )
+                    }
                 }
             }
         }
@@ -908,6 +854,221 @@ fun TaskScreen(
             },
             onDismiss = { deletingTask = null }
         )
+    }
+}
+
+/** 表示フィルタのメイン画面上での表示名。 */
+private val TaskDisplayFilter.label: String
+    get() = when (this) {
+        TaskDisplayFilter.HAS_URL -> "リンクを含む"
+        TaskDisplayFilter.DUE_TODAY_OR_OVERDUE -> "今日期限・期限切れ"
+    }
+
+/**
+ * [TaskScreen]上部のヘッダー。☰ボタン(ドロワーを開く)と、ドロワーに隠れている絞り込み状態
+ * (選択中のリスト名・有効な表示フィルタ)を表示する。
+ */
+@Composable
+private fun TaskScreenHeader(
+    lists: List<TaskList>,
+    selectedListId: Long?,
+    activeDisplayFilters: Set<TaskDisplayFilter>,
+    showCalendar: Boolean,
+    onOpenDrawer: () -> Unit
+) {
+    val selectedListName = when (selectedListId) {
+        null -> "すべて"
+        TaskViewModel.UNASSIGNED_LIST_ID -> "リスト未登録"
+        else -> lists.find { it.id == selectedListId }?.name ?: "すべて"
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(
+            onClick = onOpenDrawer,
+            modifier = Modifier.semantics { contentDescription = "メニューを開く" }
+        ) {
+            Text(text = "☰", style = MaterialTheme.typography.titleLarge)
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 4.dp)
+        ) {
+            Text(
+                text = selectedListName,
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            // 表示フィルタはカレンダー表示には適用しないため、カレンダー表示中は出さない。
+            if (!showCalendar && activeDisplayFilters.isNotEmpty()) {
+                Text(
+                    text = "🔍 " + TaskDisplayFilter.entries
+                        .filter { it in activeDisplayFilters }
+                        .joinToString("・") { it.label },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (showCalendar) {
+            Text(
+                text = "📅 カレンダー",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/**
+ * [TaskScreen]の☰ボタンで開くドロワーの中身。リスト選択(単一選択)・表示フィルタ(複数選択)・
+ * 表示切り替え(完了済みの表示/カレンダー表示)・設定画面への遷移をまとめる。
+ */
+@Composable
+private fun TaskScreenDrawer(
+    lists: List<TaskList>,
+    selectedListId: Long?,
+    onSelectList: (Long?) -> Unit,
+    activeDisplayFilters: Set<TaskDisplayFilter>,
+    onToggleDisplayFilter: (TaskDisplayFilter) -> Unit,
+    showCompleted: Boolean,
+    onSetShowCompleted: (Boolean) -> Unit,
+    showCalendar: Boolean,
+    onSetShowCalendar: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    ModalDrawerSheet {
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 16.dp)
+        ) {
+            Text(
+                text = "Oboetotte",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+            )
+
+            DrawerSectionLabel("リスト")
+            DrawerRadioRow("すべて", selectedListId == null) { onSelectList(null) }
+            DrawerRadioRow("リスト未登録", selectedListId == TaskViewModel.UNASSIGNED_LIST_ID) {
+                onSelectList(TaskViewModel.UNASSIGNED_LIST_ID)
+            }
+            lists.forEach { list ->
+                DrawerRadioRow(list.name, selectedListId == list.id) { onSelectList(list.id) }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            // 表示フィルタ・完了済みの表示はカレンダー表示には適用しないため、カレンダー表示中は無効化する。
+            DrawerSectionLabel(if (showCalendar) "フィルタ(カレンダー表示中は無効)" else "フィルタ")
+            TaskDisplayFilter.entries.forEach { filter ->
+                DrawerCheckboxRow(
+                    label = filter.label,
+                    checked = filter in activeDisplayFilters,
+                    enabled = !showCalendar,
+                    onToggle = { onToggleDisplayFilter(filter) }
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            DrawerSectionLabel("表示")
+            DrawerSwitchRow(
+                label = "完了済みを表示",
+                checked = showCompleted,
+                enabled = !showCalendar,
+                onCheckedChange = onSetShowCompleted
+            )
+            DrawerSwitchRow(
+                label = "📅 カレンダー表示",
+                checked = showCalendar,
+                onCheckedChange = onSetShowCalendar
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            NavigationDrawerItem(
+                label = { Text("⚙ 設定") },
+                selected = false,
+                onClick = onOpenSettings,
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun DrawerSectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+    )
+}
+
+@Composable
+private fun DrawerRadioRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(12.dp))
+        Text(text = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun DrawerCheckboxRow(label: String, checked: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = { onToggle() })
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled, modifier = Modifier.padding(12.dp))
+        Text(
+            text = label,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            }
+        )
+    }
+}
+
+@Composable
+private fun DrawerSwitchRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            }
+        )
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
