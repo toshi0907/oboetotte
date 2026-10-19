@@ -92,6 +92,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
@@ -620,15 +622,20 @@ fun TaskScreen(
             (it.notifyOnArrival || it.notifyOnDeparture)
     }
 
-    // ドロワーが開いている間は、システムの「戻る」操作でまずドロワーを閉じる。
-    BackHandler(enabled = drawerState.isOpen) { closeDrawer() }
+    // ドロワーが開いている(開くアニメーション中・ドラッグ中を含む)間は、システムの「戻る」操作で
+    // まずドロワーを閉じる。
+    BackHandler(enabled = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open) {
+        closeDrawer()
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         // カレンダーは左右スワイプで月を移動するため、カレンダー表示中はスワイプでドロワーを
         // 開かない(☰ボタンからは開ける。開いた後はスワイプで閉じられる)。
         gesturesEnabled = drawerState.isOpen || !showCalendar,
-        modifier = modifier,
+        // ScaffoldのinnerPadding(modifier)は本体側にだけ適用する。ModalDrawerSheetは自前で
+        // システムバーのinsetsを適用するため、ドロワー全体に掛けると二重に余白が付く。
+        modifier = Modifier.fillMaxSize(),
         drawerContent = {
             TaskScreenDrawer(
                 lists = lists,
@@ -650,7 +657,7 @@ fun TaskScreen(
             )
         }
     ) {
-        Surface(modifier = Modifier.fillMaxSize()) {
+        Surface(modifier = modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -797,7 +804,7 @@ fun TaskScreen(
                     }
                 }
             }
-    }
+        }
     }
 
     viewingTask?.let { task ->
@@ -878,7 +885,10 @@ private fun TaskScreenHeader(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onOpenDrawer) {
+        IconButton(
+            onClick = onOpenDrawer,
+            modifier = Modifier.semantics { contentDescription = "メニューを開く" }
+        ) {
             Text(text = "☰", style = MaterialTheme.typography.titleLarge)
         }
         Column(
