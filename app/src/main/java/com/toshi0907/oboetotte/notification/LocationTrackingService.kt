@@ -282,12 +282,14 @@ class LocationTrackingService : Service() {
 
     private fun buildNotification(): Notification {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // IMPORTANCE_MINはstartForegroundで使うと、代わりにシステムが「バックグラウンドで実行中」の
+            // より目立つ通知を出すため、フォアグラウンドサービスの通知はIMPORTANCE_LOWとする。
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "位置情報の連続追跡",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "位置情報リマインダーを連続追跡方式で確認している間、表示され続けます"
+                description = "位置情報リマインダーを連続追跡方式で確認している間、表示されます"
             }
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(channel)
@@ -306,7 +308,8 @@ class LocationTrackingService : Service() {
             .setContentTitle("位置情報を連続で確認中")
             .setContentText("設定 → 位置情報 から確認方式を変更できます")
             .setContentIntent(contentIntent)
-            .setOngoing(true)
+            // Android 14以降はスワイプで通知を消せる(消してもサービスは動作を続ける)。
+            .setOngoing(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
