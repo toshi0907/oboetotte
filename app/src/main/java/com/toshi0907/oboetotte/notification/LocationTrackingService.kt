@@ -282,20 +282,17 @@ class LocationTrackingService : Service() {
 
     private fun buildNotification(): Notification {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // フォアグラウンドサービスの通知自体は必須のため、IMPORTANCE_MINにしてステータスバーの
-            // アイコンを出さず、通知シェードでも折りたたまれた状態で目立たないようにする。
-            // 作成済みチャンネルの重要度はアプリ側から下げられないため、旧IMPORTANCE_LOWの
-            // チャンネル(LEGACY_CHANNEL_ID)は削除し、新しいIDで作り直す。
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+            // IMPORTANCE_MINはstartForegroundで使うと、代わりにシステムが「バックグラウンドで実行中」の
+            // より目立つ通知を出すため、フォアグラウンドサービスの通知はIMPORTANCE_LOWとする。
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "位置情報の連続追跡",
-                NotificationManager.IMPORTANCE_MIN
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "位置情報リマインダーを連続追跡方式で確認している間、目立たない形で表示されます"
+                description = "位置情報リマインダーを連続追跡方式で確認している間、表示されます"
             }
-            notificationManager.createNotificationChannel(channel)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(channel)
         }
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -313,14 +310,13 @@ class LocationTrackingService : Service() {
             .setContentIntent(contentIntent)
             // Android 14以降はスワイプで通知を消せる(消してもサービスは動作を続ける)。
             .setOngoing(false)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
     companion object {
         private const val TAG = "LocationReminder"
-        private const val CHANNEL_ID = "location_tracking_service_min"
-        private const val LEGACY_CHANNEL_ID = "location_tracking_service"
+        private const val CHANNEL_ID = "location_tracking_service"
         private const val NOTIFICATION_ID = 2
         private const val EXTRA_FORCE_RESTART = "force_restart"
 
