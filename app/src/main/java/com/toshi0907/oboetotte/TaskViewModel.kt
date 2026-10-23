@@ -16,6 +16,7 @@ import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanupSettings
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.NotificationLog
+import com.toshi0907.oboetotte.data.OperationLog
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
@@ -27,6 +28,10 @@ import com.toshi0907.oboetotte.notification.LocationTrackingMode
 import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.notification.VibrationPatternPlayer
+import com.toshi0907.oboetotte.oplog.OperationLogSource
+import com.toshi0907.oboetotte.oplog.OperationLogger
+import com.toshi0907.oboetotte.oplog.describeTaskChanges
+import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +39,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -108,6 +114,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val notificationLogDao = AppDatabase.getInstance(application).notificationLogDao()
     private val locationUpdateLogDao = AppDatabase.getInstance(application).locationUpdateLogDao()
     private val vibrationPatternDao = AppDatabase.getInstance(application).vibrationPatternDao()
+    private val operationLogDao = AppDatabase.getInstance(application).operationLogDao()
 
     val lists: StateFlow<List<TaskList>> = taskListDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -126,6 +133,18 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     val locationUpdateLogs: StateFlow<List<LocationUpdateLog>> = locationUpdateLogDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val operationLogs: StateFlow<List<OperationLog>> = operationLogDao.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 操作ログ画面の「ログを消去」ボタン用。 */
+    fun clearOperationLogs() {
+        viewModelScope.launch { OperationLogger.clearAll(appContext) }
+    }
+
+    private fun logOperation(action: String, detail: String = "") {
+        OperationLogger.logAsync(appContext, OperationLogSource.APP, action, detail)
+    }
 
     private val _locationTrackingMode =
         MutableStateFlow(LocationTrackingSettings.getMode(application))
@@ -265,6 +284,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val id = taskDao.insert(newTask)
             val inserted = newTask.copy(id = id)
             ReminderScheduler.schedule(appContext, inserted)
+            logOperation("タスク追加", inserted.logLabel())
             refreshTaskWidget(appContext)
             onAdded(inserted)
         }
@@ -277,10 +297,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 val updated = task.copy(isDone = false, completedAt = null)
                 ReminderScheduler.schedule(appContext, updated)
                 LocationReminderManager.register(appContext, updated)
+                logOperation("タスクを未完了に戻す", task.logLabel())
                 refreshTaskWidget(appContext)
             } else {
-                // TaskCompletion.completeが自身でウィジェットの再描画までまとめて行う。
-                TaskCompletion.complete(appContext, task)
+                // TaskCompletion.completeが自身でウィジェットの再描画・操作ログの記録までまとめて行う。
+                TaskCompletion.complete(appContext, task, OperationLogSource.APP)
             }
         }
     }
@@ -320,13 +341,23 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             taskDao.update(updated)
             ReminderScheduler.schedule(appContext, updated)
             LocationReminderManager.register(appContext, updated)
+            val changes = describeTaskChanges(
+                before = current,
+                after = updated,
+                listNames = taskListDao.getAll().first().associate { it.id to it.name },
+                patternNames = vibrationPatternDao.getAll().first().associate { it.id to it.name }
+            )
+            // 何も変更せずに保存した場合は記録しない。
+            if (changes.isNotEmpty()) {
+                logOperation("タスク編集", "${current.logLabel()} ${changes.joinToString("、")}")
+            }
             refreshTaskWidget(appContext)
         }
     }
 
     fun deleteTask(task: Task) {
         viewModelScope.launch {
-            TaskDeletion.delete(appContext, task)
+            TaskDeletion.delete(appContext, task, OperationLogSource.APP)
             refreshTaskWidget(appContext)
         }
     }
@@ -349,6 +380,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     sizeBytes = copied.sizeBytes
                 )
             )
+            logOperation("添付ファイル追加", "${task.logLabel()} ${copied.fileName}")
         }
     }
 
@@ -358,6 +390,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 AttachmentStorage.delete(appContext, attachment.storedFileName)
             }
+            logOperation("添付ファイル削除", attachment.fileName)
         }
     }
 
@@ -372,6 +405,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             )
             val id = taskDao.insert(newSubtask)
             ReminderScheduler.schedule(appContext, newSubtask.copy(id = id))
+            logOperation("サブタスク追加", "${parent.logLabel()}に「$trimmed」")
             refreshTaskWidget(appContext)
         }
     }
@@ -381,6 +415,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             taskListDao.insert(TaskList(name = trimmed))
+            logOperation("リスト追加", "「$trimmed」")
         }
     }
 
@@ -389,6 +424,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             taskListDao.update(list.copy(name = trimmed))
+            logOperation("リスト名変更", "「${list.name}」→「$trimmed」")
         }
     }
 
@@ -399,6 +435,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             if (_selectedListId.value == list.id) {
                 _selectedListId.value = null
             }
+            logOperation("リスト削除", "「${list.name}」")
         }
     }
 
@@ -409,6 +446,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             savedLocationDao.insert(
                 SavedLocation(name = trimmed, latitude = latitude, longitude = longitude, radiusMeters = radiusMeters)
             )
+            logOperation("場所追加", "「$trimmed」半径${radiusMeters}m")
         }
     }
 
@@ -417,12 +455,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             savedLocationDao.update(location.copy(name = trimmed, radiusMeters = radiusMeters))
+            logOperation(
+                "場所編集",
+                "「${location.name}」→「$trimmed」半径${location.radiusMeters}m→${radiusMeters}m"
+            )
         }
     }
 
     fun deleteSavedLocation(location: SavedLocation) {
         viewModelScope.launch {
             savedLocationDao.delete(location)
+            logOperation("場所削除", "「${location.name}」")
         }
     }
 
@@ -433,6 +476,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             vibrationPatternDao.insert(
                 VibrationPattern(name = trimmed, onMs = onMs, offMs = offMs, durationMs = durationMs)
             )
+            logOperation("バイブレーションパターン追加", "「$trimmed」${vibrationSummary(onMs, offMs, durationMs)}")
         }
     }
 
@@ -443,6 +487,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             vibrationPatternDao.update(
                 pattern.copy(name = trimmed, onMs = onMs, offMs = offMs, durationMs = durationMs)
             )
+            logOperation(
+                "バイブレーションパターン編集",
+                "「${pattern.name}」→「$trimmed」" +
+                    "${vibrationSummary(pattern.onMs, pattern.offMs, pattern.durationMs)}→" +
+                    vibrationSummary(onMs, offMs, durationMs)
+            )
         }
     }
 
@@ -451,6 +501,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             taskDao.clearVibrationPatternId(pattern.id)
             vibrationPatternDao.delete(pattern)
+            logOperation("バイブレーションパターン削除", "「${pattern.name}」")
         }
     }
 
@@ -468,6 +519,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             LocationReminderManager.switchMode(appContext, mode)
             _locationTrackingMode.value = mode
+            logOperation("設定変更", "位置情報の確認方式: ${mode.logLabel()}")
         }
     }
 
@@ -476,6 +528,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             LocationReminderManager.updateContinuousTrackingInterval(appContext, minutes)
             _locationTrackingIntervalMinutes.value = LocationTrackingSettings.getIntervalMinutes(appContext)
+            logOperation("設定変更", "連続追跡の更新頻度: ${_locationTrackingIntervalMinutes.value}分")
         }
     }
 
@@ -486,6 +539,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun setCompletedTaskCleanupEnabled(enabled: Boolean) {
         CompletedTaskCleanupSettings.setEnabled(appContext, enabled)
         _completedTaskCleanupEnabled.value = enabled
+        logOperation("設定変更", "完了タスクの自動削除: ${if (enabled) "有効" else "無効"}")
         viewModelScope.launch { CompletedTaskCleanup.run(appContext) }
     }
 
@@ -496,6 +550,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun setCompletedTaskCleanupRetentionDays(days: Int) {
         CompletedTaskCleanupSettings.setRetentionDays(appContext, days)
         _completedTaskCleanupRetentionDays.value = CompletedTaskCleanupSettings.getRetentionDays(appContext)
+        logOperation("設定変更", "完了タスクの自動削除までの日数: ${_completedTaskCleanupRetentionDays.value}日")
         viewModelScope.launch { CompletedTaskCleanup.run(appContext) }
     }
 
@@ -519,6 +574,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
         CloudBackupSettings.setFolderUri(appContext, uri)
         _cloudBackupFolderUri.value = uri
+        logOperation("設定変更", "クラウドバックアップの保存先: ${Uri.decode(uri.lastPathSegment ?: uri.toString())}")
         // 新しい権限の取得・保存が成功した後にのみ、以前選択していたフォルダの権限を解放する。
         // 解放せずに保存先を切り替え続けると、永続化されたURI権限が増え続け、Android側の上限
         // (端末により異なるが歴史的に128件)に達して以降のtakePersistableUriPermissionが
@@ -541,6 +597,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled && CloudBackupSettings.getFolderUri(appContext) == null) return
         CloudBackupSettings.setEnabled(appContext, enabled)
         _cloudBackupEnabled.value = enabled
+        logOperation("設定変更", "クラウド自動バックアップ: ${if (enabled) "有効" else "無効"}")
         if (enabled) {
             // 有効化のたびに現在の保存時刻設定で初回遅延を計算し直す(ensureScheduledのKEEPだと
             // 過去に別の時刻設定で登録済みの定期実行が残っていた場合に反映されないため)。
@@ -554,12 +611,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun setCloudBackupRetentionCount(count: Int) {
         CloudBackupSettings.setRetentionCount(appContext, count)
         _cloudBackupRetentionCount.value = CloudBackupSettings.getRetentionCount(appContext)
+        logOperation("設定変更", "クラウドバックアップの保持件数: ${_cloudBackupRetentionCount.value}件")
     }
 
     /** 期限クイック選択「当日朝/昼/夕/夜」のうち[slot]の時刻を変更する。 */
     fun setDueTimePreset(slot: DueTimeSlot, hour: Int, minute: Int) {
         DueTimePresetSettings.setTime(appContext, slot, hour, minute)
         _dueTimePresets.value = DueTimePresetSettings.getAll(appContext)
+        logOperation(
+            "設定変更",
+            "期限のクイック選択(${slot.label}): ${_dueTimePresets.value[slot]?.let(::formatMinuteOfDay).orEmpty()}"
+        )
     }
 
     /**
@@ -571,6 +633,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         CloudBackupSettings.setBackupTime(appContext, hour, minute)
         _cloudBackupHour.value = CloudBackupSettings.getBackupHour(appContext)
         _cloudBackupMinute.value = CloudBackupSettings.getBackupMinute(appContext)
+        logOperation(
+            "設定変更",
+            "クラウドバックアップの保存時刻: %02d:%02d".format(_cloudBackupHour.value, _cloudBackupMinute.value)
+        )
         if (_cloudBackupEnabled.value) {
             CloudBackupScheduler.reschedule(appContext)
         }
@@ -586,7 +652,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _cloudBackupRunning.value = true
         viewModelScope.launch {
             try {
-                val success = CloudBackupRunner.run(appContext)
+                val success = CloudBackupRunner.run(appContext, OperationLogSource.APP)
                 onResult(success)
             } finally {
                 _cloudBackupRunning.value = false
@@ -609,6 +675,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
          */
         const val DEFAULT_DUE_DELAY_MILLIS = 60 * 60 * 1000L
     }
+}
+
+private fun vibrationSummary(onMs: Long, offMs: Long, durationMs: Long): String =
+    "(オン${onMs}ms・オフ${offMs}ms・継続${durationMs}ms)"
+
+private fun LocationTrackingMode.logLabel(): String = when (this) {
+    LocationTrackingMode.GEOFENCING_API -> "Geofencing API"
+    LocationTrackingMode.CONTINUOUS_TRACKING -> "連続追跡方式"
 }
 
 /**

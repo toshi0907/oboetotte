@@ -6,6 +6,7 @@ import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
 import com.toshi0907.oboetotte.TaskCompletion
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.oplog.OperationLogSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -41,7 +42,7 @@ class CompleteReceiver : BroadcastReceiver() {
                 // 完了処理を行わない。位置情報通知([ReminderScheduler.EXTRA_DUE_AT]無し)は従来通り
                 // タスクが存在すれば完了扱いとする。
                 if (task != null && (!hasNotifiedDueAt || task.dueAt == notifiedDueAt)) {
-                    TaskCompletion.complete(context, task)
+                    TaskCompletion.complete(context, task, OperationLogSource.NOTIFICATION)
                 }
             } finally {
                 pendingResult.finish()

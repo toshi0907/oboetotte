@@ -3,6 +3,7 @@ package com.toshi0907.oboetotte.backup
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.toshi0907.oboetotte.oplog.OperationLogSource
 
 /**
  * [CloudBackupScheduler]から毎日1回起動され、[CloudBackupRunner]でクラウド自動バックアップを
@@ -16,7 +17,7 @@ class CloudBackupWorker(
 
     override suspend fun doWork(): Result {
         if (!CloudBackupSettings.isEnabled(applicationContext)) return Result.success()
-        val succeeded = CloudBackupRunner.run(applicationContext)
+        val succeeded = CloudBackupRunner.run(applicationContext, OperationLogSource.AUTO)
         return when {
             succeeded -> Result.success()
             // 保存先のプロバイダやネットワークの一時的な不調で失敗した場合に、次の定期実行

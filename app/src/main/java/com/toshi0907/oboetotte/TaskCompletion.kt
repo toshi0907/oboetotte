@@ -7,15 +7,18 @@ import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.oplog.OperationLogger
+import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 
 /**
  * タスクを完了にする処理の実体。アプリ内(TaskViewModel)と通知の「完了」アクション
  * (notification/CompleteReceiver)の両方から共通で呼び出し、繰り返しタスクの
- * 次回分生成ロジックを一箇所にまとめている。
+ * 次回分生成ロジックを一箇所にまとめている。実際に完了状態へ遷移させた場合のみ、[source]
+ * (操作の経路、[com.toshi0907.oboetotte.oplog.OperationLogSource])付きで操作ログを記録する。
  */
 object TaskCompletion {
-    suspend fun complete(context: Context, task: Task) {
+    suspend fun complete(context: Context, task: Task, source: String) {
         // アプリ内のチェックボックスや「通知のみタスク」の自動完了など、通知の「完了」ボタン
         // (notification/CompleteReceiver、既にここへ来る前に自身の通知を消去済み)以外の経路で
         // 完了させた場合、そのタスクの期限日時・位置情報の通知が表示されたまま残ってしまう
@@ -42,6 +45,7 @@ object TaskCompletion {
         val rule = task.repeatRule
         val dueAt = task.dueAt
         val daysOfWeek = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek)
+        var nextDueAt: Long? = null
         if (rule != null && dueAt != null && (rule != RepeatRule.WEEKLY_DAYS || daysOfWeek.isNotEmpty())) {
             // seriesIdを引き継ぐことで、次回分のタスクも同じattachmentGroupId()を持ち、
             // 添付ファイルが繰り返しシリーズ全体で共有され続ける(完了時に消えない)。
@@ -56,7 +60,14 @@ object TaskCompletion {
             val inserted = nextTask.copy(id = newId)
             ReminderScheduler.schedule(context, inserted)
             LocationReminderManager.register(context, inserted)
+            nextDueAt = inserted.dueAt
         }
+        OperationLogger.log(
+            context,
+            source,
+            "タスク完了",
+            task.logLabel() + nextDueAt?.let { "(次回分: ${formatDueAt(it)})" }.orEmpty()
+        )
         refreshTaskWidget(context)
     }
 }

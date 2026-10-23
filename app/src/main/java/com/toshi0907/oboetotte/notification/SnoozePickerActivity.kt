@@ -10,6 +10,9 @@ import androidx.compose.material3.TextButton
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.oplog.OperationLogSource
+import com.toshi0907.oboetotte.oplog.OperationLogger
+import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -38,7 +41,7 @@ class SnoozePickerActivity : ComponentActivity() {
                     text = {
                         Column {
                             ReminderScheduler.SNOOZE_OPTIONS.forEach { option ->
-                                TextButton(onClick = { snoozeAndFinish(taskId, option.minutes) }) {
+                                TextButton(onClick = { snoozeAndFinish(taskId, option.minutes, option.label) }) {
                                     Text(option.label)
                                 }
                             }
@@ -55,7 +58,7 @@ class SnoozePickerActivity : ComponentActivity() {
         }
     }
 
-    private fun snoozeAndFinish(taskId: Long, minutes: Long) {
+    private fun snoozeAndFinish(taskId: Long, minutes: Long, label: String) {
         lifecycleScope.launch {
             val task = withContext(Dispatchers.IO) {
                 AppDatabase.getInstance(applicationContext).taskDao().getById(taskId)
@@ -66,6 +69,12 @@ class SnoozePickerActivity : ComponentActivity() {
                 .cancel(ReminderScheduler.NOTIFICATION_TAG_DUE, taskId.toInt())
             if (task != null && !task.isDone) {
                 ReminderScheduler.scheduleSnooze(applicationContext, taskId, minutes)
+                OperationLogger.logAsync(
+                    applicationContext,
+                    OperationLogSource.NOTIFICATION,
+                    "スヌーズ",
+                    "${task.logLabel()} $label"
+                )
             }
             finish()
         }

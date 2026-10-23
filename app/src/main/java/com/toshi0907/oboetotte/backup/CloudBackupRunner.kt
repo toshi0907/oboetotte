@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
+import com.toshi0907.oboetotte.oplog.OperationLogger
 import java.io.File
 import java.io.IOException
 import java.time.ZonedDateTime
@@ -21,7 +22,7 @@ import kotlinx.coroutines.withContext
  * [CloudBackupSettings.getRetentionCount]件-1件になるまで保存先フォルダの古いバックアップ
  * ファイルを削除してから、選択されたSAFフォルダへ日時付きファイル名でコピーする。
  * 保存先フォルダへの書き込みは、プロバイダの一時的な失敗に備えて最大[MAX_WRITE_ATTEMPTS]回まで
- * 待機を挟みつつ再試行する。
+ * 待機を挟みつつ再試行する。実行結果(成功/失敗)は[run]の`source`(手動/自動)付きで操作ログに記録する。
  */
 object CloudBackupRunner {
     private const val TAG = "CloudBackup"
@@ -53,7 +54,18 @@ object CloudBackupRunner {
     /** 失敗した段階を表す説明([message])付きで投げ、設定画面に表示する失敗理由とする。 */
     private class BackupStepException(message: String, cause: Throwable? = null) : IOException(message, cause)
 
-    suspend fun run(context: Context): Boolean = withContext(Dispatchers.IO) {
+    suspend fun run(context: Context, source: String): Boolean {
+        val success = runInternal(context)
+        val detail = if (success) {
+            "成功"
+        } else {
+            "失敗" + CloudBackupSettings.getLastBackupError(context)?.let { ": $it" }.orEmpty()
+        }
+        OperationLogger.log(context, source, "クラウドバックアップ", detail)
+        return success
+    }
+
+    private suspend fun runInternal(context: Context): Boolean = withContext(Dispatchers.IO) {
         val folderUri = CloudBackupSettings.getFolderUri(context)
         if (folderUri == null) {
             Log.w(TAG, "保存先フォルダが未設定のためクラウドバックアップをスキップします")

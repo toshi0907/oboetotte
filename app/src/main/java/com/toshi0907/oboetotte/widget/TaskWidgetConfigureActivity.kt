@@ -24,6 +24,8 @@ import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.TaskDisplayFilter
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.oplog.OperationLogSource
+import com.toshi0907.oboetotte.oplog.OperationLogger
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -140,6 +142,13 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
         }
     }
 
+    private suspend fun listFilterLabel(listFilter: String): String = when (listFilter) {
+        TaskWidget.ALL_LISTS_VALUE -> "すべて"
+        TaskWidget.UNASSIGNED_LIST_VALUE -> "リスト未登録"
+        else -> AppDatabase.getInstance(this).taskListDao().getAll().first()
+            .find { it.id.toString() == listFilter }?.name ?: listFilter
+    }
+
     private fun confirmAndFinish(
         background: WidgetBackground,
         listFilter: String,
@@ -153,12 +162,24 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
                 prefs[TaskWidget.DISPLAY_FILTER_KEY] = displayFilters.map { it.name }.toSet()
             }
             refreshTaskWidget(this@TaskWidgetConfigureActivity)
+            OperationLogger.logAsync(
+                this@TaskWidgetConfigureActivity,
+                OperationLogSource.WIDGET,
+                "ウィジェット設定",
+                "ウィジェット追加(背景: ${background.label}、リスト: ${listFilterLabel(listFilter)}、表示フィルタ: " +
+                    displayFilters.joinToString("・") { it.logLabel() }.ifEmpty { "なし" } + ")"
+            )
 
             val resultValue = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
             setResult(RESULT_OK, resultValue)
             finish()
         }
     }
+}
+
+private fun TaskDisplayFilter.logLabel(): String = when (this) {
+    TaskDisplayFilter.HAS_URL -> "リンクを含む"
+    TaskDisplayFilter.DUE_TODAY_OR_OVERDUE -> "今日期限・期限切れ"
 }
 
 private fun Set<TaskDisplayFilter>.toggle(filter: TaskDisplayFilter): Set<TaskDisplayFilter> =

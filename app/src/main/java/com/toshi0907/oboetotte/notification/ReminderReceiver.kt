@@ -18,6 +18,7 @@ import com.toshi0907.oboetotte.TaskCompletion
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.NotificationLog
 import com.toshi0907.oboetotte.data.VibrationPattern
+import com.toshi0907.oboetotte.oplog.OperationLogSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -70,7 +71,7 @@ class ReminderReceiver : BroadcastReceiver() {
                             // 通知が実際に表示できた時点でのみ完了扱いにする(権限が無く表示できなかった
                             // 場合は完了させず、通知されないままタスクが消えてしまうことを避ける)。
                             // 繰り返しタスクの次回分生成・アラーム再スケジュールもTaskCompletion.completeに含まれる。
-                            TaskCompletion.complete(context, task)
+                            TaskCompletion.complete(context, task, OperationLogSource.AUTO)
                         } else {
                             // オートスヌーズが設定されたタスクは、未完了のまま指定間隔が経過するたびに
                             // 再通知を繰り返す(上限なし)。手動スヌーズ・アプリ側の編集等でこのアラームの

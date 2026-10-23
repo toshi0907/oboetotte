@@ -127,6 +127,8 @@ import com.toshi0907.oboetotte.notification.LocationTrackingMode
 import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.notification.VibrationPatternPlayer
+import com.toshi0907.oboetotte.oplog.OperationLogSource
+import com.toshi0907.oboetotte.oplog.OperationLogger
 import com.toshi0907.oboetotte.ui.theme.Green40
 import com.toshi0907.oboetotte.ui.theme.Green80
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
@@ -145,8 +147,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** [MainActivity]がナビゲーションライブラリ無しで切り替える2画面。 */
-private enum class MainScreen { Tasks, Settings }
+/** [MainActivity]がナビゲーションライブラリ無しで切り替える画面。 */
+private enum class MainScreen { Tasks, Settings, OperationLog }
 
 class MainActivity : ComponentActivity() {
     private val taskViewModel: TaskViewModel by viewModels()
@@ -162,8 +164,10 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch {
                 try {
                     BackupManager.export(this@MainActivity, uri)
+                    OperationLogger.log(this@MainActivity, OperationLogSource.APP, "エクスポート", "成功")
                     Toast.makeText(this@MainActivity, "エクスポートしました", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
+                    OperationLogger.log(this@MainActivity, OperationLogSource.APP, "エクスポート", "失敗")
                     Toast.makeText(this@MainActivity, "エクスポートに失敗しました", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -177,8 +181,10 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch {
                 try {
                     BackupManager.import(this@MainActivity, uri)
+                    OperationLogger.log(this@MainActivity, OperationLogSource.APP, "インポート", "成功")
                     Toast.makeText(this@MainActivity, "インポートしました", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
+                    OperationLogger.log(this@MainActivity, OperationLogSource.APP, "インポート", "失敗")
                     Toast.makeText(this@MainActivity, "インポートに失敗しました。ファイル形式を確認してください", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -224,6 +230,7 @@ class MainActivity : ComponentActivity() {
                     val attachments by taskViewModel.attachments.collectAsState()
                     val notificationLogs by taskViewModel.notificationLogs.collectAsState()
                     val locationUpdateLogs by taskViewModel.locationUpdateLogs.collectAsState()
+                    val operationLogs by taskViewModel.operationLogs.collectAsState()
                     val locationTrackingMode by taskViewModel.locationTrackingMode.collectAsState()
                     val completedTaskCleanupEnabled by taskViewModel.completedTaskCleanupEnabled.collectAsState()
                     val completedTaskCleanupRetentionDays by
@@ -277,9 +284,11 @@ class MainActivity : ComponentActivity() {
                                     AppUpdateInstaller.download(context, downloadUrl)
                                 }
                                 startActivity(AppUpdateInstaller.installIntent(context, file))
+                                OperationLogger.log(context, OperationLogSource.APP, "アップデートのインストール開始")
                             } catch (e: Exception) {
                                 // ダウンロード中の通信エラーや、パッケージインストーラーが
                                 // 見つからない端末など、失敗してもアプリ全体をクラッシュさせない。
+                                OperationLogger.log(context, OperationLogSource.APP, "アップデートのダウンロード", "失敗")
                                 Toast.makeText(context, "更新のダウンロードに失敗しました", Toast.LENGTH_SHORT).show()
                             } finally {
                                 isDownloadingUpdate = false
@@ -306,6 +315,11 @@ class MainActivity : ComponentActivity() {
                         // を起動する。既に動作中なら何もしない。
                         CompletedTaskCleanup.run(context)
                         CompletedTaskCleanupScheduler.ensureScheduled(context)
+                    }
+                    LaunchedEffect(Unit) {
+                        // しばらく操作が無く記録時の自動削除が走っていない場合に備え、起動のたびに
+                        // 保存期間を過ぎた操作ログを削除する。
+                        OperationLogger.purgeExpired(context)
                     }
                     LaunchedEffect(Unit) {
                         // クラウド自動バックアップが有効なら、定期実行(CloudBackupWorker)が
@@ -397,6 +411,12 @@ class MainActivity : ComponentActivity() {
                             onSetLocationTrackingIntervalMinutes = taskViewModel::setLocationTrackingIntervalMinutes,
                             onSendTestNotification = {
                                 val scheduled = ReminderScheduler.scheduleTestNotification(context)
+                                OperationLogger.logAsync(
+                                    context,
+                                    OperationLogSource.APP,
+                                    "テスト通知",
+                                    if (scheduled) "送信" else "権限が無いため送信できず"
+                                )
                                 val message = if (scheduled) {
                                     "${ReminderScheduler.TEST_DELAY_SECONDS}秒後にテスト通知が届きます"
                                 } else {
@@ -445,9 +465,19 @@ class MainActivity : ComponentActivity() {
                             updateCheckResult = updateCheckResult,
                             updateLastCheckedAt = updateLastCheckedAt,
                             isDownloadingUpdate = isDownloadingUpdate,
-                            onCheckForUpdate = ::checkForUpdate,
+                            onCheckForUpdate = {
+                                OperationLogger.logAsync(context, OperationLogSource.APP, "更新を確認")
+                                checkForUpdate()
+                            },
                             onDownloadUpdate = ::downloadAndInstallUpdate,
+                            onOpenOperationLogs = { currentScreen = MainScreen.OperationLog },
                             onBack = { currentScreen = MainScreen.Tasks },
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                        MainScreen.OperationLog -> OperationLogScreen(
+                            logs = operationLogs,
+                            onClear = taskViewModel::clearOperationLogs,
+                            onBack = { currentScreen = MainScreen.Settings },
                             modifier = Modifier.padding(innerPadding)
                         )
                     }
@@ -515,7 +545,7 @@ private val DUE_QUICK_OPTIONS: List<Pair<String, (Long) -> Long>> = listOf(
 private fun radiusLabel(meters: Int): String =
     if (meters >= 1000) "${meters / 1000}km" else "${meters}m"
 
-private fun locationLabel(task: Task): String? {
+internal fun locationLabel(task: Task): String? {
     val name = task.locationName ?: return null
     val radius = task.radiusMeters ?: return null
     val timing = when {
@@ -527,7 +557,7 @@ private fun locationLabel(task: Task): String? {
     return "📍$name ${radiusLabel(radius)}・$timing"
 }
 
-private fun repeatRuleLabel(task: Task): String? {
+internal fun repeatRuleLabel(task: Task): String? {
     val rule = task.repeatRule ?: return null
     return when (rule) {
         RepeatRule.DAILY -> "毎日"
@@ -1398,6 +1428,7 @@ fun SettingsScreen(
     isDownloadingUpdate: Boolean = false,
     onCheckForUpdate: () -> Unit = {},
     onDownloadUpdate: (String) -> Unit = {},
+    onOpenOperationLogs: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1782,6 +1813,20 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            Text(
+                text = "操作ログ",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                text = "タスクの追加・削除・完了や設定変更などの操作の履歴です。" +
+                    "${OperationLogger.RETENTION_MONTHS}ヶ月より古いログは自動で削除されます。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            TextButton(onClick = onOpenOperationLogs) {
+                Text("操作ログ")
             }
 
             Text(
