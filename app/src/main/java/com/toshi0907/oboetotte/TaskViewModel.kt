@@ -293,11 +293,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleDone(task: Task) {
         viewModelScope.launch {
             if (task.isDone) {
-                taskDao.setDone(task.id, false, null)
+                val updatedRows = taskDao.setDone(task.id, false, null)
                 val updated = task.copy(isDone = false, completedAt = null)
                 ReminderScheduler.schedule(appContext, updated)
                 LocationReminderManager.register(appContext, updated)
-                logOperation("タスクを未完了に戻す", task.logLabel())
+                // 既に未完了に戻っていた・削除済み等で実際には状態が変わらなかった場合は記録しない。
+                if (updatedRows > 0) logOperation("タスクを未完了に戻す", task.logLabel())
                 refreshTaskWidget(appContext)
             } else {
                 // TaskCompletion.completeが自身でウィジェットの再描画・操作ログの記録までまとめて行う。
@@ -344,8 +345,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val changes = describeTaskChanges(
                 before = current,
                 after = updated,
-                listNames = taskListDao.getAll().first().associate { it.id to it.name },
-                patternNames = vibrationPatternDao.getAll().first().associate { it.id to it.name }
+                // 名前の引き当てが必要な場合(リスト・バイブレーションパターンを変更した場合)のみ読み込む。
+                listNames = if (current.listId != updated.listId) {
+                    taskListDao.getAll().first().associate { it.id to it.name }
+                } else {
+                    emptyMap()
+                },
+                patternNames = if (current.vibrationPatternId != updated.vibrationPatternId) {
+                    vibrationPatternDao.getAll().first().associate { it.id to it.name }
+                } else {
+                    emptyMap()
+                }
             )
             // 何も変更せずに保存した場合は記録しない。
             if (changes.isNotEmpty()) {
@@ -517,9 +527,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     /** 位置情報リマインダーの確認方式を切り替える(Geofencing API/連続追跡方式)。 */
     fun setLocationTrackingMode(mode: LocationTrackingMode) {
         viewModelScope.launch {
+            val changed = _locationTrackingMode.value != mode
             LocationReminderManager.switchMode(appContext, mode)
             _locationTrackingMode.value = mode
-            logOperation("設定変更", "位置情報の確認方式: ${mode.logLabel()}")
+            if (changed) logOperation("設定変更", "位置情報の確認方式: ${mode.logLabel()}")
         }
     }
 

@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.toshi0907.oboetotte.data.OperationLog
+import com.toshi0907.oboetotte.oplog.OperationLogger
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -61,7 +62,7 @@ fun OperationLogScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "直近1ヶ月分の操作を新しい順に表示します(${logs.size}件)。",
+                    text = "直近${OperationLogger.RETENTION_MONTHS}ヶ月分の操作を新しい順に表示します(${logs.size}件)。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)

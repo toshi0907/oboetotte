@@ -888,7 +888,7 @@ fun TaskScreen(
 }
 
 /** 表示フィルタのメイン画面上での表示名。 */
-private val TaskDisplayFilter.label: String
+internal val TaskDisplayFilter.label: String
     get() = when (this) {
         TaskDisplayFilter.HAS_URL -> "リンクを含む"
         TaskDisplayFilter.DUE_TODAY_OR_OVERDUE -> "今日期限・期限切れ"

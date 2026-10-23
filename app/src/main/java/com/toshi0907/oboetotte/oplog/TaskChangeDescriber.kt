@@ -32,7 +32,16 @@ fun describeTaskChanges(
     add("リスト", before.listId?.let { listNames[it] ?: "ID $it" }, after.listId?.let { listNames[it] ?: "ID $it" })
     add("期限", before.dueAt?.let(::formatDueAt), after.dueAt?.let(::formatDueAt))
     add("繰り返し", repeatRuleLabel(before), repeatRuleLabel(after))
-    add("場所", locationLabel(before), locationLabel(after))
+    val beforeLocation = locationLabel(before)
+    val afterLocation = locationLabel(after)
+    if (beforeLocation == afterLocation &&
+        (before.latitude != after.latitude || before.longitude != after.longitude)
+    ) {
+        // 場所名・半径・タイミングが同じまま座標だけ変わった場合も変更として記録する。
+        changes.add("場所: ${afterLocation ?: NONE_LABEL}(座標を変更)")
+    } else {
+        add("場所", beforeLocation, afterLocation)
+    }
     addText("URL", before.url, after.url)
     addText("メモ", before.memo, after.memo)
     add("オートスヌーズ", autoSnoozeText(before), autoSnoozeText(after))

@@ -22,6 +22,7 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.TaskDisplayFilter
+import com.toshi0907.oboetotte.label
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.oplog.OperationLogSource
@@ -167,7 +168,7 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
                 OperationLogSource.WIDGET,
                 "ウィジェット設定",
                 "ウィジェット追加(背景: ${background.label}、リスト: ${listFilterLabel(listFilter)}、表示フィルタ: " +
-                    displayFilters.joinToString("・") { it.logLabel() }.ifEmpty { "なし" } + ")"
+                    displayFilters.joinToString("・") { it.label }.ifEmpty { "なし" } + ")"
             )
 
             val resultValue = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
@@ -175,11 +176,6 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
             finish()
         }
     }
-}
-
-private fun TaskDisplayFilter.logLabel(): String = when (this) {
-    TaskDisplayFilter.HAS_URL -> "リンクを含む"
-    TaskDisplayFilter.DUE_TODAY_OR_OVERDUE -> "今日期限・期限切れ"
 }
 
 private fun Set<TaskDisplayFilter>.toggle(filter: TaskDisplayFilter): Set<TaskDisplayFilter> =
