@@ -24,7 +24,7 @@ object TaskDeletion {
         val taskDao = db.taskDao()
         val taskAttachmentDao = db.taskAttachmentDao()
         val groupId = task.attachmentGroupId()
-        taskDao.delete(task)
+        val deletedRows = taskDao.delete(task)
         ReminderScheduler.cancel(context, task.id)
         LocationReminderManager.unregister(context, task.id)
         // 添付ファイルは繰り返しシリーズ全体で共有しているため、同じシリーズの他のインスタンスが
@@ -36,6 +36,7 @@ object TaskDeletion {
                 attachmentsToDelete.forEach { AttachmentStorage.delete(context, it.storedFileName) }
             }
         }
-        OperationLogger.log(context, source, action, task.logLabel())
+        // 二重に削除操作が行われた場合等、実際には行を削除していなければ記録しない。
+        if (deletedRows > 0) OperationLogger.log(context, source, action, task.logLabel())
     }
 }

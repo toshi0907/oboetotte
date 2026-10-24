@@ -279,16 +279,23 @@ class MainActivity : ComponentActivity() {
                         if (isDownloadingUpdate) return
                         isDownloadingUpdate = true
                         coroutineScope.launch {
+                            var downloaded = false
                             try {
                                 val file = withContext(Dispatchers.IO) {
                                     AppUpdateInstaller.download(context, downloadUrl)
                                 }
+                                downloaded = true
                                 startActivity(AppUpdateInstaller.installIntent(context, file))
                                 OperationLogger.log(context, OperationLogSource.APP, "アップデートのインストール開始")
                             } catch (e: Exception) {
                                 // ダウンロード中の通信エラーや、パッケージインストーラーが
                                 // 見つからない端末など、失敗してもアプリ全体をクラッシュさせない。
-                                OperationLogger.log(context, OperationLogSource.APP, "アップデートのダウンロード", "失敗")
+                                OperationLogger.log(
+                                    context,
+                                    OperationLogSource.APP,
+                                    "アップデート",
+                                    if (downloaded) "インストーラーの起動に失敗" else "ダウンロードに失敗"
+                                )
                                 Toast.makeText(context, "更新のダウンロードに失敗しました", Toast.LENGTH_SHORT).show()
                             } finally {
                                 isDownloadingUpdate = false
@@ -415,7 +422,7 @@ class MainActivity : ComponentActivity() {
                                     context,
                                     OperationLogSource.APP,
                                     "テスト通知",
-                                    if (scheduled) "送信" else "権限が無いため送信できず"
+                                    if (scheduled) "送信予約" else "権限が無いため送信できず"
                                 )
                                 val message = if (scheduled) {
                                     "${ReminderScheduler.TEST_DELAY_SECONDS}秒後にテスト通知が届きます"

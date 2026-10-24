@@ -127,7 +127,7 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
                     confirmButton = {
                         TextButton(
                             onClick = {
-                                confirmAndFinish(selectedBackground, selectedListFilter, selectedDisplayFilters)
+                                confirmAndFinish(selectedBackground, selectedListFilter, selectedDisplayFilters, lists)
                             }
                         ) {
                             Text("追加")
@@ -143,17 +143,17 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun listFilterLabel(listFilter: String): String = when (listFilter) {
+    private fun listFilterLabel(listFilter: String, lists: List<TaskList>): String = when (listFilter) {
         TaskWidget.ALL_LISTS_VALUE -> "すべて"
         TaskWidget.UNASSIGNED_LIST_VALUE -> "リスト未登録"
-        else -> AppDatabase.getInstance(this).taskListDao().getAll().first()
-            .find { it.id.toString() == listFilter }?.name ?: listFilter
+        else -> lists.find { it.id.toString() == listFilter }?.name ?: listFilter
     }
 
     private fun confirmAndFinish(
         background: WidgetBackground,
         listFilter: String,
-        displayFilters: Set<TaskDisplayFilter>
+        displayFilters: Set<TaskDisplayFilter>,
+        lists: List<TaskList>
     ) {
         lifecycleScope.launch {
             val glanceId = GlanceAppWidgetManager(this@TaskWidgetConfigureActivity).getGlanceIdBy(appWidgetId)
@@ -167,7 +167,7 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
                 this@TaskWidgetConfigureActivity,
                 OperationLogSource.WIDGET,
                 "ウィジェット設定",
-                "ウィジェット追加(背景: ${background.label}、リスト: ${listFilterLabel(listFilter)}、表示フィルタ: " +
+                "ウィジェット追加(背景: ${background.label}、リスト: ${listFilterLabel(listFilter, lists)}、表示フィルタ: " +
                     displayFilters.joinToString("・") { it.label }.ifEmpty { "なし" } + ")"
             )
 

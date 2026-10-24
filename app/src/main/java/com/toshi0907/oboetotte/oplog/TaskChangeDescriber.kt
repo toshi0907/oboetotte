@@ -26,10 +26,30 @@ fun describeTaskChanges(
     }
     // 長い文字列は切り詰めて表示するため、切り詰め後の表示が同じでも元の値が違えば変更として記録する。
     fun addText(label: String, old: String?, new: String?) {
-        if (old != new) changes.add("$label: ${old?.ellipsize() ?: NONE_LABEL} → ${new?.ellipsize() ?: NONE_LABEL}")
+        if (old == new) return
+        val oldText = old?.ellipsize()
+        val newText = new?.ellipsize()
+        if (oldText == newText) {
+            // 先頭が同じで切り詰めた部分だけが違う場合、表示上は同じになってしまうため変更があった旨を明示する。
+            changes.add("$label: 変更あり(${newText ?: NONE_LABEL})")
+        } else {
+            changes.add("$label: ${oldText ?: NONE_LABEL} → ${newText ?: NONE_LABEL}")
+        }
+    }
+    // 同名のリスト・パターンが複数ありうるため、名前ではなくIDで変更の有無を判定する
+    // (名前が同じ場合はIDを併記して区別する)。
+    fun addRef(label: String, oldId: Long?, newId: Long?, names: Map<Long, String>) {
+        if (oldId == newId) return
+        val oldName = oldId?.let { names[it] ?: "ID $it" }
+        val newName = newId?.let { names[it] ?: "ID $it" }
+        if (oldName == newName) {
+            changes.add("$label: $oldName(ID $oldId) → $newName(ID $newId)")
+        } else {
+            changes.add("$label: ${oldName ?: NONE_LABEL} → ${newName ?: NONE_LABEL}")
+        }
     }
     addText("タイトル", before.title, after.title)
-    add("リスト", before.listId?.let { listNames[it] ?: "ID $it" }, after.listId?.let { listNames[it] ?: "ID $it" })
+    addRef("リスト", before.listId, after.listId, listNames)
     add("期限", before.dueAt?.let(::formatDueAt), after.dueAt?.let(::formatDueAt))
     add("繰り返し", repeatRuleLabel(before), repeatRuleLabel(after))
     val beforeLocation = locationLabel(before)
@@ -46,11 +66,7 @@ fun describeTaskChanges(
     addText("メモ", before.memo, after.memo)
     add("オートスヌーズ", autoSnoozeText(before), autoSnoozeText(after))
     add("通知のみ", onOffText(before.notifyOnlyMode), onOffText(after.notifyOnlyMode))
-    add(
-        "バイブレーション",
-        before.vibrationPatternId?.let { patternNames[it] ?: "ID $it" },
-        after.vibrationPatternId?.let { patternNames[it] ?: "ID $it" }
-    )
+    addRef("バイブレーション", before.vibrationPatternId, after.vibrationPatternId, patternNames)
     return changes
 }
 
