@@ -22,8 +22,11 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.TaskDisplayFilter
+import com.toshi0907.oboetotte.label
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.TaskList
+import com.toshi0907.oboetotte.oplog.OperationLogSource
+import com.toshi0907.oboetotte.oplog.OperationLogger
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -124,7 +127,7 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
                     confirmButton = {
                         TextButton(
                             onClick = {
-                                confirmAndFinish(selectedBackground, selectedListFilter, selectedDisplayFilters)
+                                confirmAndFinish(selectedBackground, selectedListFilter, selectedDisplayFilters, lists)
                             }
                         ) {
                             Text("追加")
@@ -140,10 +143,17 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
         }
     }
 
+    private fun listFilterLabel(listFilter: String, lists: List<TaskList>): String = when (listFilter) {
+        TaskWidget.ALL_LISTS_VALUE -> "すべて"
+        TaskWidget.UNASSIGNED_LIST_VALUE -> "リスト未登録"
+        else -> lists.find { it.id.toString() == listFilter }?.name ?: listFilter
+    }
+
     private fun confirmAndFinish(
         background: WidgetBackground,
         listFilter: String,
-        displayFilters: Set<TaskDisplayFilter>
+        displayFilters: Set<TaskDisplayFilter>,
+        lists: List<TaskList>
     ) {
         lifecycleScope.launch {
             val glanceId = GlanceAppWidgetManager(this@TaskWidgetConfigureActivity).getGlanceIdBy(appWidgetId)
@@ -153,6 +163,13 @@ class TaskWidgetConfigureActivity : ComponentActivity() {
                 prefs[TaskWidget.DISPLAY_FILTER_KEY] = displayFilters.map { it.name }.toSet()
             }
             refreshTaskWidget(this@TaskWidgetConfigureActivity)
+            OperationLogger.logAsync(
+                this@TaskWidgetConfigureActivity,
+                OperationLogSource.WIDGET,
+                "ウィジェット設定",
+                "ウィジェット追加(背景: ${background.label}、リスト: ${listFilterLabel(listFilter, lists)}、表示フィルタ: " +
+                    displayFilters.joinToString("・") { it.label }.ifEmpty { "なし" } + ")"
+            )
 
             val resultValue = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
             setResult(RESULT_OK, resultValue)

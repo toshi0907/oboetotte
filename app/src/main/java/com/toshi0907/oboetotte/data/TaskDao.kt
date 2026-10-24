@@ -66,8 +66,9 @@ interface TaskDao {
     @Query("SELECT COUNT(*) FROM tasks WHERE seriesId = :groupId OR (seriesId IS NULL AND id = :groupId)")
     suspend fun countByAttachmentGroup(groupId: Long): Int
 
+    /** 削除した行数を返す(既に削除済みの場合は0)。 */
     @Delete
-    suspend fun delete(task: Task)
+    suspend fun delete(task: Task): Int
 
     @Insert
     suspend fun insertAll(tasks: List<Task>)

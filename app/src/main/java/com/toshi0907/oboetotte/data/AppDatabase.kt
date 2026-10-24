@@ -16,9 +16,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotificationLog::class,
         LocationUpdateLog::class,
         GeofenceState::class,
-        VibrationPattern::class
+        VibrationPattern::class,
+        OperationLog::class
     ],
-    version = 23,
+    version = 24,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,6 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun locationUpdateLogDao(): LocationUpdateLogDao
     abstract fun geofenceStateDao(): GeofenceStateDao
     abstract fun vibrationPatternDao(): VibrationPatternDao
+    abstract fun operationLogDao(): OperationLogDao
 
     companion object {
         @Volatile
@@ -240,6 +242,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `operation_logs` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`timestamp` INTEGER NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`action` TEXT NOT NULL, " +
+                        "`detail` TEXT NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_operation_logs_timestamp` ON `operation_logs` (`timestamp`)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -264,7 +282,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_19_20,
                         MIGRATION_20_21,
                         MIGRATION_21_22,
-                        MIGRATION_22_23
+                        MIGRATION_22_23,
+                        MIGRATION_23_24
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }

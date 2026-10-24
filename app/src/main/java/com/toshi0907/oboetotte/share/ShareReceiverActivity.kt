@@ -15,6 +15,8 @@ import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.normalizeUrl
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.oplog.OperationLogSource
+import com.toshi0907.oboetotte.oplog.OperationLogger
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -86,6 +88,7 @@ class ShareReceiverActivity : ComponentActivity() {
             if (attachedCount > 0) resultParts.add("添付${attachedCount}件")
             if (isSharedUrl) resultParts.add("URL") else if (sharedText != null) resultParts.add("メモ")
             val suffix = if (resultParts.isEmpty()) "" else "(${resultParts.joinToString("、")})"
+            OperationLogger.logAsync(applicationContext, OperationLogSource.SHARE, "タスク追加", "「$title」$suffix")
             Toast.makeText(
                 applicationContext,
                 "「$title」を追加しました$suffix",

@@ -5,6 +5,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.toshi0907.oboetotte.TaskDeletion
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.oplog.OperationLogSource
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -56,7 +57,7 @@ object CompletedTaskCleanup {
                 // 一緒に削除される未完了のサブタスクの通知が表示されたまま残らないよう消去しておく。
                 notificationManager.cancel(ReminderScheduler.NOTIFICATION_TAG_DUE, task.id.toInt())
                 notificationManager.cancel(ReminderScheduler.NOTIFICATION_TAG_LOCATION, task.id.toInt())
-                TaskDeletion.delete(context, task)
+                TaskDeletion.delete(context, task, OperationLogSource.AUTO, "完了タスクの自動削除")
             }
         }
         if (deletedIds.isNotEmpty()) refreshTaskWidget(context)

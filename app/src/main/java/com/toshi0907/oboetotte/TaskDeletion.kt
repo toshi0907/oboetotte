@@ -7,6 +7,8 @@ import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.ReminderScheduler
+import com.toshi0907.oboetotte.oplog.OperationLogger
+import com.toshi0907.oboetotte.oplog.logLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -14,14 +16,15 @@ import kotlinx.coroutines.withContext
  * タスク1件を削除する処理の実体。アプリ内の手動削除(TaskViewModel.deleteTask)と完了済みタスクの
  * 自動削除([com.toshi0907.oboetotte.cleanup.CompletedTaskCleanup])の両方から共通で呼び出す。
  * ウィジェットの再描画は呼び出し元で行う(自動削除では複数件まとめて削除した後に1回だけ行うため)。
+ * 操作ログは[source](操作の経路)・[action](操作の種別)で記録する。
  */
 object TaskDeletion {
-    suspend fun delete(context: Context, task: Task) {
+    suspend fun delete(context: Context, task: Task, source: String, action: String = "タスク削除") {
         val db = AppDatabase.getInstance(context)
         val taskDao = db.taskDao()
         val taskAttachmentDao = db.taskAttachmentDao()
         val groupId = task.attachmentGroupId()
-        taskDao.delete(task)
+        val deletedRows = taskDao.delete(task)
         ReminderScheduler.cancel(context, task.id)
         LocationReminderManager.unregister(context, task.id)
         // 添付ファイルは繰り返しシリーズ全体で共有しているため、同じシリーズの他のインスタンスが
@@ -33,5 +36,7 @@ object TaskDeletion {
                 attachmentsToDelete.forEach { AttachmentStorage.delete(context, it.storedFileName) }
             }
         }
+        // 二重に削除操作が行われた場合等、実際には行を削除していなければ記録しない。
+        if (deletedRows > 0) OperationLogger.log(context, source, action, task.logLabel())
     }
 }
