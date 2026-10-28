@@ -575,9 +575,23 @@ internal fun repeatRuleLabel(task: Task): String? {
             "毎週($labels)"
         }
         RepeatRule.MONTHLY -> "毎月"
+        RepeatRule.AFTER_COMPLETION -> "完了から${task.repeatIntervalDays ?: "?"}日後"
         else -> rule
     }
 }
+
+private val REPEAT_RULE_OPTIONS = listOf(
+    null to "なし",
+    RepeatRule.DAILY to "毎日",
+    RepeatRule.WEEKLY to "毎週",
+    RepeatRule.WEEKLY_DAYS to "毎週(曜日)",
+    RepeatRule.MONTHLY to "毎月",
+    RepeatRule.AFTER_COMPLETION to "完了後"
+)
+
+/** 「完了後に繰り返す」の日数入力を解釈する。範囲外・未入力ならnull。 */
+private fun parseRepeatIntervalDays(input: String): Int? =
+    input.toIntOrNull()?.takeIf { it in RepeatRule.INTERVAL_DAYS_RANGE }
 
 private fun autoSnoozeLabel(task: Task): String? {
     val minutes = task.autoSnoozeMinutes ?: return null
@@ -2795,6 +2809,9 @@ fun EditTaskDialog(
     var selectedDays by remember(task.id) {
         mutableStateOf(RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek))
     }
+    var repeatIntervalInput by remember(task.id) {
+        mutableStateOf(task.repeatIntervalDays?.toString() ?: "")
+    }
     var autoSnoozeMinutes by remember(task.id) { mutableStateOf(task.autoSnoozeMinutes) }
     var notifyOnlyMode by remember(task.id) { mutableStateOf(task.notifyOnlyMode) }
     var vibrationPatternId by remember(task.id) { mutableStateOf(task.vibrationPatternId) }
@@ -2939,18 +2956,46 @@ fun EditTaskDialog(
                 }
 
                 Text(text = "繰り返し", style = MaterialTheme.typography.titleSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(
-                        null to "なし",
-                        RepeatRule.DAILY to "毎日",
-                        RepeatRule.WEEKLY to "毎週",
-                        RepeatRule.WEEKLY_DAYS to "毎週(曜日)",
-                        RepeatRule.MONTHLY to "毎月"
-                    ).forEach { (value, label) ->
+                // 選択肢が画面幅に収まらないため横スクロールにする。
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(REPEAT_RULE_OPTIONS) { (value, label) ->
                         FilterChip(
                             selected = repeatRule == value,
                             onClick = { repeatRule = value },
                             label = { Text(label) }
+                        )
+                    }
+                }
+                if (repeatRule == RepeatRule.AFTER_COMPLETION) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("完了から")
+                        OutlinedTextField(
+                            value = repeatIntervalInput,
+                            onValueChange = { repeatIntervalInput = it.filter { c -> c.isDigit() } },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier
+                                .width(96.dp)
+                                .padding(horizontal = 8.dp)
+                        )
+                        Text("日後")
+                    }
+                    if (parseRepeatIntervalDays(repeatIntervalInput) == null) {
+                        Text(
+                            text = "${RepeatRule.INTERVAL_DAYS_RANGE.first}〜${RepeatRule.INTERVAL_DAYS_RANGE.last}" +
+                                "の日数を入力してください",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    if (dueAt == null) {
+                        Text(
+                            text = "期限が未設定の場合、完了しても次回分は作成されません",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -3288,7 +3333,11 @@ fun EditTaskDialog(
             }
         },
         confirmButton = {
-            val repeatValid = repeatRule != RepeatRule.WEEKLY_DAYS || selectedDays.isNotEmpty()
+            val repeatValid = when (repeatRule) {
+                RepeatRule.WEEKLY_DAYS -> selectedDays.isNotEmpty()
+                RepeatRule.AFTER_COMPLETION -> parseRepeatIntervalDays(repeatIntervalInput) != null
+                else -> true
+            }
             val locationValid = resolvedLocation == null || notifyOnArrival || notifyOnDeparture
             val vibrationValid = !vibrationEnabled || vibrationPatternSelected
             val canSave = repeatValid && locationValid && vibrationValid
@@ -3309,6 +3358,11 @@ fun EditTaskDialog(
                             dueAt = dueAt,
                             repeatRule = repeatRule,
                             repeatDaysOfWeek = daysOfWeek,
+                            repeatIntervalDays = if (repeatRule == RepeatRule.AFTER_COMPLETION) {
+                                parseRepeatIntervalDays(repeatIntervalInput)
+                            } else {
+                                null
+                            },
                             locationName = location?.name,
                             latitude = location?.latitude,
                             longitude = location?.longitude,
