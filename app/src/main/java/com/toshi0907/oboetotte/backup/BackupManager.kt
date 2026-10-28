@@ -230,9 +230,11 @@ object BackupManager {
                 repeatRule = if (obj.isNull("repeatRule")) null else obj.getString("repeatRule"),
                 repeatDaysOfWeek = if (obj.isNull("repeatDaysOfWeek")) null else obj.getString("repeatDaysOfWeek"),
                 // キーの無い旧形式のバックアップはisNullがtrueを返すためnullになる。範囲外の値は無視する
-                // (TaskCompletion側でも次回分を生成しない)。
-                repeatIntervalDays = (if (obj.isNull("repeatIntervalDays")) null else obj.getInt("repeatIntervalDays"))
-                    ?.takeIf { it in RepeatRule.INTERVAL_DAYS_RANGE },
+                // (TaskCompletion側でも次回分を生成しない)。getIntはInt範囲外の値を桁あふれさせて
+                // 範囲内の値に化けさせうるため、Longのまま範囲を検証してからIntにする。
+                repeatIntervalDays = (if (obj.isNull("repeatIntervalDays")) null else obj.getLong("repeatIntervalDays"))
+                    ?.takeIf { it in RepeatRule.INTERVAL_DAYS_RANGE }
+                    ?.toInt(),
                 locationName = if (obj.isNull("locationName")) null else obj.getString("locationName"),
                 latitude = if (obj.isNull("latitude")) null else obj.getDouble("latitude"),
                 longitude = if (obj.isNull("longitude")) null else obj.getDouble("longitude"),

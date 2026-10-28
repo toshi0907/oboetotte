@@ -2974,7 +2974,7 @@ fun EditTaskDialog(
                         Text("完了から")
                         OutlinedTextField(
                             value = repeatIntervalInput,
-                            onValueChange = { repeatIntervalInput = it.filter { c -> c.isDigit() }.take(3) },
+                            onValueChange = { repeatIntervalInput = it.filter { c -> c.isDigit() } },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier
