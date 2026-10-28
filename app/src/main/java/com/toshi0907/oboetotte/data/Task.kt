@@ -14,6 +14,9 @@ data class Task(
     val parentTaskId: Long? = null,
     val repeatRule: String? = null,
     val repeatDaysOfWeek: String? = null,
+    // repeatRuleがRepeatRule.AFTER_COMPLETIONの場合の間隔(日数、1以上)。完了日からこの日数後を
+    // 次回の期限にする。それ以外のルールではnull(詳細はdocs/architecture/repeat-tasks.md)。
+    val repeatIntervalDays: Int? = null,
     val locationName: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,

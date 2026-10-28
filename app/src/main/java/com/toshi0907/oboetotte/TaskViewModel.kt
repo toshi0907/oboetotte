@@ -51,6 +51,12 @@ object RepeatRule {
     const val WEEKLY = "WEEKLY"
     const val WEEKLY_DAYS = "WEEKLY_DAYS"
     const val MONTHLY = "MONTHLY"
+    // 期限ではなく完了日を起点に、Task.repeatIntervalDays日後を次回の期限にする。次回の期限は
+    // 完了するまで決まらないため、カレンダー表示での将来の予定の計算(nextDueAt)には含めない。
+    const val AFTER_COMPLETION = "AFTER_COMPLETION"
+
+    /** [AFTER_COMPLETION]の間隔として受け付ける日数の範囲。 */
+    val INTERVAL_DAYS_RANGE = 1..999
 
     // 曜日はISO-8601に合わせて月曜=1〜日曜=7の数値をカンマ区切りで保存する。
     // バックアップの破損等で範囲外の値が混ざっていても、呼び出し側の`isNotEmpty()`チェックが
@@ -83,6 +89,26 @@ object RepeatRule {
         }
         return next.toInstant().toEpochMilli()
     }
+
+    /**
+     * [AFTER_COMPLETION]の次回の期限。[completedAt]の日付(ローカルタイムゾーン)に[intervalDays]日を
+     * 加え、時刻は[currentDueAt](元の期限)の時刻をそのまま引き継ぐ。期限を過ぎてから完了した場合も
+     * 実際の完了日を起点にする。
+     */
+    fun nextDueAtAfterCompletion(
+        currentDueAt: Long,
+        completedAt: Long,
+        intervalDays: Int,
+        zone: ZoneId = ZoneId.systemDefault()
+    ): Long {
+        val dueTime = Instant.ofEpochMilli(currentDueAt).atZone(zone).toLocalTime()
+        val completedDate = Instant.ofEpochMilli(completedAt).atZone(zone).toLocalDate()
+        return completedDate.plusDays(intervalDays.toLong())
+            .atTime(dueTime)
+            .atZone(zone)
+            .toInstant()
+            .toEpochMilli()
+    }
 }
 
 /** [EditTaskDialog]で編集可能な項目をまとめたもの。[TaskViewModel.updateTask]に渡す。 */
@@ -92,6 +118,7 @@ data class TaskEdits(
     val dueAt: Long?,
     val repeatRule: String?,
     val repeatDaysOfWeek: String?,
+    val repeatIntervalDays: Int?,
     val locationName: String?,
     val latitude: Double?,
     val longitude: Double?,
@@ -324,6 +351,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 dueAt = edits.dueAt,
                 repeatRule = edits.repeatRule,
                 repeatDaysOfWeek = edits.repeatDaysOfWeek,
+                // 間隔は「完了後に繰り返す」の場合のみ保持し、他のルールへ切り替えたら破棄する。
+                repeatIntervalDays = edits.repeatIntervalDays
+                    .takeIf { edits.repeatRule == RepeatRule.AFTER_COMPLETION },
                 locationName = edits.locationName,
                 latitude = edits.latitude,
                 longitude = edits.longitude,

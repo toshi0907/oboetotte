@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         VibrationPattern::class,
         OperationLog::class
     ],
-    version = 24,
+    version = 25,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -258,6 +258,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN repeatIntervalDays INTEGER")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -283,7 +289,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_20_21,
                         MIGRATION_21_22,
                         MIGRATION_22_23,
-                        MIGRATION_23_24
+                        MIGRATION_23_24,
+                        MIGRATION_24_25
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }
