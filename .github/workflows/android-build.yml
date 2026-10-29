@@ -52,6 +52,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # 連続マージ時にlatest-debugの更新が並行実行されないよう直列化する
+    concurrency:
+      group: latest-debug-release
+      cancel-in-progress: false
 
     steps:
       - name: Download debug APK

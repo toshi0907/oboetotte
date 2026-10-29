@@ -24,7 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `.github/workflows/android-build.yml`は全ブランチのpush/PR・手動`workflow_dispatch`で`./gradlew assembleDebug`を実行し、APKを`app-debug`Artifactとしてアップロードします。`latest-debug`タグのGitHub Release更新は**mainへのpush時のみ**、`build`jobのAPKをartifact経由で受け取る別の`release`jobで行われ(`softprops/action-gh-release`)、常にmainの最新デバッグAPKを指す固定URL(`https://github.com/toshi0907/oboetotte/releases/tag/latest-debug`)として、アプリ内アップデート機能から参照されます。**そのためClaude Codeが`SendUserFile`でAPKを配布する運用は行いません。**
 
-**ワークフローの権限・Action固定**: トップレベルは`permissions: contents: read`で、`contents: write`は`release`jobにのみ付与(ビルドスクリプトを書き込み可能なトークンで動かさない)。Actionは公式`actions/*`も含めすべてコミットSHAで固定し、`# vX.Y.Z`コメントでバージョンを併記する(更新時はタグが指すコミットSHAを確認して差し替える)。`build`jobは`gradle/actions/wrapper-validation`でGradle Wrapperのjarを検証する。
+ワークフローの権限分離・ActionのSHA固定の詳細は`docs/architecture/ci-pipeline.md`(ワークフローを編集する際に参照)。
 
 **デバッグ署名鍵は固定(`app/debug.keystore`、alias/storepass/keypass: `android`)。** GitHub Actionsのrunnerは毎回まっさらなVMのためデフォルトの挙動だとビルドごとに鍵が変わり、既存インストール済みAPKの上書きインストールが失敗します。コミット済みの鍵は公開されても問題ないデバッグ専用鍵です。
 
@@ -85,6 +85,7 @@ GitHub Issueに対応する形で実装を行った場合は、対応内容のPR
 - ホーム画面ウィジェット: `docs/architecture/home-widget.md`
 - 共有によるタスク追加: `docs/architecture/share-task.md`
 - アプリ内アップデート: `docs/architecture/app-update.md`
+- CI/ビルドパイプライン(GitHub Actions): `docs/architecture/ci-pipeline.md`
 - テーマ: `docs/architecture/theme.md`
 - アプリアイコン: `docs/architecture/app-icon.md`
 - 基本情報(パッケージ名/SDKバージョン): `docs/architecture/basic-info.md`
