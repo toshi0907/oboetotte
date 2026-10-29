@@ -6,6 +6,11 @@ import android.util.Log
 import androidx.room.withTransaction
 import com.toshi0907.oboetotte.RepeatRule
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
+import com.toshi0907.oboetotte.attachment.DiscardOutputStream
+import com.toshi0907.oboetotte.attachment.SizeLimitExceededException
+import com.toshi0907.oboetotte.attachment.copyToWithLimit
+import com.toshi0907.oboetotte.attachment.formatLimitBytes
+import com.toshi0907.oboetotte.attachment.readBytesWithLimit
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.SavedLocation
 import com.toshi0907.oboetotte.data.Task
@@ -14,6 +19,7 @@ import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.data.VibrationPattern
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.notification.VibrationPatternPlayer
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
@@ -40,6 +46,18 @@ object BackupManager {
     private const val ATTACHMENT_BACKUP_DIR_NAME = "attachments_import_backup"
     private const val TAG = "BackupManager"
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+
+    // インポート時の上限(信頼できない入力によるOutOfMemoryError・ストレージ枯渇対策)。
+    // backup.json(またはプレーンJSON形式のファイル)はorg.jsonでメモリ上にパースするため、
+    // 文字列化・オブジェクト化で数倍に膨らむことを見込んで小さめに抑える(1タスク数百バイト〜
+    // 数KB程度のため、数千〜数万件のタスクでも十分収まる)。
+    private const val MAX_JSON_BYTES = 16L * 1024 * 1024
+    // ZIP全体の展開後の合計サイズ。添付は1件あたりAttachmentStorage.MAX_FILE_BYTES(100MB)が上限のため、
+    // 上限いっぱいの添付が20件程度あっても収まる。インポート中は既存の添付と一時ディレクトリの
+    // 両方が同時に存在するため、空き容量の確認(MIN_FREE_SPACE_BYTES)も併せて行う。
+    private const val MAX_IMPORT_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
+    // ZIPのエントリ数(backup.json+添付ファイル数)。大量の小さなエントリによる処理の長期化を防ぐ。
+    private const val MAX_IMPORT_ENTRIES = 10_000
 
     suspend fun export(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
         val db = AppDatabase.getInstance(context)
@@ -161,33 +179,90 @@ object BackupManager {
     }
 
     suspend fun import(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        // ZIP内の添付ファイルはメモリに保持せず、読み込みながら一時ディレクトリへ直接書き出す
+        // (巨大なファイル・ZIP bombでのOutOfMemoryError対策)。既存の添付ディレクトリ・DBには
+        // 以降の検証をすべて通過するまで一切触れないため、途中で失敗しても一時ディレクトリを
+        // 消すだけで元の状態のまま残る。
+        val stagingDir = File(context.filesDir, ATTACHMENT_STAGING_DIR_NAME).apply {
+            deleteRecursively()
+            mkdirs()
+        }
+        try {
+            importWithStaging(context, uri, stagingDir)
+        } finally {
+            stagingDir.deleteRecursively()
+        }
+    }
+
+    private suspend fun importWithStaging(context: Context, uri: Uri, stagingDir: File) {
+        val attachmentFileNames = mutableSetOf<String>()
+
+        val input = context.contentResolver.openInputStream(uri)
             ?: throw IOException("ファイルを開けませんでした")
-
-        val json: JSONObject
-        val attachmentFiles = mutableMapOf<String, ByteArray>()
-
-        if (isZip(bytes)) {
-            var jsonText: String? = null
-            ZipInputStream(bytes.inputStream()).use { zip ->
-                var entry = zip.nextEntry
-                while (entry != null) {
-                    when {
-                        entry.name == ENTRY_JSON -> jsonText = zip.readBytes().toString(Charsets.UTF_8)
-                        entry.name.startsWith("$ENTRY_ATTACHMENTS_DIR/") && !entry.isDirectory -> {
-                            val storedFileName = entry.name.removePrefix("$ENTRY_ATTACHMENTS_DIR/")
-                            // パストラバーサルを狙った不正なエントリ名なら例外を投げてインポートを中断する。
-                            AttachmentStorage.file(context, storedFileName)
-                            attachmentFiles[storedFileName] = zip.readBytes()
+        val json = BufferedInputStream(input).use { stream ->
+            if (isZip(stream)) {
+                var jsonText: String? = null
+                var entryCount = 0
+                var totalBytes = 0L
+                val totalLimitMessage =
+                    "バックアップの展開後のサイズが上限(${formatLimitBytes(MAX_IMPORT_TOTAL_BYTES)})を超えています"
+                ZipInputStream(stream).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        entryCount++
+                        if (entryCount > MAX_IMPORT_ENTRIES) {
+                            throw SizeLimitExceededException(
+                                "バックアップに含まれるファイル数が上限(${MAX_IMPORT_ENTRIES}件)を超えています"
+                            )
                         }
+                        // 展開後のサイズはZipEntry.sizeの申告値(偽装可能)ではなく、実際に展開した
+                        // バイト数で数える。読み飛ばすだけのエントリも展開処理自体は走るため合計に含める。
+                        val remaining = MAX_IMPORT_TOTAL_BYTES - totalBytes
+                        when {
+                            entry.name == ENTRY_JSON -> {
+                                if (jsonText != null) {
+                                    throw IOException("バックアップの形式が不正です($ENTRY_JSON が重複しています)")
+                                }
+                                val jsonLimit = minOf(MAX_JSON_BYTES, remaining)
+                                val limitMessage = if (jsonLimit == MAX_JSON_BYTES) {
+                                    "バックアップのデータ部分のサイズが上限(${formatLimitBytes(MAX_JSON_BYTES)})を超えています"
+                                } else {
+                                    totalLimitMessage
+                                }
+                                val jsonBytes = zip.readBytesWithLimit(jsonLimit, limitMessage)
+                                totalBytes += jsonBytes.size
+                                jsonText = jsonBytes.toString(Charsets.UTF_8)
+                            }
+                            entry.name.startsWith("$ENTRY_ATTACHMENTS_DIR/") && !entry.isDirectory -> {
+                                val storedFileName = entry.name.removePrefix("$ENTRY_ATTACHMENTS_DIR/")
+                                // パストラバーサルを狙った不正なエントリ名なら例外を投げてインポートを中断する。
+                                AttachmentStorage.file(context, storedFileName)
+                                if (!attachmentFileNames.add(storedFileName)) {
+                                    throw IOException("バックアップの形式が不正です(添付ファイルのエントリが重複しています)")
+                                }
+                                File(stagingDir, storedFileName).outputStream().use { out ->
+                                    totalBytes += zip.copyToWithLimit(
+                                        out,
+                                        remaining,
+                                        totalLimitMessage,
+                                        storageDir = context.filesDir
+                                    )
+                                }
+                            }
+                            else -> totalBytes += zip.copyToWithLimit(DiscardOutputStream, remaining, totalLimitMessage)
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
                     }
-                    zip.closeEntry()
-                    entry = zip.nextEntry
                 }
+                JSONObject(jsonText ?: throw IOException("バックアップの形式が不正です"))
+            } else {
+                val bytes = stream.readBytesWithLimit(
+                    MAX_JSON_BYTES,
+                    "バックアップのサイズが上限(${formatLimitBytes(MAX_JSON_BYTES)})を超えています"
+                )
+                JSONObject(bytes.toString(Charsets.UTF_8))
             }
-            json = JSONObject(jsonText ?: throw IOException("バックアップの形式が不正です"))
-        } else {
-            json = JSONObject(bytes.toString(Charsets.UTF_8))
         }
 
         val listsJson = json.getJSONArray("lists")
@@ -310,80 +385,77 @@ object BackupManager {
         if (declaredNames.toSet().size != declaredNames.size) {
             throw IOException("バックアップの形式が不正です(添付ファイルのstoredFileNameが重複しています)")
         }
-        if (declaredNames.toSet() != attachmentFiles.keys) {
+        if (declaredNames.toSet() != attachmentFileNames) {
             throw IOException("バックアップの形式が不正です(添付ファイルのメタデータと実体が一致しません)")
         }
 
         // ここまでのバリデーションをすべて通過した後にのみ、既存データの削除・新データの反映を行う。
         // DBとファイルシステムは別々のリソースであり単一のトランザクションにできないため、
         // 失敗した場合に「より復元しやすい」順序で処理する。
-        // 1. 添付ファイルの実体をまず一時ディレクトリへ書き込む(ディスク容量不足等のI/O失敗は
-        //    ここで起きるため、失敗すれば既存のDB・添付ファイルには一切触れずに済む)。
+        // 1. 添付ファイルの実体は、ZIPの読み込み時点ですでに一時ディレクトリへ書き込み済み
+        //    (ディスク容量不足等のI/O失敗はそこで起きるため、既存のDB・添付ファイルには触れていない)。
         // 2. 添付ディレクトリの入れ替え(ファイル単位ではなくディレクトリ単位のrenameTo。
         //    同一ボリューム上でのディレクトリ名の付け替えのみで完了する軽い操作で、失敗の
         //    可能性は低い)を、DBの更新より先に行う。この時点で失敗してもDBは未着手のまま。
         // 3. 最後にDBをトランザクションで置き換える。DB側が失敗した場合(Room側で自動的に
         //    ロールバックされる)は、2で入れ替えたディレクトリも明示的に元へ戻す。
-        val stagingDir = File(context.filesDir, ATTACHMENT_STAGING_DIR_NAME).apply {
-            deleteRecursively()
-            mkdirs()
+        val attachmentsDir = AttachmentStorage.directory(context)
+        val backupDir = File(context.filesDir, ATTACHMENT_BACKUP_DIR_NAME)
+        backupDir.deleteRecursively()
+        if (!attachmentsDir.renameTo(backupDir)) {
+            throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
         }
+        if (!stagingDir.renameTo(attachmentsDir)) {
+            // 失敗時は退避しておいた旧ディレクトリを元の名前に戻す。この「復旧」自体が
+            // 失敗する可能性もゼロではないが、同一ボリューム上のディレクトリ名の
+            // 付け替えのみであり実際に失敗する見込みは極めて低いため、失敗時はLogに
+            // 残すのみとする(端末のストレージ破損など、アプリ側での対処が困難な状況)。
+            if (!backupDir.renameTo(attachmentsDir)) {
+                Log.e(TAG, "添付ディレクトリの復旧に失敗しました: $backupDir")
+            }
+            throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
+        }
+
         try {
-            attachmentFiles.forEach { (storedFileName, fileBytes) ->
-                File(stagingDir, storedFileName).writeBytes(fileBytes)
+            val db = AppDatabase.getInstance(context)
+            db.withTransaction {
+                db.taskDao().deleteAll()
+                db.taskListDao().deleteAll()
+                db.savedLocationDao().deleteAll()
+                db.taskAttachmentDao().deleteAll()
+                db.vibrationPatternDao().deleteAll()
+                db.taskListDao().insertAll(lists)
+                db.taskDao().insertAll(tasks)
+                db.savedLocationDao().insertAll(savedLocations)
+                db.taskAttachmentDao().insertAll(attachments)
+                db.vibrationPatternDao().insertAll(vibrationPatterns)
+                // 取り込んだタスクは元のIDのまま復元されるため、既存の操作ログのタスクとの紐づけが
+                // 無関係なタスクを指してしまわないよう解除する(ログ自体は設定画面で引き続き見られる)。
+                db.operationLogDao().clearTaskGroupIds()
             }
-
-            val attachmentsDir = AttachmentStorage.directory(context)
-            val backupDir = File(context.filesDir, ATTACHMENT_BACKUP_DIR_NAME)
-            backupDir.deleteRecursively()
-            if (!attachmentsDir.renameTo(backupDir)) {
-                throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
+        } catch (e: Exception) {
+            // DB側が失敗した場合は、直前で入れ替えたディレクトリを元に戻す
+            // (新しい添付ディレクトリの内容はstagingDirへ戻し、finallyで削除する)。
+            if (!attachmentsDir.renameTo(stagingDir) || !backupDir.renameTo(attachmentsDir)) {
+                Log.e(TAG, "DB更新失敗後の添付ディレクトリの復旧に失敗しました: $backupDir")
             }
-            if (!stagingDir.renameTo(attachmentsDir)) {
-                // 失敗時は退避しておいた旧ディレクトリを元の名前に戻す。この「復旧」自体が
-                // 失敗する可能性もゼロではないが、同一ボリューム上のディレクトリ名の
-                // 付け替えのみであり実際に失敗する見込みは極めて低いため、失敗時はLogに
-                // 残すのみとする(端末のストレージ破損など、アプリ側での対処が困難な状況)。
-                if (!backupDir.renameTo(attachmentsDir)) {
-                    Log.e(TAG, "添付ディレクトリの復旧に失敗しました: $backupDir")
-                }
-                throw IOException("添付ファイルディレクトリの入れ替えに失敗しました")
-            }
-
-            try {
-                val db = AppDatabase.getInstance(context)
-                db.withTransaction {
-                    db.taskDao().deleteAll()
-                    db.taskListDao().deleteAll()
-                    db.savedLocationDao().deleteAll()
-                    db.taskAttachmentDao().deleteAll()
-                    db.vibrationPatternDao().deleteAll()
-                    db.taskListDao().insertAll(lists)
-                    db.taskDao().insertAll(tasks)
-                    db.savedLocationDao().insertAll(savedLocations)
-                    db.taskAttachmentDao().insertAll(attachments)
-                    db.vibrationPatternDao().insertAll(vibrationPatterns)
-                    // 取り込んだタスクは元のIDのまま復元されるため、既存の操作ログのタスクとの紐づけが
-                    // 無関係なタスクを指してしまわないよう解除する(ログ自体は設定画面で引き続き見られる)。
-                    db.operationLogDao().clearTaskGroupIds()
-                }
-            } catch (e: Exception) {
-                // DB側が失敗した場合は、直前で入れ替えたディレクトリを元に戻す
-                // (新しい添付ディレクトリの内容はstagingDirへ戻し、finallyで削除する)。
-                if (!attachmentsDir.renameTo(stagingDir) || !backupDir.renameTo(attachmentsDir)) {
-                    Log.e(TAG, "DB更新失敗後の添付ディレクトリの復旧に失敗しました: $backupDir")
-                }
-                throw e
-            }
-
-            backupDir.deleteRecursively()
-        } finally {
-            stagingDir.deleteRecursively()
+            throw e
         }
+
+        backupDir.deleteRecursively()
     }
 
-    private fun isZip(bytes: ByteArray): Boolean {
-        if (bytes.size < ZIP_MAGIC.size) return false
-        return ZIP_MAGIC.indices.all { bytes[it] == ZIP_MAGIC[it] }
+    /** 先頭のマジックナンバーを覗き見て判定し、[stream]の読み込み位置は先頭に戻しておく。 */
+    private fun isZip(stream: BufferedInputStream): Boolean {
+        stream.mark(ZIP_MAGIC.size)
+        val head = ByteArray(ZIP_MAGIC.size)
+        var read = 0
+        while (read < head.size) {
+            val n = stream.read(head, read, head.size - read)
+            if (n < 0) break
+            read += n
+        }
+        stream.reset()
+        return read == head.size && head.contentEquals(ZIP_MAGIC)
     }
 }
