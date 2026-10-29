@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -36,6 +37,7 @@ import com.toshi0907.oboetotte.oplog.describeTaskChanges
 import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -423,7 +425,16 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: StorageLimitException) {
                 Toast.makeText(appContext, "ファイルを添付できませんでした。${e.message}", Toast.LENGTH_LONG).show()
                 return@launch
-            } ?: return@launch
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "添付ファイルのコピーに失敗しました", e)
+                null
+            }
+            if (copied == null) {
+                Toast.makeText(appContext, "ファイルを添付できませんでした", Toast.LENGTH_LONG).show()
+                return@launch
+            }
             taskAttachmentDao.insert(
                 TaskAttachment(
                     taskId = task.attachmentGroupId(),
@@ -716,6 +727,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        private const val TAG = "TaskViewModel"
+
         /**
          * [selectedListId]に渡すと「リスト未登録」(`listId == null`のタスクのみ)を表す特別な値。
          * Roomの`TaskList.id`は`autoGenerate`で1から始まるため、負の値であれば実際のリストIDと
