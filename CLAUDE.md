@@ -22,7 +22,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## CI/ビルドパイプライン
 
-`.github/workflows/android-build.yml`は全ブランチのpush/PR・手動`workflow_dispatch`で`./gradlew assembleDebug`を実行し、APKを`app-debug`Artifactとしてアップロードします。`latest-debug`タグのGitHub Release更新は**mainへのpush時のみ**行われ(`softprops/action-gh-release`)、常にmainの最新デバッグAPKを指す固定URL(`https://github.com/toshi0907/oboetotte/releases/tag/latest-debug`)として、アプリ内アップデート機能から参照されます。**そのためClaude Codeが`SendUserFile`でAPKを配布する運用は行いません。**
+`.github/workflows/android-build.yml`は全ブランチのpush/PR・手動`workflow_dispatch`で`./gradlew assembleDebug`を実行し、APKを`app-debug`Artifactとしてアップロードします。`latest-debug`タグのGitHub Release更新は**mainへのpush時のみ**、`build`jobのAPKをartifact経由で受け取る別の`release`jobで行われ(`softprops/action-gh-release`)、常にmainの最新デバッグAPKを指す固定URL(`https://github.com/toshi0907/oboetotte/releases/tag/latest-debug`)として、アプリ内アップデート機能から参照されます。**そのためClaude Codeが`SendUserFile`でAPKを配布する運用は行いません。**
+
+**ワークフローの権限・Action固定**: トップレベルは`permissions: contents: read`で、`contents: write`は`release`jobにのみ付与(ビルドスクリプトを書き込み可能なトークンで動かさない)。Actionは公式`actions/*`も含めすべてコミットSHAで固定し、`# vX.Y.Z`コメントでバージョンを併記する(更新時はタグが指すコミットSHAを確認して差し替える)。`build`jobは`gradle/actions/wrapper-validation`でGradle Wrapperのjarを検証する。
 
 **デバッグ署名鍵は固定(`app/debug.keystore`、alias/storepass/keypass: `android`)。** GitHub Actionsのrunnerは毎回まっさらなVMのためデフォルトの挙動だとビルドごとに鍵が変わり、既存インストール済みAPKの上書きインストールが失敗します。コミット済みの鍵は公開されても問題ないデバッグ専用鍵です。
 
