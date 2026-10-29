@@ -19,6 +19,12 @@ object AttachmentStorage {
     private const val DIR_NAME = "attachments"
     private const val FILE_PROVIDER_AUTHORITY_SUFFIX = ".fileprovider"
 
+    /**
+     * 添付ファイル1件あたりの上限サイズ。写真(数MB)・PDF・Office文書・短い動画は十分収まり、
+     * Todoアプリの添付としては現実的な範囲を超える巨大ファイルでの内部ストレージ枯渇を防ぐ。
+     */
+    const val MAX_FILE_BYTES = 100L * 1024 * 1024
+
     fun directory(context: Context): File =
         File(context.filesDir, DIR_NAME).apply { mkdirs() }
 
@@ -44,7 +50,10 @@ object AttachmentStorage {
 
     /**
      * [uri]の内容を端末内にコピーする。呼び出し元([TaskViewModel])が`Dispatchers.IO`上で
-     * 呼び出すことを想定したブロッキングI/O。
+     * 呼び出すことを想定したブロッキングI/O。共有受信([com.toshi0907.oboetotte.share.ShareReceiverActivity])
+     * のようにユーザー操作なしで外部アプリから巨大なストリームを渡されうるため、1ファイルあたり
+     * [MAX_FILE_BYTES]を上限とし、超えた場合や空き容量が[MIN_FREE_SPACE_BYTES]を下回りそうな場合は
+     * 書きかけのファイルを削除した上で[StorageLimitException]を投げる。
      */
     fun copyToStorage(context: Context, uri: Uri): CopiedFile? {
         val resolver = context.contentResolver
@@ -57,8 +66,21 @@ object AttachmentStorage {
         }
         val destination = file(context, storedFileName)
         val input = resolver.openInputStream(uri) ?: return null
-        input.use { inStream ->
-            destination.outputStream().use { outStream -> inStream.copyTo(outStream) }
+        try {
+            input.use { inStream ->
+                destination.outputStream().use { outStream ->
+                    inStream.copyToWithLimit(
+                        outStream,
+                        MAX_FILE_BYTES,
+                        "ファイルサイズが上限(${formatLimitBytes(MAX_FILE_BYTES)})を超えています",
+                        storageDir = context.filesDir
+                    )
+                }
+            }
+        } catch (e: Throwable) {
+            // 上限超過・I/O失敗のいずれでも、DBに登録されない書きかけのファイルを残さない。
+            destination.delete()
+            throw e
         }
         return CopiedFile(
             fileName = originalName,

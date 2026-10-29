@@ -106,6 +106,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
+import com.toshi0907.oboetotte.attachment.StorageLimitException
 import com.toshi0907.oboetotte.backup.BackupManager
 import com.toshi0907.oboetotte.backup.CloudBackupResult
 import com.toshi0907.oboetotte.backup.CloudBackupScheduler
@@ -186,6 +187,10 @@ class MainActivity : ComponentActivity() {
                     BackupManager.import(this@MainActivity, uri)
                     OperationLogger.log(this@MainActivity, OperationLogSource.APP, "インポート", "成功")
                     Toast.makeText(this@MainActivity, "インポートしました", Toast.LENGTH_SHORT).show()
+                } catch (e: StorageLimitException) {
+                    // サイズ上限・空き容量不足は「ファイル形式を確認」では原因が伝わらないため、理由を表示する。
+                    OperationLogger.log(this@MainActivity, OperationLogSource.APP, "インポート", "失敗(${e.message})")
+                    Toast.makeText(this@MainActivity, "インポートに失敗しました。${e.message}", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
                     OperationLogger.log(this@MainActivity, OperationLogSource.APP, "インポート", "失敗")
                     Toast.makeText(this@MainActivity, "インポートに失敗しました。ファイル形式を確認してください", Toast.LENGTH_SHORT).show()

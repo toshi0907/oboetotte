@@ -10,6 +10,8 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.TaskViewModel
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
+import com.toshi0907.oboetotte.attachment.StorageLimitException
+import com.toshi0907.oboetotte.attachment.formatLimitBytes
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
@@ -67,9 +69,16 @@ class ShareReceiverActivity : ComponentActivity() {
             ReminderScheduler.schedule(applicationContext, task.copy(id = taskId))
 
             var attachedCount = 0
+            // サイズ上限超過・空き容量不足で添付できなかったファイル数(他のファイルの添付は続行する)。
+            var rejectedCount = 0
             withContext(Dispatchers.IO) {
                 uris.forEach { uri ->
-                    val copied = AttachmentStorage.copyToStorage(applicationContext, uri) ?: return@forEach
+                    val copied = try {
+                        AttachmentStorage.copyToStorage(applicationContext, uri)
+                    } catch (e: StorageLimitException) {
+                        rejectedCount++
+                        return@forEach
+                    } ?: return@forEach
                     taskAttachmentDao.insert(
                         TaskAttachment(
                             taskId = taskId,
@@ -86,6 +95,12 @@ class ShareReceiverActivity : ComponentActivity() {
 
             val resultParts = mutableListOf<String>()
             if (attachedCount > 0) resultParts.add("添付${attachedCount}件")
+            if (rejectedCount > 0) {
+                resultParts.add(
+                    "サイズ上限(${formatLimitBytes(AttachmentStorage.MAX_FILE_BYTES)})超過・空き容量不足で" +
+                        "添付できなかったファイル${rejectedCount}件"
+                )
+            }
             if (isSharedUrl) resultParts.add("URL") else if (sharedText != null) resultParts.add("メモ")
             val suffix = if (resultParts.isEmpty()) "" else "(${resultParts.joinToString("、")})"
             OperationLogger.logAsync(

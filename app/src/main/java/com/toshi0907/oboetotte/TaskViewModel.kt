@@ -4,9 +4,11 @@ import android.app.Application
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
+import com.toshi0907.oboetotte.attachment.StorageLimitException
 import com.toshi0907.oboetotte.backup.CloudBackupResult
 import com.toshi0907.oboetotte.backup.CloudBackupRunner
 import com.toshi0907.oboetotte.backup.CloudBackupScheduler
@@ -414,8 +416,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun addAttachment(task: Task, uri: Uri) {
         viewModelScope.launch {
-            val copied = withContext(Dispatchers.IO) {
-                AttachmentStorage.copyToStorage(appContext, uri)
+            val copied = try {
+                withContext(Dispatchers.IO) {
+                    AttachmentStorage.copyToStorage(appContext, uri)
+                }
+            } catch (e: StorageLimitException) {
+                Toast.makeText(appContext, "ファイルを添付できませんでした。${e.message}", Toast.LENGTH_LONG).show()
+                return@launch
             } ?: return@launch
             taskAttachmentDao.insert(
                 TaskAttachment(
