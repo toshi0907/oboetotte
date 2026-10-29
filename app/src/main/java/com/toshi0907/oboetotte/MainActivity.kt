@@ -2,6 +2,7 @@ package com.toshi0907.oboetotte
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -44,6 +45,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -96,6 +98,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -1224,6 +1231,52 @@ fun TaskTreeRow(
 }
 
 /**
+ * [url]を`ACTION_VIEW`で開く。スキームは小文字に正規化する(`HTTPS://`等だとブラウザの
+ * intent-filterにマッチしないため)。開けるアプリが無ければトーストを表示する。
+ */
+private fun openUrl(context: Context, url: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url).normalizeScheme()))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * メモ本文を表示する。本文中の`http://`/`https://`のURL([findMemoUrlRanges])はリンク色+下線で
+ * 表示しタップでブラウザ等を開く。[SelectionContainer]で囲んでいるため長押しで範囲選択・コピーもできる。
+ */
+@Composable
+private fun LinkifiedMemoText(memo: String) {
+    val context = LocalContext.current
+    val linkStyles = TextLinkStyles(
+        style = SpanStyle(
+            color = MaterialTheme.colorScheme.primary,
+            textDecoration = TextDecoration.Underline
+        )
+    )
+    val annotated = remember(memo, linkStyles, context) {
+        buildAnnotatedString {
+            var last = 0
+            findMemoUrlRanges(memo).forEach { range ->
+                append(memo.substring(last, range.first))
+                val url = memo.substring(range)
+                withLink(
+                    LinkAnnotation.Clickable(tag = url, styles = linkStyles) { openUrl(context, url) }
+                ) {
+                    append(url)
+                }
+                last = range.last + 1
+            }
+            append(memo.substring(last))
+        }
+    }
+    SelectionContainer {
+        Text(text = annotated)
+    }
+}
+
+/**
  * タスク行タップで最初に開く読み取り専用の確認ダイアログ。[EditTaskDialog]と同じ項目
  * (タイトル・リスト・URL・期限・繰り返し・位置情報・メモ・添付ファイル・サブタスク一覧)を
  * すべて表示するが、値を書き換える操作は上部の「編集」ボタンから[EditTaskDialog]を開いた
@@ -1307,13 +1360,7 @@ fun TaskDetailDialog(
                         text = url,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable {
-                            try {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            } catch (e: ActivityNotFoundException) {
-                                Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                        modifier = Modifier.clickable { openUrl(context, url) }
                     )
                 }
                 Text(text = current.dueAt?.let { formatDueAt(it) } ?: "期限なし")
@@ -1331,7 +1378,7 @@ fun TaskDetailDialog(
                 locationLabel(current)?.let { Text(text = it) }
                 if (!current.memo.isNullOrBlank()) {
                     Text(text = "メモ", style = MaterialTheme.typography.titleSmall)
-                    Text(text = current.memo)
+                    LinkifiedMemoText(memo = current.memo)
                 }
                 if (attachments.isNotEmpty()) {
                     Text(text = "添付ファイル", style = MaterialTheme.typography.titleSmall)
