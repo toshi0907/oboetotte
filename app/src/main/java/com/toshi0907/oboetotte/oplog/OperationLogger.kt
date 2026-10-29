@@ -36,14 +36,25 @@ object OperationLogger {
     // スコープとは独立したプロセス全体のスコープで書き込む(logAsync用)。
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    suspend fun log(context: Context, source: String, action: String, detail: String = "") {
+    /**
+     * 操作を1件記録する。特定のタスクに対する操作の場合は[taskGroupId]に対象タスクの
+     * [com.toshi0907.oboetotte.data.attachmentGroupId]を渡す(タスクの詳細画面の操作ログに表示される)。
+     */
+    suspend fun log(
+        context: Context,
+        source: String,
+        action: String,
+        detail: String = "",
+        taskGroupId: Long? = null
+    ) {
         try {
             AppDatabase.getInstance(context).operationLogDao().insertAndPurge(
                 OperationLog(
                     timestamp = System.currentTimeMillis(),
                     source = source,
                     action = action,
-                    detail = detail
+                    detail = detail,
+                    taskGroupId = taskGroupId
                 ),
                 retentionCutoff()
             )
@@ -55,9 +66,15 @@ object OperationLogger {
     }
 
     /** suspend関数から呼べない箇所(設定変更のコールバック等)向けに、非同期で[log]する。 */
-    fun logAsync(context: Context, source: String, action: String, detail: String = "") {
+    fun logAsync(
+        context: Context,
+        source: String,
+        action: String,
+        detail: String = "",
+        taskGroupId: Long? = null
+    ) {
         val appContext = context.applicationContext
-        scope.launch { log(appContext, source, action, detail) }
+        scope.launch { log(appContext, source, action, detail, taskGroupId) }
     }
 
     /** 保存期間を過ぎたログを削除する。アプリ起動時に呼ぶ(しばらく操作が無かった場合の保険)。 */

@@ -121,6 +121,7 @@ import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.data.VibrationPattern
+import com.toshi0907.oboetotte.data.OperationLog
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.LocationTrackingMode
@@ -373,6 +374,7 @@ class MainActivity : ComponentActivity() {
                             savedLocations = savedLocations,
                             vibrationPatterns = vibrationPatterns,
                             allAttachments = attachments,
+                            operationLogs = operationLogs,
                             onAddAttachment = taskViewModel::addAttachment,
                             onDeleteAttachment = taskViewModel::deleteAttachment,
                             showExactAlarmBanner = !exactAlarmPermissionGranted,
@@ -641,6 +643,7 @@ fun TaskScreen(
     savedLocations: List<SavedLocation> = emptyList(),
     vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
+    operationLogs: List<OperationLog> = emptyList(),
     onAddAttachment: (Task, Uri) -> Unit = { _, _ -> },
     onDeleteAttachment: (TaskAttachment) -> Unit = {},
     showExactAlarmBanner: Boolean = false,
@@ -866,6 +869,7 @@ fun TaskScreen(
             savedLocations = savedLocations,
             vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
+            operationLogs = operationLogs,
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
             onAddSubtask = onAddSubtask,
@@ -1232,6 +1236,7 @@ fun TaskDetailDialog(
     savedLocations: List<SavedLocation> = emptyList(),
     vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
+    operationLogs: List<OperationLog> = emptyList(),
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
@@ -1243,8 +1248,13 @@ fun TaskDetailDialog(
     val current = allTasks.find { it.id == task.id } ?: task
     var editing by remember(task.id) { mutableStateOf(false) }
     var nestedViewTask by remember { mutableStateOf<Task?>(null) }
+    // 操作ログは初期状態では折りたたみ、見出しのタップで展開する。
+    var showOperationLogs by remember(task.id) { mutableStateOf(false) }
     val subtasks = allTasks.filter { it.parentTaskId == current.id }
     val attachments = allAttachments.filter { it.taskId == current.attachmentGroupId() }
+    // 繰り返しタスクはシリーズ全体(attachmentGroupIdが共通)の操作ログを表示する。サブタスクへの
+    // 操作はそのサブタスク自身の詳細にのみ表示する(サブタスク追加は親タスクへの操作として記録)。
+    val taskOperationLogs = operationLogs.filter { it.taskGroupId == current.attachmentGroupId() }
     val listName = lists.find { it.id == current.listId }?.name
 
     AlertDialog(
@@ -1344,6 +1354,35 @@ fun TaskDetailDialog(
                         )
                     }
                 }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showOperationLogs = !showOperationLogs }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "操作ログ(${taskOperationLogs.size}件)",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(text = if (showOperationLogs) "▲" else "▼")
+                }
+                if (showOperationLogs) {
+                    if (taskOperationLogs.isEmpty()) {
+                        Text(
+                            text = "このタスクの操作ログはありません",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        taskOperationLogs.forEach { log ->
+                            OperationLogRow(log)
+                            HorizontalDivider()
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1381,6 +1420,7 @@ fun TaskDetailDialog(
             savedLocations = savedLocations,
             vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
+            operationLogs = operationLogs,
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
             onAddSubtask = onAddSubtask,

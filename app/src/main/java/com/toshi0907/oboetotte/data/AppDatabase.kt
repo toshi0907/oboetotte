@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         VibrationPattern::class,
         OperationLog::class
     ],
-    version = 25,
+    version = 26,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -264,6 +264,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE operation_logs ADD COLUMN taskGroupId INTEGER")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_operation_logs_taskGroupId` ON `operation_logs` (`taskGroupId`)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -290,7 +299,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_21_22,
                         MIGRATION_22_23,
                         MIGRATION_23_24,
-                        MIGRATION_24_25
+                        MIGRATION_24_25,
+                        MIGRATION_25_26
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { instance = it }

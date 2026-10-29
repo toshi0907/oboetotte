@@ -75,7 +75,8 @@ object TaskCompletion {
             context,
             source,
             "タスク完了",
-            task.logLabel() + nextDueAt?.let { "(次回分: ${formatDueAt(it)})" }.orEmpty()
+            task.logLabel() + nextDueAt?.let { "(次回分: ${formatDueAt(it)})" }.orEmpty(),
+            task.attachmentGroupId()
         )
         refreshTaskWidget(context)
     }

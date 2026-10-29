@@ -10,6 +10,7 @@ import androidx.compose.material3.TextButton
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.oplog.OperationLogSource
 import com.toshi0907.oboetotte.oplog.OperationLogger
 import com.toshi0907.oboetotte.oplog.logLabel
@@ -73,7 +74,8 @@ class SnoozePickerActivity : ComponentActivity() {
                     applicationContext,
                     OperationLogSource.NOTIFICATION,
                     "スヌーズ",
-                    "${task.logLabel()} $label"
+                    "${task.logLabel()} $label",
+                    task.attachmentGroupId()
                 )
             }
             finish()
