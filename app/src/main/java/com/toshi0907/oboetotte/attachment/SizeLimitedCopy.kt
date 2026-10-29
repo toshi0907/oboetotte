@@ -55,7 +55,8 @@ fun InputStream.copyToWithLimit(
         total += read
         if (total > maxBytes) throw SizeLimitExceededException(limitMessage)
         if (storageDir != null && total >= nextFreeSpaceCheckAt) {
-            if (storageDir.usableSpace - read < MIN_FREE_SPACE_BYTES) {
+            // 次の確認までに最大FREE_SPACE_CHECK_INTERVAL_BYTES書き込むため、その分も見込んで判定する。
+            if (storageDir.usableSpace < MIN_FREE_SPACE_BYTES + FREE_SPACE_CHECK_INTERVAL_BYTES) {
                 throw InsufficientStorageException("端末の空き容量が不足しています")
             }
             nextFreeSpaceCheckAt = total + FREE_SPACE_CHECK_INTERVAL_BYTES

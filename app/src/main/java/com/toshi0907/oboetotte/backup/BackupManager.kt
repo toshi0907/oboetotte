@@ -52,12 +52,14 @@ object BackupManager {
     // 文字列化・オブジェクト化で数倍に膨らむことを見込んで小さめに抑える(1タスク数百バイト〜
     // 数KB程度のため、数千〜数万件のタスクでも十分収まる)。
     private const val MAX_JSON_BYTES = 16L * 1024 * 1024
-    // ZIP全体の展開後の合計サイズ。添付は1件あたりAttachmentStorage.MAX_FILE_BYTES(100MB)が上限のため、
-    // 上限いっぱいの添付が20件程度あっても収まる。インポート中は既存の添付と一時ディレクトリの
-    // 両方が同時に存在するため、空き容量の確認(MIN_FREE_SPACE_BYTES)も併せて行う。
-    private const val MAX_IMPORT_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
+    // ZIP全体の展開後の合計サイズ。エクスポート側には上限が無く、上限を下げすぎると正当なバックアップを
+    // 復元できなくなるため、Todoアプリの現実的な添付総量(添付1件の上限100MBで80件分)を大きく上回る値にする。
+    // ZIP bomb等でこれより手前に端末の容量を使い切りそうな場合は、空き容量の確認
+    // (MIN_FREE_SPACE_BYTES)で別途中止する。
+    private const val MAX_IMPORT_TOTAL_BYTES = 8L * 1024 * 1024 * 1024
     // ZIPのエントリ数(backup.json+添付ファイル数)。大量の小さなエントリによる処理の長期化を防ぐ。
-    private const val MAX_IMPORT_ENTRIES = 10_000
+    // 上記と同じ理由で、現実的な添付件数を大きく上回る値にする。
+    private const val MAX_IMPORT_ENTRIES = 50_000
 
     suspend fun export(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
         val db = AppDatabase.getInstance(context)
