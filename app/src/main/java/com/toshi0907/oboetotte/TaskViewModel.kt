@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
+import com.toshi0907.oboetotte.attachment.StorageLimitException
 import com.toshi0907.oboetotte.backup.CloudBackupResult
 import com.toshi0907.oboetotte.backup.CloudBackupRunner
 import com.toshi0907.oboetotte.backup.CloudBackupScheduler
@@ -36,6 +37,7 @@ import com.toshi0907.oboetotte.oplog.describeTaskChanges
 import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -416,13 +418,18 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun addAttachment(task: Task, uri: Uri) {
         viewModelScope.launch {
-            val copied = withContext(Dispatchers.IO) {
-                try {
+            val copied = try {
+                withContext(Dispatchers.IO) {
                     AttachmentStorage.copyToStorage(appContext, uri)
-                } catch (e: Exception) {
-                    Log.w(TAG, "添付ファイルのコピーに失敗しました", e)
-                    null
                 }
+            } catch (e: StorageLimitException) {
+                Toast.makeText(appContext, "ファイルを添付できませんでした。${e.message}", Toast.LENGTH_LONG).show()
+                return@launch
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "添付ファイルのコピーに失敗しました", e)
+                null
             }
             if (copied == null) {
                 Toast.makeText(appContext, "ファイルを添付できませんでした", Toast.LENGTH_LONG).show()

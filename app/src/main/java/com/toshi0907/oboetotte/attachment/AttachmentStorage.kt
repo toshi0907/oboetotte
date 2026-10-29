@@ -21,6 +21,12 @@ object AttachmentStorage {
     private const val FILE_PROVIDER_AUTHORITY_SUFFIX = ".fileprovider"
     private const val MAX_EXTENSION_LENGTH = 10
 
+    /**
+     * 添付ファイル1件あたりの上限サイズ。写真(数MB)・PDF・Office文書・短い動画は十分収まり、
+     * Todoアプリの添付としては現実的な範囲を超える巨大ファイルでの内部ストレージ枯渇を防ぐ。
+     */
+    const val MAX_FILE_BYTES = 100L * 1024 * 1024
+
     fun directory(context: Context): File =
         File(context.filesDir, DIR_NAME).apply { mkdirs() }
 
@@ -51,7 +57,11 @@ object AttachmentStorage {
      * [uri]は他アプリから共有Intent経由で渡されることがあり、`openInputStream`はアプリ自身の権限で
      * 実行されるため、[isAllowedSourceUri]を満たさないUri(`file://`等の`content://`以外のスキームや、
      * 自アプリのContentProviderを指す`content://`)は内部ファイルの持ち出しに悪用されうるので
-     * コピーせずnullを返す。コピー中の例外はそのまま呼び出し元へ投げる(途中まで書き込んだファイルは削除する)。
+     * コピーせずnullを返す。また共有受信([com.toshi0907.oboetotte.share.ShareReceiverActivity])の
+     * ようにユーザー操作なしで外部アプリから巨大なストリームを渡されうるため、1ファイルあたり
+     * [MAX_FILE_BYTES]を上限とし、超えた場合や空き容量が[MIN_FREE_SPACE_BYTES]を下回りそうな場合は
+     * [StorageLimitException]を投げる。コピー中の例外はいずれも書きかけのファイルを削除した上で
+     * 呼び出し元へ投げる。
      */
     fun copyToStorage(context: Context, uri: Uri): CopiedFile? {
         if (!isAllowedSourceUri(context, uri)) return null
@@ -67,7 +77,14 @@ object AttachmentStorage {
         val input = resolver.openInputStream(uri) ?: return null
         try {
             input.use { inStream ->
-                destination.outputStream().use { outStream -> inStream.copyTo(outStream) }
+                destination.outputStream().use { outStream ->
+                    inStream.copyToWithLimit(
+                        outStream,
+                        MAX_FILE_BYTES,
+                        "ファイルサイズが上限(${formatLimitBytes(MAX_FILE_BYTES)})を超えています",
+                        storageDir = context.filesDir
+                    )
+                }
             }
             return CopiedFile(
                 fileName = originalName,
@@ -75,7 +92,8 @@ object AttachmentStorage {
                 mimeType = resolver.getType(uri),
                 sizeBytes = destination.length()
             )
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // 上限超過・I/O失敗のいずれでも、DBに登録されない書きかけのファイルを残さない。
             destination.delete()
             throw e
         }

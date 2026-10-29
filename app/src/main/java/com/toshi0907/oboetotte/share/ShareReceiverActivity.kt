@@ -11,6 +11,8 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.toshi0907.oboetotte.TaskViewModel
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
+import com.toshi0907.oboetotte.attachment.StorageLimitException
+import com.toshi0907.oboetotte.attachment.formatLimitBytes
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
@@ -62,17 +64,23 @@ class ShareReceiverActivity : ComponentActivity() {
 
             // 共有元は任意のアプリのため、先にファイルをコピーして検証する。受け付けられないUri(nullが返る)や
             // コピー中の例外はそのファイルだけスキップし、残りのファイルの処理は続行する。
+            // サイズ上限超過・空き容量不足で添付できなかったファイル数(他のファイルの添付は続行する)。
+            var rejectedCount = 0
             val copiedFiles = withContext(Dispatchers.IO) {
                 uris.mapNotNull { uri ->
                     try {
                         AttachmentStorage.copyToStorage(applicationContext, uri)
+                    } catch (e: StorageLimitException) {
+                        rejectedCount++
+                        null
                     } catch (e: Exception) {
                         Log.w(TAG, "共有ファイルのコピーに失敗しました", e)
                         null
                     }
                 }
             }
-            val failedCount = uris.size - copiedFiles.size
+            // 受け付けられないUri・上記以外の例外で添付できなかったファイル数。
+            val failedCount = uris.size - copiedFiles.size - rejectedCount
             // 取り込めるものが何も無い共有(拒否されたUriのみ等)では、空のタスクを作らない
             // (他アプリから無操作で空タスク・リマインダーを量産されないようにする)。
             if (copiedFiles.isEmpty() && sharedText == null) {
@@ -111,6 +119,12 @@ class ShareReceiverActivity : ComponentActivity() {
 
             val resultParts = mutableListOf<String>()
             if (attachedCount > 0) resultParts.add("添付${attachedCount}件")
+            if (rejectedCount > 0) {
+                resultParts.add(
+                    "サイズ上限(${formatLimitBytes(AttachmentStorage.MAX_FILE_BYTES)})超過・空き容量不足で" +
+                        "添付できなかったファイル${rejectedCount}件"
+                )
+            }
             if (isSharedUrl) resultParts.add("URL") else if (sharedText != null) resultParts.add("メモ")
             if (failedCount > 0) resultParts.add("添付失敗${failedCount}件")
             val suffix = if (resultParts.isEmpty()) "" else "(${resultParts.joinToString("、")})"
