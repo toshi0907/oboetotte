@@ -66,54 +66,75 @@ class ShareReceiverActivity : ComponentActivity() {
             // コピー中の例外はそのファイルだけスキップし、残りのファイルの処理は続行する。
             // サイズ上限超過・空き容量不足で添付できなかったファイル数(他のファイルの添付は続行する)。
             var rejectedCount = 0
-            val copiedFiles = withContext(Dispatchers.IO) {
-                uris.mapNotNull { uri ->
+            // コピー済みでまだDBに添付として登録していないファイル。処理のキャンセル(Activity破棄)や
+            // DB登録の失敗で登録まで到達しなかったものは、finallyで削除して実体だけが残らないようにする。
+            val unpersisted = mutableListOf<AttachmentStorage.CopiedFile>()
+            var copiedFiles: List<AttachmentStorage.CopiedFile> = emptyList()
+            var taskId = 0L
+            var title = ""
+            try {
+                // withContextはキャンセルされてもブロックの完了を待ってから戻るため、IOスレッドでの
+                // unpersistedへの追加はfinallyより前に完了している。
+                withContext(Dispatchers.IO) {
+                    uris.forEach { uri ->
+                        val copied = try {
+                            AttachmentStorage.copyToStorage(applicationContext, uri)
+                        } catch (e: StorageLimitException) {
+                            rejectedCount++
+                            null
+                        } catch (e: Exception) {
+                            Log.w(TAG, "共有ファイルのコピーに失敗しました", e)
+                            null
+                        }
+                        if (copied != null) unpersisted.add(copied)
+                    }
+                }
+                copiedFiles = unpersisted.toList()
+                // 取り込めるものが何も無い共有(拒否されたUriのみ等)では、空のタスクを作らない
+                // (他アプリから無操作で空タスク・リマインダーを量産されないようにする)。
+                if (copiedFiles.isEmpty() && sharedText == null) {
+                    Toast.makeText(
+                        applicationContext,
+                        "共有されたファイルを取り込めませんでした",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                    return@launch
+                }
+
+                title = "タスク(${TITLE_DATE_FORMAT.format(LocalDateTime.now())})"
+                val task = Task(
+                    title = title,
+                    dueAt = System.currentTimeMillis() + TaskViewModel.DEFAULT_DUE_DELAY_MILLIS,
+                    url = if (isSharedUrl) normalizeUrl(sharedText!!) else null,
+                    memo = if (!isSharedUrl) sharedText else null
+                )
+                taskId = taskDao.insert(task)
+                ReminderScheduler.schedule(applicationContext, task.copy(id = taskId))
+
+                copiedFiles.forEach { copied ->
+                    taskAttachmentDao.insert(
+                        TaskAttachment(
+                            taskId = taskId,
+                            fileName = copied.fileName,
+                            storedFileName = copied.storedFileName,
+                            mimeType = copied.mimeType,
+                            sizeBytes = copied.sizeBytes
+                        )
+                    )
+                    unpersisted.remove(copied)
+                }
+            } finally {
+                unpersisted.forEach { copied ->
                     try {
-                        AttachmentStorage.copyToStorage(applicationContext, uri)
-                    } catch (e: StorageLimitException) {
-                        rejectedCount++
-                        null
+                        AttachmentStorage.delete(applicationContext, copied.storedFileName)
                     } catch (e: Exception) {
-                        Log.w(TAG, "共有ファイルのコピーに失敗しました", e)
-                        null
+                        Log.w(TAG, "未登録の共有ファイルの削除に失敗しました", e)
                     }
                 }
             }
             // 受け付けられないUri・上記以外の例外で添付できなかったファイル数。
             val failedCount = uris.size - copiedFiles.size - rejectedCount
-            // 取り込めるものが何も無い共有(拒否されたUriのみ等)では、空のタスクを作らない
-            // (他アプリから無操作で空タスク・リマインダーを量産されないようにする)。
-            if (copiedFiles.isEmpty() && sharedText == null) {
-                Toast.makeText(
-                    applicationContext,
-                    "共有されたファイルを取り込めませんでした",
-                    Toast.LENGTH_LONG
-                ).show()
-                finish()
-                return@launch
-            }
-
-            val title = "タスク(${TITLE_DATE_FORMAT.format(LocalDateTime.now())})"
-            val task = Task(
-                title = title,
-                dueAt = System.currentTimeMillis() + TaskViewModel.DEFAULT_DUE_DELAY_MILLIS,
-                url = if (isSharedUrl) normalizeUrl(sharedText!!) else null,
-                memo = if (!isSharedUrl) sharedText else null
-            )
-            val taskId = taskDao.insert(task)
-            ReminderScheduler.schedule(applicationContext, task.copy(id = taskId))
-
-            copiedFiles.forEach { copied ->
-                taskAttachmentDao.insert(
-                    TaskAttachment(
-                        taskId = taskId,
-                        fileName = copied.fileName,
-                        storedFileName = copied.storedFileName,
-                        mimeType = copied.mimeType,
-                        sizeBytes = copied.sizeBytes
-                    )
-                )
-            }
             val attachedCount = copiedFiles.size
             refreshTaskWidget(applicationContext)
 
