@@ -35,6 +35,7 @@ import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -164,13 +165,18 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     val operationLogs: StateFlow<List<OperationLog>> = operationLogDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** タスクの詳細画面の「操作ログ」用。[taskGroupId]はタスクの[attachmentGroupId]。 */
+    fun operationLogsForTaskGroup(taskGroupId: Long): Flow<List<OperationLog>> =
+        operationLogDao.getForTaskGroup(taskGroupId)
+
     /** 操作ログ画面の「ログを消去」ボタン用。 */
     fun clearOperationLogs() {
         viewModelScope.launch { OperationLogger.clearAll(appContext) }
     }
 
-    private fun logOperation(action: String, detail: String = "") {
-        OperationLogger.logAsync(appContext, OperationLogSource.APP, action, detail)
+    /** [taskGroupId](対象タスクの[attachmentGroupId])を指定すると、そのタスクの詳細画面の操作ログにも表示される。 */
+    private fun logOperation(action: String, detail: String = "", taskGroupId: Long? = null) {
+        OperationLogger.logAsync(appContext, OperationLogSource.APP, action, detail, taskGroupId)
     }
 
     private val _locationTrackingMode =
@@ -311,7 +317,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val id = taskDao.insert(newTask)
             val inserted = newTask.copy(id = id)
             ReminderScheduler.schedule(appContext, inserted)
-            logOperation("タスク追加", inserted.logLabel())
+            logOperation("タスク追加", inserted.logLabel(), inserted.attachmentGroupId())
             refreshTaskWidget(appContext)
             onAdded(inserted)
         }
@@ -325,7 +331,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 ReminderScheduler.schedule(appContext, updated)
                 LocationReminderManager.register(appContext, updated)
                 // 既に未完了に戻っていた・削除済み等で実際には状態が変わらなかった場合は記録しない。
-                if (updatedRows > 0) logOperation("タスクを未完了に戻す", task.logLabel())
+                if (updatedRows > 0) logOperation("タスクを未完了に戻す", task.logLabel(), task.attachmentGroupId())
                 refreshTaskWidget(appContext)
             } else {
                 // TaskCompletion.completeが自身でウィジェットの再描画・操作ログの記録までまとめて行う。
@@ -389,7 +395,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             )
             // 何も変更せずに保存した場合は記録しない。
             if (changes.isNotEmpty()) {
-                logOperation("タスク編集", "${current.logLabel()} ${changes.joinToString("、")}")
+                logOperation("タスク編集", "${current.logLabel()} ${changes.joinToString("、")}", current.attachmentGroupId())
             }
             refreshTaskWidget(appContext)
         }
@@ -420,7 +426,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     sizeBytes = copied.sizeBytes
                 )
             )
-            logOperation("添付ファイル追加", "${task.logLabel()} ${copied.fileName}")
+            logOperation("添付ファイル追加", "${task.logLabel()} ${copied.fileName}", task.attachmentGroupId())
         }
     }
 
@@ -430,7 +436,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 AttachmentStorage.delete(appContext, attachment.storedFileName)
             }
-            logOperation("添付ファイル削除", attachment.fileName)
+            // 添付ファイルのtaskIdは添付先タスクのattachmentGroupId()。
+            logOperation("添付ファイル削除", attachment.fileName, attachment.taskId)
         }
     }
 
@@ -445,7 +452,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             )
             val id = taskDao.insert(newSubtask)
             ReminderScheduler.schedule(appContext, newSubtask.copy(id = id))
-            logOperation("サブタスク追加", "${parent.logLabel()}に「$trimmed」")
+            logOperation("サブタスク追加", "${parent.logLabel()}に「$trimmed」", parent.attachmentGroupId())
             refreshTaskWidget(appContext)
         }
     }

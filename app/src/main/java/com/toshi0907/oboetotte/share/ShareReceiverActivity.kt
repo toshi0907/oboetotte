@@ -88,7 +88,13 @@ class ShareReceiverActivity : ComponentActivity() {
             if (attachedCount > 0) resultParts.add("添付${attachedCount}件")
             if (isSharedUrl) resultParts.add("URL") else if (sharedText != null) resultParts.add("メモ")
             val suffix = if (resultParts.isEmpty()) "" else "(${resultParts.joinToString("、")})"
-            OperationLogger.logAsync(applicationContext, OperationLogSource.SHARE, "タスク追加", "「$title」$suffix")
+            OperationLogger.logAsync(
+                applicationContext,
+                OperationLogSource.SHARE,
+                "タスク追加",
+                "「$title」$suffix",
+                taskGroupId = taskId
+            )
             Toast.makeText(
                 applicationContext,
                 "「$title」を追加しました$suffix",

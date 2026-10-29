@@ -37,6 +37,6 @@ object TaskDeletion {
             }
         }
         // 二重に削除操作が行われた場合等、実際には行を削除していなければ記録しない。
-        if (deletedRows > 0) OperationLogger.log(context, source, action, task.logLabel())
+        if (deletedRows > 0) OperationLogger.log(context, source, action, task.logLabel(), groupId)
     }
 }

@@ -363,6 +363,9 @@ object BackupManager {
                     db.savedLocationDao().insertAll(savedLocations)
                     db.taskAttachmentDao().insertAll(attachments)
                     db.vibrationPatternDao().insertAll(vibrationPatterns)
+                    // 取り込んだタスクは元のIDのまま復元されるため、既存の操作ログのタスクとの紐づけが
+                    // 無関係なタスクを指してしまわないよう解除する(ログ自体は設定画面で引き続き見られる)。
+                    db.operationLogDao().clearTaskGroupIds()
                 }
             } catch (e: Exception) {
                 // DB側が失敗した場合は、直前で入れ替えたディレクトリを元に戻す
