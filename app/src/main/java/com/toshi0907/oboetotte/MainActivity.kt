@@ -2,6 +2,7 @@ package com.toshi0907.oboetotte
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -1230,6 +1231,18 @@ fun TaskTreeRow(
 }
 
 /**
+ * [url]を`ACTION_VIEW`で開く。スキームは小文字に正規化する(`HTTPS://`等だとブラウザの
+ * intent-filterにマッチしないため)。開けるアプリが無ければトーストを表示する。
+ */
+private fun openUrl(context: Context, url: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url).normalizeScheme()))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
  * メモ本文を表示する。本文中の`http://`/`https://`のURL([findMemoUrlRanges])はリンク色+下線で
  * 表示しタップでブラウザ等を開く。[SelectionContainer]で囲んでいるため長押しで範囲選択・コピーもできる。
  */
@@ -1242,20 +1255,14 @@ private fun LinkifiedMemoText(memo: String) {
             textDecoration = TextDecoration.Underline
         )
     )
-    val annotated = remember(memo, linkStyles) {
+    val annotated = remember(memo, linkStyles, context) {
         buildAnnotatedString {
             var last = 0
             findMemoUrlRanges(memo).forEach { range ->
                 append(memo.substring(last, range.first))
                 val url = memo.substring(range)
                 withLink(
-                    LinkAnnotation.Clickable(tag = url, styles = linkStyles) {
-                        try {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        } catch (e: ActivityNotFoundException) {
-                            Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                    LinkAnnotation.Clickable(tag = url, styles = linkStyles) { openUrl(context, url) }
                 ) {
                     append(url)
                 }
@@ -1353,13 +1360,7 @@ fun TaskDetailDialog(
                         text = url,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable {
-                            try {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            } catch (e: ActivityNotFoundException) {
-                                Toast.makeText(context, "開けるアプリが見つかりません", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                        modifier = Modifier.clickable { openUrl(context, url) }
                     )
                 }
                 Text(text = current.dueAt?.let { formatDueAt(it) } ?: "期限なし")
