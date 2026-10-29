@@ -1,5 +1,6 @@
 package com.toshi0907.oboetotte.attachment
 
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -18,6 +19,7 @@ import java.util.UUID
 object AttachmentStorage {
     private const val DIR_NAME = "attachments"
     private const val FILE_PROVIDER_AUTHORITY_SUFFIX = ".fileprovider"
+    private const val MAX_EXTENSION_LENGTH = 10
 
     fun directory(context: Context): File =
         File(context.filesDir, DIR_NAME).apply { mkdirs() }
@@ -43,13 +45,19 @@ object AttachmentStorage {
     }
 
     /**
-     * [uri]の内容を端末内にコピーする。呼び出し元([TaskViewModel])が`Dispatchers.IO`上で
+     * [uri]の内容を端末内にコピーする。呼び出し元([TaskViewModel]・共有受信)が`Dispatchers.IO`上で
      * 呼び出すことを想定したブロッキングI/O。
+     *
+     * [uri]は他アプリから共有Intent経由で渡されることがあり、`openInputStream`はアプリ自身の権限で
+     * 実行されるため、[isAllowedSourceUri]を満たさないUri(`file://`等の`content://`以外のスキームや、
+     * 自アプリのContentProviderを指す`content://`)は内部ファイルの持ち出しに悪用されうるので
+     * コピーせずnullを返す。コピー中の例外はそのまま呼び出し元へ投げる(途中まで書き込んだファイルは削除する)。
      */
     fun copyToStorage(context: Context, uri: Uri): CopiedFile? {
+        if (!isAllowedSourceUri(context, uri)) return null
         val resolver = context.contentResolver
         val originalName = queryFileName(context, uri) ?: uri.lastPathSegment ?: "file"
-        val extension = originalName.substringAfterLast('.', "")
+        val extension = safeExtension(originalName)
         val storedFileName = if (extension.isNotEmpty()) {
             "${UUID.randomUUID()}.$extension"
         } else {
@@ -57,8 +65,13 @@ object AttachmentStorage {
         }
         val destination = file(context, storedFileName)
         val input = resolver.openInputStream(uri) ?: return null
-        input.use { inStream ->
-            destination.outputStream().use { outStream -> inStream.copyTo(outStream) }
+        try {
+            input.use { inStream ->
+                destination.outputStream().use { outStream -> inStream.copyTo(outStream) }
+            }
+        } catch (e: Exception) {
+            destination.delete()
+            throw e
         }
         return CopiedFile(
             fileName = originalName,
@@ -66,6 +79,45 @@ object AttachmentStorage {
             mimeType = resolver.getType(uri),
             sizeBytes = destination.length()
         )
+    }
+
+    /**
+     * 添付ファイルのコピー元として受け付けてよいUriか。`content://`のみを許可し、そのうち
+     * 自アプリのFileProvider(`${applicationId}.fileprovider`)や自アプリが提供するその他の
+     * ContentProviderを指すものは拒否する。
+     */
+    private fun isAllowedSourceUri(context: Context, uri: Uri): Boolean {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        val authority = providerAuthority(uri.authority) ?: return false
+        if (isOwnFileProviderAuthority(authority, context.packageName)) return false
+        @Suppress("DEPRECATION")
+        val ownerPackage = context.packageManager.resolveContentProvider(authority, 0)?.packageName
+        return ownerPackage != context.packageName
+    }
+
+    /**
+     * Uriのauthority部分から、ContentResolverが実際にプロバイダの解決に使う値を取り出す。
+     * ContentResolverは`userId@authority`形式の先頭のユーザーIDを取り除いて解決するため、
+     * 同様に`@`より後ろを使う(`0@<自アプリのauthority>`のような指定で拒否を回避されないようにする)。
+     */
+    internal fun providerAuthority(rawAuthority: String?): String? =
+        rawAuthority?.substringAfterLast('@')?.takeIf { it.isNotEmpty() }
+
+    internal fun isOwnFileProviderAuthority(authority: String, packageName: String): Boolean =
+        authority.equals(packageName + FILE_PROVIDER_AUTHORITY_SUFFIX, ignoreCase = true)
+
+    /**
+     * 保存用ファイル名に付ける拡張子。共有元のContentProviderが返す`DISPLAY_NAME`は任意の文字列に
+     * なりうる(`a./x`のようにパス区切りを含むと[file]の検証で例外になる)ため、英数字のみ・
+     * [MAX_EXTENSION_LENGTH]文字以内の場合だけ採用し、それ以外は拡張子なしにフォールバックする。
+     */
+    internal fun safeExtension(fileName: String): String {
+        val extension = fileName.substringAfterLast('.', "")
+        return if (extension.length in 1..MAX_EXTENSION_LENGTH && extension.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }) {
+            extension
+        } else {
+            ""
+        }
     }
 
     fun delete(context: Context, storedFileName: String) {

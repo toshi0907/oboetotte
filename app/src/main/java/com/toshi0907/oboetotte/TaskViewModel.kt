@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
@@ -415,7 +416,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun addAttachment(task: Task, uri: Uri) {
         viewModelScope.launch {
             val copied = withContext(Dispatchers.IO) {
-                AttachmentStorage.copyToStorage(appContext, uri)
+                try {
+                    AttachmentStorage.copyToStorage(appContext, uri)
+                } catch (e: Exception) {
+                    Log.w(TAG, "添付ファイルのコピーに失敗しました", e)
+                    null
+                }
             } ?: return@launch
             taskAttachmentDao.insert(
                 TaskAttachment(
@@ -709,6 +715,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        private const val TAG = "TaskViewModel"
+
         /**
          * [selectedListId]に渡すと「リスト未登録」(`listId == null`のタスクのみ)を表す特別な値。
          * Roomの`TaskList.id`は`autoGenerate`で1から始まるため、負の値であれば実際のリストIDと
