@@ -35,7 +35,8 @@ import java.time.format.DateTimeFormatter
  * [Task.memo]に格納する(ファイル添付と同時に指定されていても両方保存する)。期限は他のタスク登録と
  * 同様デフォルトで1時間後([TaskViewModel.DEFAULT_DUE_DELAY_MILLIS])を設定する。共有ファイルのUriは
  * [AttachmentStorage.copyToStorage]側で検証され(`content://`以外や自アプリのProviderを指すものは拒否)、
- * 拒否・コピー失敗したファイルはスキップしてToastに失敗件数を表示する。画面には何も表示せず
+ * 拒否・コピー失敗したファイルはスキップしてToastに失敗件数を表示する(取り込めるファイルもテキストも
+ * 無い場合はタスクを作成しない)。画面には何も表示せず
  * (`Theme.Oboetotte.SnoozeDialog`の透過テーマを流用)、処理完了後にToastで結果を通知してfinishする。
  */
 class ShareReceiverActivity : ComponentActivity() {
@@ -59,6 +60,31 @@ class ShareReceiverActivity : ComponentActivity() {
             val taskDao = database.taskDao()
             val taskAttachmentDao = database.taskAttachmentDao()
 
+            // 共有元は任意のアプリのため、先にファイルをコピーして検証する。受け付けられないUri(nullが返る)や
+            // コピー中の例外はそのファイルだけスキップし、残りのファイルの処理は続行する。
+            val copiedFiles = withContext(Dispatchers.IO) {
+                uris.mapNotNull { uri ->
+                    try {
+                        AttachmentStorage.copyToStorage(applicationContext, uri)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "共有ファイルのコピーに失敗しました", e)
+                        null
+                    }
+                }
+            }
+            val failedCount = uris.size - copiedFiles.size
+            // 取り込めるものが何も無い共有(拒否されたUriのみ等)では、空のタスクを作らない
+            // (他アプリから無操作で空タスク・リマインダーを量産されないようにする)。
+            if (copiedFiles.isEmpty() && sharedText == null) {
+                Toast.makeText(
+                    applicationContext,
+                    "共有されたファイルを取り込めませんでした",
+                    Toast.LENGTH_LONG
+                ).show()
+                finish()
+                return@launch
+            }
+
             val title = "タスク(${TITLE_DATE_FORMAT.format(LocalDateTime.now())})"
             val task = Task(
                 title = title,
@@ -69,34 +95,18 @@ class ShareReceiverActivity : ComponentActivity() {
             val taskId = taskDao.insert(task)
             ReminderScheduler.schedule(applicationContext, task.copy(id = taskId))
 
-            var attachedCount = 0
-            var failedCount = 0
-            withContext(Dispatchers.IO) {
-                uris.forEach { uri ->
-                    // 共有元は任意のアプリのため、受け付けられないUri(nullが返る)やコピー中の例外は
-                    // そのファイルだけスキップし、残りの処理(タスク作成・他の添付)は続行する。
-                    val copied = try {
-                        AttachmentStorage.copyToStorage(applicationContext, uri)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "共有ファイルのコピーに失敗しました", e)
-                        null
-                    }
-                    if (copied == null) {
-                        failedCount++
-                        return@forEach
-                    }
-                    taskAttachmentDao.insert(
-                        TaskAttachment(
-                            taskId = taskId,
-                            fileName = copied.fileName,
-                            storedFileName = copied.storedFileName,
-                            mimeType = copied.mimeType,
-                            sizeBytes = copied.sizeBytes
-                        )
+            copiedFiles.forEach { copied ->
+                taskAttachmentDao.insert(
+                    TaskAttachment(
+                        taskId = taskId,
+                        fileName = copied.fileName,
+                        storedFileName = copied.storedFileName,
+                        mimeType = copied.mimeType,
+                        sizeBytes = copied.sizeBytes
                     )
-                    attachedCount++
-                }
+                )
             }
+            val attachedCount = copiedFiles.size
             refreshTaskWidget(applicationContext)
 
             val resultParts = mutableListOf<String>()

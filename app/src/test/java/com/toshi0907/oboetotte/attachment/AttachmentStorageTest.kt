@@ -40,4 +40,13 @@ class AttachmentStorageTest {
         assertTrue(AttachmentStorage.isOwnFileProviderAuthority("COM.toshi0907.oboetotte.FileProvider", pkg))
         assertFalse(AttachmentStorage.isOwnFileProviderAuthority("com.android.providers.media.documents", pkg))
     }
+
+    @Test
+    fun isPathUnder_matchesBySegment() {
+        val tree = listOf("tree", "primary:Backup")
+        assertTrue(AttachmentStorage.isPathUnder(tree, tree))
+        assertTrue(AttachmentStorage.isPathUnder(tree + listOf("document", "primary:Backup/a.zip"), tree))
+        assertFalse(AttachmentStorage.isPathUnder(listOf("tree", "primary:BackupX"), tree))
+        assertFalse(AttachmentStorage.isPathUnder(listOf("document", "primary:Backup/a.zip"), tree))
+    }
 }

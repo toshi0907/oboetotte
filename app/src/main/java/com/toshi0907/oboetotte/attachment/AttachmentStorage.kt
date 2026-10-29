@@ -69,22 +69,24 @@ object AttachmentStorage {
             input.use { inStream ->
                 destination.outputStream().use { outStream -> inStream.copyTo(outStream) }
             }
+            return CopiedFile(
+                fileName = originalName,
+                storedFileName = storedFileName,
+                mimeType = resolver.getType(uri),
+                sizeBytes = destination.length()
+            )
         } catch (e: Exception) {
             destination.delete()
             throw e
         }
-        return CopiedFile(
-            fileName = originalName,
-            storedFileName = storedFileName,
-            mimeType = resolver.getType(uri),
-            sizeBytes = destination.length()
-        )
     }
 
     /**
      * 添付ファイルのコピー元として受け付けてよいUriか。`content://`のみを許可し、そのうち
      * 自アプリのFileProvider(`${applicationId}.fileprovider`)や自アプリが提供するその他の
-     * ContentProviderを指すものは拒否する。
+     * ContentProviderを指すもの、および自アプリが永続的なアクセス権を持つUri配下(クラウド自動
+     * バックアップの保存先フォルダ等、SAFの`takePersistableUriPermission`で得た権限を共有元に
+     * 流用されないようにする)を指すものは拒否する。
      */
     private fun isAllowedSourceUri(context: Context, uri: Uri): Boolean {
         if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
@@ -92,8 +94,17 @@ object AttachmentStorage {
         if (isOwnFileProviderAuthority(authority, context.packageName)) return false
         @Suppress("DEPRECATION")
         val ownerPackage = context.packageManager.resolveContentProvider(authority, 0)?.packageName
-        return ownerPackage != context.packageName
+        if (ownerPackage == context.packageName) return false
+        return context.contentResolver.persistedUriPermissions.none { permission ->
+            val grantedUri = permission.uri
+            providerAuthority(grantedUri.authority).equals(authority, ignoreCase = true) &&
+                isPathUnder(uri.pathSegments, grantedUri.pathSegments)
+        }
     }
+
+    /** [path]が[prefix]と同じ、またはその配下のパス(パスセグメント単位の前方一致)か。 */
+    internal fun isPathUnder(path: List<String>, prefix: List<String>): Boolean =
+        path.size >= prefix.size && path.subList(0, prefix.size) == prefix
 
     /**
      * Uriのauthority部分から、ContentResolverが実際にプロバイダの解決に使う値を取り出す。
@@ -138,7 +149,6 @@ object AttachmentStorage {
     }
 
     private fun queryFileName(context: Context, uri: Uri): String? {
-        if (uri.scheme != "content") return null
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { cursor ->
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)

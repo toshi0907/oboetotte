@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
@@ -422,7 +423,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     Log.w(TAG, "添付ファイルのコピーに失敗しました", e)
                     null
                 }
-            } ?: return@launch
+            }
+            if (copied == null) {
+                Toast.makeText(appContext, "ファイルを添付できませんでした", Toast.LENGTH_LONG).show()
+                return@launch
+            }
             taskAttachmentDao.insert(
                 TaskAttachment(
                     taskId = task.attachmentGroupId(),
