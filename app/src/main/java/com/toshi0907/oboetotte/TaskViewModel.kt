@@ -35,6 +35,7 @@ import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -163,6 +164,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     val operationLogs: StateFlow<List<OperationLog>> = operationLogDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** タスクの詳細画面の「操作ログ」用。[taskGroupId]はタスクの[attachmentGroupId]。 */
+    fun operationLogsForTaskGroup(taskGroupId: Long): Flow<List<OperationLog>> =
+        operationLogDao.getForTaskGroup(taskGroupId)
 
     /** 操作ログ画面の「ログを消去」ボタン用。 */
     fun clearOperationLogs() {

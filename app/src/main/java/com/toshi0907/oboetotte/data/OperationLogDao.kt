@@ -14,6 +14,14 @@ interface OperationLogDao {
     @Query("SELECT * FROM operation_logs ORDER BY timestamp DESC, id DESC")
     fun getAll(): Flow<List<OperationLog>>
 
+    /** タスクの詳細画面用。[taskGroupId](対象タスクのattachmentGroupId)に紐づくログを新しい順に返す。 */
+    @Query("SELECT * FROM operation_logs WHERE taskGroupId = :taskGroupId ORDER BY timestamp DESC, id DESC")
+    fun getForTaskGroup(taskGroupId: Long): Flow<List<OperationLog>>
+
+    /** インポートでタスクを入れ替えた際に、既存ログとタスクの紐づけを解除する。 */
+    @Query("UPDATE operation_logs SET taskGroupId = NULL WHERE taskGroupId IS NOT NULL")
+    suspend fun clearTaskGroupIds()
+
     @Query("DELETE FROM operation_logs WHERE timestamp < :cutoff")
     suspend fun deleteOlderThan(cutoff: Long)
 

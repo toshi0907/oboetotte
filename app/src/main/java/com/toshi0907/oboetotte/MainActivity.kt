@@ -145,6 +145,8 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -374,7 +376,7 @@ class MainActivity : ComponentActivity() {
                             savedLocations = savedLocations,
                             vibrationPatterns = vibrationPatterns,
                             allAttachments = attachments,
-                            operationLogs = operationLogs,
+                            operationLogsForTaskGroup = taskViewModel::operationLogsForTaskGroup,
                             onAddAttachment = taskViewModel::addAttachment,
                             onDeleteAttachment = taskViewModel::deleteAttachment,
                             showExactAlarmBanner = !exactAlarmPermissionGranted,
@@ -643,7 +645,7 @@ fun TaskScreen(
     savedLocations: List<SavedLocation> = emptyList(),
     vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
-    operationLogs: List<OperationLog> = emptyList(),
+    operationLogsForTaskGroup: (Long) -> Flow<List<OperationLog>> = { flowOf(emptyList()) },
     onAddAttachment: (Task, Uri) -> Unit = { _, _ -> },
     onDeleteAttachment: (TaskAttachment) -> Unit = {},
     showExactAlarmBanner: Boolean = false,
@@ -869,7 +871,7 @@ fun TaskScreen(
             savedLocations = savedLocations,
             vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
-            operationLogs = operationLogs,
+            operationLogsForTaskGroup = operationLogsForTaskGroup,
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
             onAddSubtask = onAddSubtask,
@@ -1236,7 +1238,7 @@ fun TaskDetailDialog(
     savedLocations: List<SavedLocation> = emptyList(),
     vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
-    operationLogs: List<OperationLog> = emptyList(),
+    operationLogsForTaskGroup: (Long) -> Flow<List<OperationLog>> = { flowOf(emptyList()) },
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
@@ -1254,7 +1256,9 @@ fun TaskDetailDialog(
     val attachments = allAttachments.filter { it.taskId == current.attachmentGroupId() }
     // 繰り返しタスクはシリーズ全体(attachmentGroupIdが共通)の操作ログを表示する。サブタスクへの
     // 操作はそのサブタスク自身の詳細にのみ表示する(サブタスク追加は親タスクへの操作として記録)。
-    val taskOperationLogs = operationLogs.filter { it.taskGroupId == current.attachmentGroupId() }
+    val taskGroupId = current.attachmentGroupId()
+    val taskOperationLogs by remember(taskGroupId) { operationLogsForTaskGroup(taskGroupId) }
+        .collectAsState(initial = emptyList())
     val listName = lists.find { it.id == current.listId }?.name
 
     AlertDialog(
@@ -1420,7 +1424,7 @@ fun TaskDetailDialog(
             savedLocations = savedLocations,
             vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
-            operationLogs = operationLogs,
+            operationLogsForTaskGroup = operationLogsForTaskGroup,
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
             onAddSubtask = onAddSubtask,
