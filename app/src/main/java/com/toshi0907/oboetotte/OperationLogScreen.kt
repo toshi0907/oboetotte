@@ -110,8 +110,9 @@ fun OperationLogScreen(
     }
 }
 
+/** 操作ログ1件分の行。設定画面の[OperationLogScreen]とタスクの詳細画面([TaskDetailDialog])で共用する。 */
 @Composable
-private fun OperationLogRow(log: OperationLog) {
+internal fun OperationLogRow(log: OperationLog) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)

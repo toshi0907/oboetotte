@@ -37,7 +37,8 @@ object TaskCompletion {
         // 0件超の更新件数を得る。他方はここで早期returnし、繰り返しタスクの次回分が
         // 重複生成されるのを防ぐ(呼び出し元から渡されたtaskスナップショットのisDoneは
         // 古い可能性があるため、DBへの書き込み結果そのものを正としてチェックする)。
-        val updatedRows = taskDao.setDone(task.id, true, System.currentTimeMillis())
+        val completedAt = System.currentTimeMillis()
+        val updatedRows = taskDao.setDone(task.id, true, completedAt)
         if (updatedRows == 0) return
         ReminderScheduler.cancel(context, task.id)
         LocationReminderManager.unregister(context, task.id)
@@ -45,15 +46,23 @@ object TaskCompletion {
         val rule = task.repeatRule
         val dueAt = task.dueAt
         val daysOfWeek = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek)
+        val intervalDays = task.repeatIntervalDays?.takeIf { it in RepeatRule.INTERVAL_DAYS_RANGE }
+        val computedNextDueAt = when {
+            rule == null || dueAt == null -> null
+            rule == RepeatRule.AFTER_COMPLETION ->
+                intervalDays?.let { RepeatRule.nextDueAtAfterCompletion(dueAt, completedAt, it) }
+            rule == RepeatRule.WEEKLY_DAYS && daysOfWeek.isEmpty() -> null
+            else -> RepeatRule.nextDueAt(dueAt, rule, daysOfWeek)
+        }
         var nextDueAt: Long? = null
-        if (rule != null && dueAt != null && (rule != RepeatRule.WEEKLY_DAYS || daysOfWeek.isNotEmpty())) {
+        if (computedNextDueAt != null) {
             // seriesIdを引き継ぐことで、次回分のタスクも同じattachmentGroupId()を持ち、
             // 添付ファイルが繰り返しシリーズ全体で共有され続ける(完了時に消えない)。
             val nextTask = task.copy(
                 id = 0,
                 isDone = false,
                 completedAt = null,
-                dueAt = RepeatRule.nextDueAt(dueAt, rule, daysOfWeek),
+                dueAt = computedNextDueAt,
                 seriesId = task.attachmentGroupId()
             )
             val newId = taskDao.insert(nextTask)
@@ -66,7 +75,8 @@ object TaskCompletion {
             context,
             source,
             "タスク完了",
-            task.logLabel() + nextDueAt?.let { "(次回分: ${formatDueAt(it)})" }.orEmpty()
+            task.logLabel() + nextDueAt?.let { "(次回分: ${formatDueAt(it)})" }.orEmpty(),
+            task.attachmentGroupId()
         )
         refreshTaskWidget(context)
     }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.room.withTransaction
+import com.toshi0907.oboetotte.RepeatRule
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.SavedLocation
@@ -75,6 +76,7 @@ object BackupManager {
                             put("parentTaskId", task.parentTaskId ?: JSONObject.NULL)
                             put("repeatRule", task.repeatRule ?: JSONObject.NULL)
                             put("repeatDaysOfWeek", task.repeatDaysOfWeek ?: JSONObject.NULL)
+                            put("repeatIntervalDays", task.repeatIntervalDays ?: JSONObject.NULL)
                             put("locationName", task.locationName ?: JSONObject.NULL)
                             put("latitude", task.latitude ?: JSONObject.NULL)
                             put("longitude", task.longitude ?: JSONObject.NULL)
@@ -227,6 +229,12 @@ object BackupManager {
                 parentTaskId = if (obj.isNull("parentTaskId")) null else obj.getLong("parentTaskId"),
                 repeatRule = if (obj.isNull("repeatRule")) null else obj.getString("repeatRule"),
                 repeatDaysOfWeek = if (obj.isNull("repeatDaysOfWeek")) null else obj.getString("repeatDaysOfWeek"),
+                // キーの無い旧形式のバックアップはisNullがtrueを返すためnullになる。範囲外の値は無視する
+                // (TaskCompletion側でも次回分を生成しない)。getIntはInt範囲外の値を桁あふれさせて
+                // 範囲内の値に化けさせうるため、Longのまま範囲を検証してからIntにする。
+                repeatIntervalDays = (if (obj.isNull("repeatIntervalDays")) null else obj.getLong("repeatIntervalDays"))
+                    ?.takeIf { it in RepeatRule.INTERVAL_DAYS_RANGE }
+                    ?.toInt(),
                 locationName = if (obj.isNull("locationName")) null else obj.getString("locationName"),
                 latitude = if (obj.isNull("latitude")) null else obj.getDouble("latitude"),
                 longitude = if (obj.isNull("longitude")) null else obj.getDouble("longitude"),
@@ -355,6 +363,9 @@ object BackupManager {
                     db.savedLocationDao().insertAll(savedLocations)
                     db.taskAttachmentDao().insertAll(attachments)
                     db.vibrationPatternDao().insertAll(vibrationPatterns)
+                    // 取り込んだタスクは元のIDのまま復元されるため、既存の操作ログのタスクとの紐づけが
+                    // 無関係なタスクを指してしまわないよう解除する(ログ自体は設定画面で引き続き見られる)。
+                    db.operationLogDao().clearTaskGroupIds()
                 }
             } catch (e: Exception) {
                 // DB側が失敗した場合は、直前で入れ替えたディレクトリを元に戻す

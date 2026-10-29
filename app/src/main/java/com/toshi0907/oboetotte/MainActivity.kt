@@ -121,6 +121,7 @@ import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.data.TaskAttachment
 import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.data.VibrationPattern
+import com.toshi0907.oboetotte.data.OperationLog
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
 import com.toshi0907.oboetotte.notification.LocationTrackingMode
@@ -144,6 +145,8 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -373,6 +376,7 @@ class MainActivity : ComponentActivity() {
                             savedLocations = savedLocations,
                             vibrationPatterns = vibrationPatterns,
                             allAttachments = attachments,
+                            operationLogsForTaskGroup = taskViewModel::operationLogsForTaskGroup,
                             onAddAttachment = taskViewModel::addAttachment,
                             onDeleteAttachment = taskViewModel::deleteAttachment,
                             showExactAlarmBanner = !exactAlarmPermissionGranted,
@@ -575,9 +579,23 @@ internal fun repeatRuleLabel(task: Task): String? {
             "毎週($labels)"
         }
         RepeatRule.MONTHLY -> "毎月"
+        RepeatRule.AFTER_COMPLETION -> "完了から${task.repeatIntervalDays ?: "?"}日後"
         else -> rule
     }
 }
+
+private val REPEAT_RULE_OPTIONS = listOf(
+    null to "なし",
+    RepeatRule.DAILY to "毎日",
+    RepeatRule.WEEKLY to "毎週",
+    RepeatRule.WEEKLY_DAYS to "毎週(曜日)",
+    RepeatRule.MONTHLY to "毎月",
+    RepeatRule.AFTER_COMPLETION to "完了後"
+)
+
+/** 「完了後に繰り返す」の日数入力を解釈する。範囲外・未入力ならnull。 */
+private fun parseRepeatIntervalDays(input: String): Int? =
+    input.toIntOrNull()?.takeIf { it in RepeatRule.INTERVAL_DAYS_RANGE }
 
 private fun autoSnoozeLabel(task: Task): String? {
     val minutes = task.autoSnoozeMinutes ?: return null
@@ -627,6 +645,7 @@ fun TaskScreen(
     savedLocations: List<SavedLocation> = emptyList(),
     vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
+    operationLogsForTaskGroup: (Long) -> Flow<List<OperationLog>> = { flowOf(emptyList()) },
     onAddAttachment: (Task, Uri) -> Unit = { _, _ -> },
     onDeleteAttachment: (TaskAttachment) -> Unit = {},
     showExactAlarmBanner: Boolean = false,
@@ -852,6 +871,7 @@ fun TaskScreen(
             savedLocations = savedLocations,
             vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
+            operationLogsForTaskGroup = operationLogsForTaskGroup,
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
             onAddSubtask = onAddSubtask,
@@ -1218,6 +1238,7 @@ fun TaskDetailDialog(
     savedLocations: List<SavedLocation> = emptyList(),
     vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
+    operationLogsForTaskGroup: (Long) -> Flow<List<OperationLog>> = { flowOf(emptyList()) },
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
@@ -1229,8 +1250,15 @@ fun TaskDetailDialog(
     val current = allTasks.find { it.id == task.id } ?: task
     var editing by remember(task.id) { mutableStateOf(false) }
     var nestedViewTask by remember { mutableStateOf<Task?>(null) }
+    // 操作ログは初期状態では折りたたみ、見出しのタップで展開する。
+    var showOperationLogs by remember(task.id) { mutableStateOf(false) }
     val subtasks = allTasks.filter { it.parentTaskId == current.id }
     val attachments = allAttachments.filter { it.taskId == current.attachmentGroupId() }
+    // 繰り返しタスクはシリーズ全体(attachmentGroupIdが共通)の操作ログを表示する。サブタスクへの
+    // 操作はそのサブタスク自身の詳細にのみ表示する(サブタスク追加は親タスクへの操作として記録)。
+    val taskGroupId = current.attachmentGroupId()
+    val taskOperationLogs by remember(taskGroupId) { operationLogsForTaskGroup(taskGroupId) }
+        .collectAsState(initial = emptyList())
     val listName = lists.find { it.id == current.listId }?.name
 
     AlertDialog(
@@ -1330,6 +1358,35 @@ fun TaskDetailDialog(
                         )
                     }
                 }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showOperationLogs = !showOperationLogs }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "操作ログ(${taskOperationLogs.size}件)",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(text = if (showOperationLogs) "▲" else "▼")
+                }
+                if (showOperationLogs) {
+                    if (taskOperationLogs.isEmpty()) {
+                        Text(
+                            text = "このタスクの操作ログはありません",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        taskOperationLogs.forEach { log ->
+                            OperationLogRow(log)
+                            HorizontalDivider()
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1367,6 +1424,7 @@ fun TaskDetailDialog(
             savedLocations = savedLocations,
             vibrationPatterns = vibrationPatterns,
             allAttachments = allAttachments,
+            operationLogsForTaskGroup = operationLogsForTaskGroup,
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
             onAddSubtask = onAddSubtask,
@@ -2795,6 +2853,9 @@ fun EditTaskDialog(
     var selectedDays by remember(task.id) {
         mutableStateOf(RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek))
     }
+    var repeatIntervalInput by remember(task.id) {
+        mutableStateOf(task.repeatIntervalDays?.toString() ?: "")
+    }
     var autoSnoozeMinutes by remember(task.id) { mutableStateOf(task.autoSnoozeMinutes) }
     var notifyOnlyMode by remember(task.id) { mutableStateOf(task.notifyOnlyMode) }
     var vibrationPatternId by remember(task.id) { mutableStateOf(task.vibrationPatternId) }
@@ -2939,18 +3000,46 @@ fun EditTaskDialog(
                 }
 
                 Text(text = "繰り返し", style = MaterialTheme.typography.titleSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(
-                        null to "なし",
-                        RepeatRule.DAILY to "毎日",
-                        RepeatRule.WEEKLY to "毎週",
-                        RepeatRule.WEEKLY_DAYS to "毎週(曜日)",
-                        RepeatRule.MONTHLY to "毎月"
-                    ).forEach { (value, label) ->
+                // 選択肢が画面幅に収まらないため横スクロールにする。
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(REPEAT_RULE_OPTIONS) { (value, label) ->
                         FilterChip(
                             selected = repeatRule == value,
                             onClick = { repeatRule = value },
                             label = { Text(label) }
+                        )
+                    }
+                }
+                if (repeatRule == RepeatRule.AFTER_COMPLETION) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("完了から")
+                        OutlinedTextField(
+                            value = repeatIntervalInput,
+                            onValueChange = { repeatIntervalInput = it.filter { c -> c.isDigit() } },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier
+                                .width(96.dp)
+                                .padding(horizontal = 8.dp)
+                        )
+                        Text("日後")
+                    }
+                    if (parseRepeatIntervalDays(repeatIntervalInput) == null) {
+                        Text(
+                            text = "${RepeatRule.INTERVAL_DAYS_RANGE.first}〜${RepeatRule.INTERVAL_DAYS_RANGE.last}" +
+                                "の日数を入力してください",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    if (dueAt == null) {
+                        Text(
+                            text = "期限が未設定の場合、完了しても次回分は作成されません",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -3288,7 +3377,11 @@ fun EditTaskDialog(
             }
         },
         confirmButton = {
-            val repeatValid = repeatRule != RepeatRule.WEEKLY_DAYS || selectedDays.isNotEmpty()
+            val repeatValid = when (repeatRule) {
+                RepeatRule.WEEKLY_DAYS -> selectedDays.isNotEmpty()
+                RepeatRule.AFTER_COMPLETION -> parseRepeatIntervalDays(repeatIntervalInput) != null
+                else -> true
+            }
             val locationValid = resolvedLocation == null || notifyOnArrival || notifyOnDeparture
             val vibrationValid = !vibrationEnabled || vibrationPatternSelected
             val canSave = repeatValid && locationValid && vibrationValid
@@ -3309,6 +3402,11 @@ fun EditTaskDialog(
                             dueAt = dueAt,
                             repeatRule = repeatRule,
                             repeatDaysOfWeek = daysOfWeek,
+                            repeatIntervalDays = if (repeatRule == RepeatRule.AFTER_COMPLETION) {
+                                parseRepeatIntervalDays(repeatIntervalInput)
+                            } else {
+                                null
+                            },
                             locationName = location?.name,
                             latitude = location?.latitude,
                             longitude = location?.longitude,

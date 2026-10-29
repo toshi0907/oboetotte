@@ -35,6 +35,7 @@ import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.update.AppUpdateCheckSettings
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +52,12 @@ object RepeatRule {
     const val WEEKLY = "WEEKLY"
     const val WEEKLY_DAYS = "WEEKLY_DAYS"
     const val MONTHLY = "MONTHLY"
+    // 期限ではなく完了日を起点に、Task.repeatIntervalDays日後を次回の期限にする。次回の期限は
+    // 完了するまで決まらないため、カレンダー表示での将来の予定の計算(nextDueAt)には含めない。
+    const val AFTER_COMPLETION = "AFTER_COMPLETION"
+
+    /** [AFTER_COMPLETION]の間隔として受け付ける日数の範囲。 */
+    val INTERVAL_DAYS_RANGE = 1..999
 
     // 曜日はISO-8601に合わせて月曜=1〜日曜=7の数値をカンマ区切りで保存する。
     // バックアップの破損等で範囲外の値が混ざっていても、呼び出し側の`isNotEmpty()`チェックが
@@ -83,6 +90,26 @@ object RepeatRule {
         }
         return next.toInstant().toEpochMilli()
     }
+
+    /**
+     * [AFTER_COMPLETION]の次回の期限。[completedAt]の日付(ローカルタイムゾーン)に[intervalDays]日を
+     * 加え、時刻は[currentDueAt](元の期限)の時刻をそのまま引き継ぐ。期限を過ぎてから完了した場合も
+     * 実際の完了日を起点にする。
+     */
+    fun nextDueAtAfterCompletion(
+        currentDueAt: Long,
+        completedAt: Long,
+        intervalDays: Int,
+        zone: ZoneId = ZoneId.systemDefault()
+    ): Long {
+        val dueTime = Instant.ofEpochMilli(currentDueAt).atZone(zone).toLocalTime()
+        val completedDate = Instant.ofEpochMilli(completedAt).atZone(zone).toLocalDate()
+        return completedDate.plusDays(intervalDays.toLong())
+            .atTime(dueTime)
+            .atZone(zone)
+            .toInstant()
+            .toEpochMilli()
+    }
 }
 
 /** [EditTaskDialog]で編集可能な項目をまとめたもの。[TaskViewModel.updateTask]に渡す。 */
@@ -92,6 +119,7 @@ data class TaskEdits(
     val dueAt: Long?,
     val repeatRule: String?,
     val repeatDaysOfWeek: String?,
+    val repeatIntervalDays: Int?,
     val locationName: String?,
     val latitude: Double?,
     val longitude: Double?,
@@ -137,13 +165,18 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     val operationLogs: StateFlow<List<OperationLog>> = operationLogDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** タスクの詳細画面の「操作ログ」用。[taskGroupId]はタスクの[attachmentGroupId]。 */
+    fun operationLogsForTaskGroup(taskGroupId: Long): Flow<List<OperationLog>> =
+        operationLogDao.getForTaskGroup(taskGroupId)
+
     /** 操作ログ画面の「ログを消去」ボタン用。 */
     fun clearOperationLogs() {
         viewModelScope.launch { OperationLogger.clearAll(appContext) }
     }
 
-    private fun logOperation(action: String, detail: String = "") {
-        OperationLogger.logAsync(appContext, OperationLogSource.APP, action, detail)
+    /** [taskGroupId](対象タスクの[attachmentGroupId])を指定すると、そのタスクの詳細画面の操作ログにも表示される。 */
+    private fun logOperation(action: String, detail: String = "", taskGroupId: Long? = null) {
+        OperationLogger.logAsync(appContext, OperationLogSource.APP, action, detail, taskGroupId)
     }
 
     private val _locationTrackingMode =
@@ -284,7 +317,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val id = taskDao.insert(newTask)
             val inserted = newTask.copy(id = id)
             ReminderScheduler.schedule(appContext, inserted)
-            logOperation("タスク追加", inserted.logLabel())
+            logOperation("タスク追加", inserted.logLabel(), inserted.attachmentGroupId())
             refreshTaskWidget(appContext)
             onAdded(inserted)
         }
@@ -298,7 +331,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 ReminderScheduler.schedule(appContext, updated)
                 LocationReminderManager.register(appContext, updated)
                 // 既に未完了に戻っていた・削除済み等で実際には状態が変わらなかった場合は記録しない。
-                if (updatedRows > 0) logOperation("タスクを未完了に戻す", task.logLabel())
+                if (updatedRows > 0) logOperation("タスクを未完了に戻す", task.logLabel(), task.attachmentGroupId())
                 refreshTaskWidget(appContext)
             } else {
                 // TaskCompletion.completeが自身でウィジェットの再描画・操作ログの記録までまとめて行う。
@@ -324,6 +357,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 dueAt = edits.dueAt,
                 repeatRule = edits.repeatRule,
                 repeatDaysOfWeek = edits.repeatDaysOfWeek,
+                // 間隔は「完了後に繰り返す」の場合のみ保持し、他のルールへ切り替えたら破棄する。
+                repeatIntervalDays = edits.repeatIntervalDays
+                    .takeIf { edits.repeatRule == RepeatRule.AFTER_COMPLETION },
                 locationName = edits.locationName,
                 latitude = edits.latitude,
                 longitude = edits.longitude,
@@ -359,7 +395,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             )
             // 何も変更せずに保存した場合は記録しない。
             if (changes.isNotEmpty()) {
-                logOperation("タスク編集", "${current.logLabel()} ${changes.joinToString("、")}")
+                logOperation("タスク編集", "${current.logLabel()} ${changes.joinToString("、")}", current.attachmentGroupId())
             }
             refreshTaskWidget(appContext)
         }
@@ -390,7 +426,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     sizeBytes = copied.sizeBytes
                 )
             )
-            logOperation("添付ファイル追加", "${task.logLabel()} ${copied.fileName}")
+            logOperation("添付ファイル追加", "${task.logLabel()} ${copied.fileName}", task.attachmentGroupId())
         }
     }
 
@@ -400,7 +436,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 AttachmentStorage.delete(appContext, attachment.storedFileName)
             }
-            logOperation("添付ファイル削除", attachment.fileName)
+            // 添付ファイルのtaskIdは添付先タスクのattachmentGroupId()。
+            logOperation("添付ファイル削除", attachment.fileName, attachment.taskId)
         }
     }
 
@@ -415,7 +452,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             )
             val id = taskDao.insert(newSubtask)
             ReminderScheduler.schedule(appContext, newSubtask.copy(id = id))
-            logOperation("サブタスク追加", "${parent.logLabel()}に「$trimmed」")
+            logOperation("サブタスク追加", "${parent.logLabel()}に「$trimmed」", parent.attachmentGroupId())
             refreshTaskWidget(appContext)
         }
     }

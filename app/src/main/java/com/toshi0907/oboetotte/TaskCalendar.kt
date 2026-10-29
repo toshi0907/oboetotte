@@ -69,6 +69,8 @@ private const val MAX_PROJECTION_STEPS = 10_000
 /** 月を移動するのに必要な、左右スワイプの最小移動量。 */
 private val SWIPE_THRESHOLD = 48.dp
 
+// RepeatRule.AFTER_COMPLETIONは次回の期限が完了日で決まり事前に計算できないため含めない
+// (現在の未完了分のみ表示する)。
 private val SUPPORTED_REPEAT_RULES = setOf(
     RepeatRule.DAILY,
     RepeatRule.WEEKLY,
