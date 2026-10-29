@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -34,7 +35,10 @@ import java.time.format.DateTimeFormatter
  * 追加と同じ扱い)。共有内容にテキスト(`EXTRA_TEXT`)が含まれる場合、trim後の文字列全体が
  * [Patterns.WEB_URL]に完全一致すればURL共有とみなし[Task.url]に、それ以外はテキスト共有とみなし
  * [Task.memo]に格納する(ファイル添付と同時に指定されていても両方保存する)。期限は他のタスク登録と
- * 同様デフォルトで1時間後([TaskViewModel.DEFAULT_DUE_DELAY_MILLIS])を設定する。画面には何も表示せず
+ * 同様デフォルトで1時間後([TaskViewModel.DEFAULT_DUE_DELAY_MILLIS])を設定する。共有ファイルのUriは
+ * [AttachmentStorage.copyToStorage]側で検証され(`content://`以外や自アプリのProviderを指すものは拒否)、
+ * 拒否・コピー失敗したファイルはスキップしてToastに失敗件数を表示する(取り込めるファイルもテキストも
+ * 無い場合はタスクを作成しない)。画面には何も表示せず
  * (`Theme.Oboetotte.SnoozeDialog`の透過テーマを流用)、処理完了後にToastで結果を通知してfinishする。
  */
 class ShareReceiverActivity : ComponentActivity() {
@@ -58,27 +62,57 @@ class ShareReceiverActivity : ComponentActivity() {
             val taskDao = database.taskDao()
             val taskAttachmentDao = database.taskAttachmentDao()
 
-            val title = "タスク(${TITLE_DATE_FORMAT.format(LocalDateTime.now())})"
-            val task = Task(
-                title = title,
-                dueAt = System.currentTimeMillis() + TaskViewModel.DEFAULT_DUE_DELAY_MILLIS,
-                url = if (isSharedUrl) normalizeUrl(sharedText!!) else null,
-                memo = if (!isSharedUrl) sharedText else null
-            )
-            val taskId = taskDao.insert(task)
-            ReminderScheduler.schedule(applicationContext, task.copy(id = taskId))
-
-            var attachedCount = 0
+            // 共有元は任意のアプリのため、先にファイルをコピーして検証する。受け付けられないUri(nullが返る)や
+            // コピー中の例外はそのファイルだけスキップし、残りのファイルの処理は続行する。
             // サイズ上限超過・空き容量不足で添付できなかったファイル数(他のファイルの添付は続行する)。
             var rejectedCount = 0
-            withContext(Dispatchers.IO) {
-                uris.forEach { uri ->
-                    val copied = try {
-                        AttachmentStorage.copyToStorage(applicationContext, uri)
-                    } catch (e: StorageLimitException) {
-                        rejectedCount++
-                        return@forEach
-                    } ?: return@forEach
+            // コピー済みでまだDBに添付として登録していないファイル。処理のキャンセル(Activity破棄)や
+            // DB登録の失敗で登録まで到達しなかったものは、finallyで削除して実体だけが残らないようにする。
+            val unpersisted = mutableListOf<AttachmentStorage.CopiedFile>()
+            var copiedFiles: List<AttachmentStorage.CopiedFile> = emptyList()
+            var taskId = 0L
+            var title = ""
+            try {
+                // withContextはキャンセルされてもブロックの完了を待ってから戻るため、IOスレッドでの
+                // unpersistedへの追加はfinallyより前に完了している。
+                withContext(Dispatchers.IO) {
+                    uris.forEach { uri ->
+                        val copied = try {
+                            AttachmentStorage.copyToStorage(applicationContext, uri)
+                        } catch (e: StorageLimitException) {
+                            rejectedCount++
+                            null
+                        } catch (e: Exception) {
+                            Log.w(TAG, "共有ファイルのコピーに失敗しました", e)
+                            null
+                        }
+                        if (copied != null) unpersisted.add(copied)
+                    }
+                }
+                copiedFiles = unpersisted.toList()
+                // 取り込めるものが何も無い共有(拒否されたUriのみ等)では、空のタスクを作らない
+                // (他アプリから無操作で空タスク・リマインダーを量産されないようにする)。
+                if (copiedFiles.isEmpty() && sharedText == null) {
+                    Toast.makeText(
+                        applicationContext,
+                        "共有されたファイルを取り込めませんでした",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                    return@launch
+                }
+
+                title = "タスク(${TITLE_DATE_FORMAT.format(LocalDateTime.now())})"
+                val task = Task(
+                    title = title,
+                    dueAt = System.currentTimeMillis() + TaskViewModel.DEFAULT_DUE_DELAY_MILLIS,
+                    url = if (isSharedUrl) normalizeUrl(sharedText!!) else null,
+                    memo = if (!isSharedUrl) sharedText else null
+                )
+                taskId = taskDao.insert(task)
+                ReminderScheduler.schedule(applicationContext, task.copy(id = taskId))
+
+                copiedFiles.forEach { copied ->
                     taskAttachmentDao.insert(
                         TaskAttachment(
                             taskId = taskId,
@@ -88,9 +122,20 @@ class ShareReceiverActivity : ComponentActivity() {
                             sizeBytes = copied.sizeBytes
                         )
                     )
-                    attachedCount++
+                    unpersisted.remove(copied)
+                }
+            } finally {
+                unpersisted.forEach { copied ->
+                    try {
+                        AttachmentStorage.delete(applicationContext, copied.storedFileName)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "未登録の共有ファイルの削除に失敗しました", e)
+                    }
                 }
             }
+            // 受け付けられないUri・上記以外の例外で添付できなかったファイル数。
+            val failedCount = uris.size - copiedFiles.size - rejectedCount
+            val attachedCount = copiedFiles.size
             refreshTaskWidget(applicationContext)
 
             val resultParts = mutableListOf<String>()
@@ -102,6 +147,7 @@ class ShareReceiverActivity : ComponentActivity() {
                 )
             }
             if (isSharedUrl) resultParts.add("URL") else if (sharedText != null) resultParts.add("メモ")
+            if (failedCount > 0) resultParts.add("添付失敗${failedCount}件")
             val suffix = if (resultParts.isEmpty()) "" else "(${resultParts.joinToString("、")})"
             OperationLogger.logAsync(
                 applicationContext,
@@ -142,6 +188,7 @@ class ShareReceiverActivity : ComponentActivity() {
         }
 
     companion object {
+        private const val TAG = "ShareReceiverActivity"
         private val TITLE_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm")
     }
 }
