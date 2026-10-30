@@ -1669,6 +1669,7 @@ fun SettingsScreen(
                     )
                     if (minutes != null) {
                         onSetLocationTrackingIntervalMinutes(minutes)
+                        intervalInput = minutes.toString()
                     }
                 }) {
                     Text("保存")
