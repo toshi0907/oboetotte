@@ -1652,11 +1652,6 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 8.dp)
             )
-            Text(
-                text = "位置情報リマインダーの到着・離脱をどう確認するかを選べます。「連続追跡方式」は" +
-                    "一定間隔で位置を取得し続けるため検知が速く正確になりますが、バッテリー消費が増えます。",
-                style = MaterialTheme.typography.bodySmall
-            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = locationTrackingMode == LocationTrackingMode.GEOFENCING_API,
@@ -1698,22 +1693,12 @@ fun SettingsScreen(
                         Text("保存")
                     }
                 }
-                Text(
-                    text = "${LocationTrackingSettings.MIN_INTERVAL_MINUTES}〜" +
-                        "${LocationTrackingSettings.MAX_INTERVAL_MINUTES}分の範囲で指定できます。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
 
             Text(
                 text = "期限のクイック選択",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 8.dp)
-            )
-            Text(
-                text = "タスク編集画面の「当日朝/昼/夕/夜」「明日の朝/昼/夕/夜」チップで設定される時刻です。",
-                style = MaterialTheme.typography.bodySmall
             )
             DueTimeSlot.entries.forEach { slot ->
                 val minuteOfDay = dueTimePresets[slot] ?: slot.defaultMinuteOfDay
@@ -1736,15 +1721,6 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 8.dp)
             )
-            Text(
-                text = "タスクデータをファイルにバックアップしたり、バックアップから復元したりできます。",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                text = "インポートすると、現在のタスクデータはすべてインポートしたファイルの内容に置き換わります。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
             Row {
                 TextButton(onClick = onExportRequested) {
                     Text("エクスポート")
@@ -1758,12 +1734,6 @@ fun SettingsScreen(
                 text = "クラウド自動バックアップ",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 8.dp)
-            )
-            Text(
-                text = "Dropbox等、フォルダ選択ダイアログから選べるクラウドストレージアプリがあれば、" +
-                    "そのアプリ内のフォルダを保存先にして毎日自動でバックアップできます" +
-                    "(内容は上記のエクスポートと同じZIPファイルです)。",
-                style = MaterialTheme.typography.bodySmall
             )
             TextButton(onClick = onSelectCloudBackupFolder) {
                 Text(if (cloudBackupFolderUri == null) "保存先フォルダを選択" else "保存先フォルダを変更")
@@ -1804,12 +1774,6 @@ fun SettingsScreen(
                         Text("変更")
                     }
                 }
-                Text(
-                    text = "実際の実行はWorkManagerの定期実行のため、指定した時刻ちょうどとは限らず" +
-                        "多少前後することがあります。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 var retentionInput by remember(cloudBackupRetentionCount) {
                     mutableStateOf(cloudBackupRetentionCount.toString())
                 }
@@ -1842,13 +1806,6 @@ fun SettingsScreen(
                         Text("保存")
                     }
                 }
-                Text(
-                    text = "${CloudBackupSettings.MIN_RETENTION_COUNT}〜" +
-                        "${CloudBackupSettings.MAX_RETENTION_COUNT}件の範囲で指定できます。" +
-                        "超えた分は古い順に自動削除されます。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 TextButton(onClick = onRunCloudBackupNow, enabled = !cloudBackupRunning) {
                     Text(if (cloudBackupRunning) "バックアップ中…" else "今すぐバックアップ")
                 }
@@ -1881,11 +1838,6 @@ fun SettingsScreen(
                 text = "完了タスク",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 8.dp)
-            )
-            Text(
-                text = "完了してから指定した日数が経過したタスクを自動的に削除します" +
-                    "(配下のサブタスクも一緒に削除されます)。",
-                style = MaterialTheme.typography.bodySmall
             )
             FilterChip(
                 selected = completedTaskCleanupEnabled,
@@ -1924,24 +1876,12 @@ fun SettingsScreen(
                         Text("保存")
                     }
                 }
-                Text(
-                    text = "${CompletedTaskCleanupSettings.MIN_RETENTION_DAYS}〜" +
-                        "${CompletedTaskCleanupSettings.MAX_RETENTION_DAYS}日の範囲で指定できます" +
-                        "(現在: ${completedTaskCleanupRetentionDays}日)。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
 
             Text(
                 text = "操作ログ",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 8.dp)
-            )
-            Text(
-                text = "タスクの追加・削除・完了や設定変更などの操作の履歴です。" +
-                    "${OperationLogger.RETENTION_MONTHS}ヶ月より古いログは自動で削除されます。",
-                style = MaterialTheme.typography.bodySmall
             )
             TextButton(onClick = onOpenOperationLogs) {
                 Text("操作ログ")
