@@ -11,8 +11,25 @@ import kotlinx.coroutines.launch
 class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED -> onBootCompleted(context)
+            // アプリ更新直後は、アプリを開くまで連続追跡サービスが動かず位置情報リマインダーが
+            // 止まったままになるため、ここで再開する(旧バージョンで登録したジオフェンスの一括解除も
+            // reconcileAll内で行われる)。期限日時のアラームは更新を越えて保持されるため触らない。
+            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        LocationReminderManager.reconcileAll(context)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            }
+        }
+    }
 
+    private fun onBootCompleted(context: Context) {
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {

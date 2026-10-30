@@ -304,6 +304,17 @@ class LocationTrackingService : Service() {
         }
 
         private fun startInternal(context: Context, forceRestart: Boolean) {
+            // startForegroundService()で起動したサービスがstartForeground()を呼ばずに停止すると
+            // 「did not then call Service.startForeground()」でアプリがクラッシュするため、
+            // onStartCommandで弾かれる条件(権限不足・端末の位置情報サービス無効)はここで先に確認し、
+            // 満たさなければ起動自体を行わない(onStartCommand側の確認はSTART_STICKYでの再生成向け)。
+            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            if (!LocationReminderManager.hasLocationPermission(context) ||
+                !LocationManagerCompat.isLocationEnabled(locationManager)
+            ) {
+                Log.w(TAG, "連続追跡: 位置情報の権限が無いか位置情報サービスが無効なため開始しません")
+                return
+            }
             val intent = Intent(context, LocationTrackingService::class.java)
                 .putExtra(EXTRA_FORCE_RESTART, forceRestart)
             try {

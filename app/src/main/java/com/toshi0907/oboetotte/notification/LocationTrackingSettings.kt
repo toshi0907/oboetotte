@@ -33,9 +33,12 @@ object LocationTrackingSettings {
         prefs(context).getBoolean(KEY_LEGACY_GEOFENCES_REMOVED, false)
 
     fun markLegacyGeofencesRemoved(context: Context) {
-        prefs(context).edit()
-            .putBoolean(KEY_LEGACY_GEOFENCES_REMOVED, true)
-            .remove(KEY_LEGACY_MODE)
-            .apply()
+        prefs(context).edit().putBoolean(KEY_LEGACY_GEOFENCES_REMOVED, true).apply()
+    }
+
+    /** 廃止した確認方式の設定値が残っていれば削除する。 */
+    fun clearLegacyMode(context: Context) {
+        val prefs = prefs(context)
+        if (prefs.contains(KEY_LEGACY_MODE)) prefs.edit().remove(KEY_LEGACY_MODE).apply()
     }
 }

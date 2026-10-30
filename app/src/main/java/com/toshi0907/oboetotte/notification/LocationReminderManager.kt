@@ -12,11 +12,11 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.tasks.Task as GmsTask
 import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.Task
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 /**
@@ -129,34 +129,35 @@ object LocationReminderManager {
     /**
      * 旧バージョンではGoogle Play servicesのGeofencing APIへもジオフェンスを登録できたため、
      * アップデート後に端末側へ残っている登録を一度だけ一括解除する(連続追跡方式のみに一本化したため)。
-     * 旧バージョンは全ジオフェンスで同じPendingIntent(削除済みの`GeofenceReceiver`宛て)を共有して
-     * いたので、それと同一視される[PendingIntent]を[PendingIntent.FLAG_NO_CREATE]で探し、
-     * 見つかればその単位でまとめて解除する(見つからなければ端末側に登録は残っていない)。
-     * 解除に失敗した場合は完了扱いにせず、次回の[reconcileAll]で再試行する。
+     * 旧バージョンは全ジオフェンスで同じPendingIntent(削除済みの`GeofenceReceiver`宛て、requestCode 0)を
+     * 共有していたので、それと同一視される[PendingIntent]を作り直してその単位でまとめて解除する
+     * (受信先のクラスが存在しなくてもIntentの同一性判定には影響しない)。解除に失敗・タイムアウトした
+     * 場合は完了扱いにせず、次回の[reconcileAll]で再試行する。
      */
     private suspend fun removeLegacyGeofencesLocked(context: Context) {
+        LocationTrackingSettings.clearLegacyMode(context)
         if (LocationTrackingSettings.isLegacyGeofencesRemoved(context)) return
         val intent = Intent().setClassName(context, LEGACY_GEOFENCE_RECEIVER_CLASS)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             0,
             intent,
-            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_MUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
-        if (pendingIntent == null) {
-            LocationTrackingSettings.markLegacyGeofencesRemoved(context)
-            return
-        }
         try {
             val removeTask = LocationServices.getGeofencingClient(context).removeGeofences(pendingIntent)
-            awaitCompletion(removeTask)
-            if (removeTask.isSuccessful) {
+            // Play servicesが応答しない場合にlifecycleMutexを保持し続けて他の登録・解除を
+            // 止めてしまわないよう、待ち合わせには上限を設ける(未完了なら次回再試行)。
+            val completed = withTimeoutOrNull(LEGACY_REMOVAL_TIMEOUT_MILLIS) { awaitCompletion(removeTask) } != null
+            if (completed && removeTask.isSuccessful) {
                 pendingIntent.cancel()
                 LocationTrackingSettings.markLegacyGeofencesRemoved(context)
                 Log.d(TAG, "旧バージョンで登録したジオフェンスを一括解除しました")
             } else {
                 Log.e(TAG, "旧バージョンで登録したジオフェンスの一括解除に失敗しました", removeTask.exception)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "旧バージョンで登録したジオフェンスの一括解除に失敗しました", e)
         }
@@ -164,12 +165,10 @@ object LocationReminderManager {
 
     /**
      * Play servicesの[GmsTask]が完了(成功/失敗/キャンセルのいずれか)するまで、ブロッキングせずに中断する。
-     * 呼び出し元のコルーチンが途中でキャンセルされても、既に発行済みの`removeGeofences`自体は
-     * 取り消せないため、[NonCancellable]でラップしてこの待ち合わせ(=lifecycleMutexの保持)だけは
-     * キャンセルの影響を受けないようにする。
+     * 呼び出し元の[withTimeoutOrNull]によるタイムアウトでは中断できるようにする。
      */
-    private suspend fun awaitCompletion(gmsTask: GmsTask<*>): Unit = withContext(NonCancellable) {
-        if (gmsTask.isComplete) return@withContext
+    private suspend fun awaitCompletion(gmsTask: GmsTask<*>) {
+        if (gmsTask.isComplete) return
         suspendCancellableCoroutine { cont ->
             gmsTask.addOnCompleteListener {
                 if (cont.isActive) cont.resume(Unit)
@@ -178,6 +177,8 @@ object LocationReminderManager {
     }
 
     private const val TAG = "LocationReminder"
+
+    private const val LEGACY_REMOVAL_TIMEOUT_MILLIS = 10_000L
 
     private const val LEGACY_GEOFENCE_RECEIVER_CLASS =
         "com.toshi0907.oboetotte.notification.GeofenceReceiver"
