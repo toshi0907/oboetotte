@@ -72,7 +72,7 @@ GitHub Issueに対応する形で実装を行った場合は、対応内容のPR
 - 期限ピッカー・DBマイグレーション: `docs/architecture/due-picker-db-migration.md`
 - リマインダー通知: `docs/architecture/reminder-notifications.md`
 - 位置情報リマインダー: `docs/architecture/location-reminders.md`
-- 位置情報リマインダーの確認方式(連続追跡): `docs/architecture/location-tracking-mode.md`
+- 位置情報リマインダーの連続追跡: `docs/architecture/location-tracking-mode.md`
 - 位置情報の更新履歴(デバッグ): `docs/architecture/location-update-log.md`
 - 通知履歴(デバッグ): `docs/architecture/notification-log.md`
 - 操作ログ: `docs/architecture/operation-log.md`

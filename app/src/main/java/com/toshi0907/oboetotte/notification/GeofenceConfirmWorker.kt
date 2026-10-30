@@ -12,13 +12,13 @@ import com.toshi0907.oboetotte.data.NotificationLog
 import java.util.concurrent.TimeUnit
 
 /**
- * ジオフェンスのENTER/EXITイベントを受けてすぐに通知するのではなく、[DEBOUNCE_DELAY_MINUTES]分
+ * [LocationTrackingService]が検知したENTER/EXITの遷移を受けてすぐに通知するのではなく、[DEBOUNCE_DELAY_MINUTES]分
  * 経っても状態が変わらなければ(反対方向のイベントで上書きされなければ)初めて通知するデバウンス
  * 処理の実体。GPS/ネットワーク測位の精度が低いタイミングでは、実際には動いていなくても
- * ジオフェンスの内外判定がわずかな誤差で反転してしまうことがあり、これによる一瞬だけの
+ * 圏内/圏外の判定がわずかな誤差で反転してしまうことがあり、これによる一瞬だけの
  * ENTER⇔EXITの反転で毎回通知が飛ぶのを防ぐ。
  *
- * [GeofenceReceiver]はイベントを受け取るたびに[schedule]を呼び、[WorkManager.enqueueUniqueWork]を
+ * [LocationTrackingService]は遷移を検知するたびに[schedule]を呼び、[WorkManager.enqueueUniqueWork]を
  * [ExistingWorkPolicy.REPLACE]で実行する。そのため同じタスクに対してデバウンス時間内に別の
  * イベント(同方向・反対方向を問わず)が届くと、以前の[GeofenceConfirmWorker]の実行はキャンセルされ
  * 新しいイベントのタイマーに置き換わる。つまり実際に[doWork]が動くのは「最後に受信したイベントから
@@ -68,7 +68,7 @@ class GeofenceConfirmWorker(
         const val KEY_TASK_ID = "task_id"
         const val KEY_IS_ENTER = "is_enter"
 
-        /** この時間だけ後続のジオフェンスイベントが来なければ通知を確定する。 */
+        /** この時間だけ後続の遷移イベントが来なければ通知を確定する。 */
         const val DEBOUNCE_DELAY_MINUTES = 3L
         private const val WORK_NAME_PREFIX = "geofence_confirm_"
 

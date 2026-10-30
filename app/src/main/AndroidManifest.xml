@@ -82,10 +82,6 @@
             android:name=".notification.CompleteReceiver"
             android:exported="false" />
 
-        <receiver
-            android:name=".notification.GeofenceReceiver"
-            android:exported="false" />
-
         <service
             android:name=".notification.LocationTrackingService"
             android:exported="false"
@@ -96,6 +92,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

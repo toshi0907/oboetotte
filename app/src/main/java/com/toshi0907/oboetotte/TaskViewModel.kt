@@ -27,7 +27,6 @@ import com.toshi0907.oboetotte.data.TaskList
 import com.toshi0907.oboetotte.data.VibrationPattern
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
-import com.toshi0907.oboetotte.notification.LocationTrackingMode
 import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.notification.VibrationPatternPlayer
@@ -182,10 +181,6 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private fun logOperation(action: String, detail: String = "", taskGroupId: Long? = null) {
         OperationLogger.logAsync(appContext, OperationLogSource.APP, action, detail, taskGroupId)
     }
-
-    private val _locationTrackingMode =
-        MutableStateFlow(LocationTrackingSettings.getMode(application))
-    val locationTrackingMode: StateFlow<LocationTrackingMode> = _locationTrackingMode
 
     private val _locationTrackingIntervalMinutes =
         MutableStateFlow(LocationTrackingSettings.getIntervalMinutes(application))
@@ -579,16 +574,6 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** 位置情報リマインダーの確認方式を切り替える(Geofencing API/連続追跡方式)。 */
-    fun setLocationTrackingMode(mode: LocationTrackingMode) {
-        viewModelScope.launch {
-            val changed = _locationTrackingMode.value != mode
-            LocationReminderManager.switchMode(appContext, mode)
-            _locationTrackingMode.value = mode
-            if (changed) logOperation("設定変更", "位置情報の確認方式: ${mode.logLabel()}")
-        }
-    }
-
     /** 連続追跡方式の更新頻度(分)を変更する。1〜60分の範囲に丸められる。 */
     fun setLocationTrackingIntervalMinutes(minutes: Int) {
         viewModelScope.launch {
@@ -747,11 +732,6 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
 private fun vibrationSummary(onMs: Long, offMs: Long, durationMs: Long): String =
     "(オン${onMs}ms・オフ${offMs}ms・継続${durationMs}ms)"
-
-private fun LocationTrackingMode.logLabel(): String = when (this) {
-    LocationTrackingMode.GEOFENCING_API -> "Geofencing API"
-    LocationTrackingMode.CONTINUOUS_TRACKING -> "連続追跡方式"
-}
 
 /**
  * タスク一覧の表示フィルタ。複数選択時はOR条件(いずれか1つでも合致すれば表示)。
