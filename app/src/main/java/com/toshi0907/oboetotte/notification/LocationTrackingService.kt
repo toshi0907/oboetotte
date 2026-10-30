@@ -38,20 +38,16 @@ import com.toshi0907.oboetotte.metersBetween
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
- * 位置情報の確認方式が[LocationTrackingMode.CONTINUOUS_TRACKING]の場合にのみ動作するフォアグラウンド
- * サービス。Google Play servicesのGeofencing APIに内外判定を任せず、
+ * 位置情報リマインダーの圏内/圏外の遷移を検知するフォアグラウンドサービス。
  * [LocationTrackingSettings.getIntervalMinutes]の間隔で自前に位置を取得し続け、位置情報を設定した
  * 各タスクとの距離を[metersBetween]で計算して圏内/圏外の遷移を検知する。前回評価時点の状態は
  * [GeofenceStateDao]に永続化し(プロセス再起動を挟んでも基準を見失わないため)、遷移を検知したら
- * [GeofenceReceiver]と同じ経路([GeofenceConfirmWorker.schedule]による3分デバウンス)へ合流させる。
+ * [GeofenceConfirmWorker.schedule]による3分デバウンスを経て通知する。
  * 開始・停止は[LocationReminderManager]がタスクの登録・解除に合わせて行う。
  */
 class LocationTrackingService : Service() {
@@ -76,17 +72,7 @@ class LocationTrackingService : Service() {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         // コンシューマーコルーチン1つだけがlocationChannelを消費する。onDestroyでchannelがcloseされ、
         // キュー済みの最後の要素(CONFLATEDのため高々1件)まで処理し終えるとfor文を抜けて正常終了する。
-        // このJob自体をcompanionのconsumerJobへ保持しておき、stopAndAwaitCompletion()から直接
-        // join()する(Jobの終了状態を保持しているJob.join()自体はコルーチンの正常終了・異常終了・
-        // キャンセルのいずれでも、既に終了済みかどうかに関わらず即座または完了時に戻るため)。
-        // 以前はCompletableDeferred+invokeOnCompletionで完了を通知する方式だったが、
-        // stopAndAwaitCompletion()が呼ばれる前にhandleLocation内の例外でこのコルーチンが
-        // 先に異常終了していた場合、invokeOnCompletionが発火した時点ではまだ誰も待っておらず、
-        // 後から呼ばれたstopAndAwaitCompletion()が新しいCompletableDeferredを設定しても
-        // (既に終了したJobからは二度とinvokeOnCompletionが呼ばれないため)永久に完了せず
-        // completion.await()がハングする不具合があった。Job自体を直接join()する方式なら、
-        // 呼び出しのタイミングに関わらず常に正しく完了を検知できる。
-        consumerJob = scope.launch {
+        scope.launch {
             for (location in locationChannel) {
                 // handleLocation内(Room操作・GeofenceConfirmWorker.schedule等)が
                 // CancellationException以外の例外を投げてこのループを抜けてしまうと、
@@ -129,15 +115,6 @@ class LocationTrackingService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        // updateContinuousTrackingIntervalが発行したrestart()のIntentは、配送されるまでの間に
-        // switchMode()で確認方式がGeofencing APIへ切り替わり永続化されていることがある。
-        // その場合ここでEXTRA_FORCE_RESTARTをそのまま処理すると、既に選ばれていない連続追跡方式で
-        // 位置情報の購読を開始してしまうため、永続化済みのモードを読み直して確認する。
-        if (LocationTrackingSettings.getMode(this) != LocationTrackingMode.CONTINUOUS_TRACKING) {
-            Log.w(TAG, "連続追跡: モードが切り替わっているため開始せず停止します")
-            stopSelf()
-            return START_NOT_STICKY
-        }
         // LocationReminderManager.registerはタスクの編集(位置情報と無関係な項目の変更を含む)
         // のたびに呼ばれ、その都度start()経由でここへ到達しうる。位置情報リクエストをすでに
         // 開始済みなら購読を維持したままにし(そうしないと更新間隔のタイマーが毎回リセットされ、
@@ -156,11 +133,8 @@ class LocationTrackingService : Service() {
 
     override fun onDestroy() {
         // stopLocationUpdatesで新規の位置情報受信を止め、locationChannel.close()でこれ以上
-        // trySend()が積まれないようにする。ここでjobをcancelしてしまうと、コンシューマー
-        // コルーチン(onCreateで起動)がまだキュー済みの最後の要素を評価している途中でも
-        // 強制終了してしまい、stopAndAwaitCompletion()が「停止完了」を待つ意味が無くなる。
-        // そのためjobのcancelは行わず、コンシューマーコルーチンが自然にfor文を抜けて完了する
-        // のに任せる(stopAndAwaitCompletion()はそのJob自体をjoin()で待ち合わせる)。
+        // trySend()が積まれないようにする。jobのcancelは行わず、コンシューマーコルーチン
+        // (onCreateで起動)がキュー済みの最後の要素の評価を終えて自然にfor文を抜けるのに任せる。
         stopLocationUpdates()
         locationChannel.close()
         super.onDestroy()
@@ -239,8 +213,7 @@ class LocationTrackingService : Service() {
         )
 
         if (previous == null) {
-            // 初回評価。Geofencing APIのINITIAL_TRIGGER_ENTERと同様、到着通知を希望していて
-            // 既に圏内の場合のみ即座にデバウンスへ回す。それ以外は基準値を記録するだけに留める。
+            // 初回評価。到着通知を希望していて既に圏内の場合のみ即座にデバウンスへ回す。それ以外は基準値を記録するだけに留める。
             if (isInside && task.notifyOnArrival) {
                 scheduleTransition(task, isEnter = true, latitude, longitude, accuracy, distance, locationUpdateLogDao)
             }
@@ -289,7 +262,7 @@ class LocationTrackingService : Service() {
                 "位置情報の連続追跡",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "位置情報リマインダーを連続追跡方式で確認している間、表示されます"
+                description = "位置情報リマインダーのために位置を連続で確認している間、表示されます"
             }
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(channel)
@@ -306,7 +279,7 @@ class LocationTrackingService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("位置情報を連続で確認中")
-            .setContentText("設定 → 位置情報 から確認方式を変更できます")
+            .setContentText("設定 → 位置情報 から更新頻度を変更できます")
             .setContentIntent(contentIntent)
             // Android 14以降はスワイプで通知を消せる(消してもサービスは動作を続ける)。
             .setOngoing(false)
@@ -319,48 +292,6 @@ class LocationTrackingService : Service() {
         private const val CHANNEL_ID = "location_tracking_service"
         private const val NOTIFICATION_ID = 2
         private const val EXTRA_FORCE_RESTART = "force_restart"
-
-        // 現在動作中のサービスインスタンスのコンシューマーコルーチン(onCreateで起動、
-        // locationChannelを消費してhandleLocationを順に呼ぶJob)への参照。stopAndAwaitCompletion()
-        // がこのJob自体をjoin()で待ち合わせることで、「停止完了(位置情報の受信停止・キュー済みの
-        // 評価まで含めたコンシューマーコルーチンの終了)」を検知する。呼び出しは
-        // [LocationReminderManager]の[lifecycleMutex]で直列化されているため、同時に複数の
-        // stopAndAwaitCompletion()呼び出しが競合することはない。
-        @Volatile
-        private var consumerJob: Job? = null
-
-        /**
-         * サービスの停止を要求し、停止完了(位置情報の受信停止・キュー済みの評価まで含めた
-         * コンシューマーコルーチンの終了)まで中断して待つ「停止完了バリア」。
-         * [LocationReminderManager.switchMode]が連続追跡方式から離れる際、この完了を待ってから
-         * [com.toshi0907.oboetotte.data.GeofenceStateDao.deleteAll]を呼ぶことで、停止処理と
-         * 競合して評価中・キュー済みだった書き込みが削除より後に発生し復活してしまう問題を防ぐ。
-         * `Job.join()`は対象のJobが既に終了済み(正常・異常・キャンセルいずれの場合も)であれば
-         * 即座に戻り、まだ実行中であれば終了まで中断して待つため、`stopAndAwaitCompletion()`が
-         * 呼ばれるより前に`handleLocation`内の例外でコンシューマーコルーチンが先に異常終了して
-         * いた場合でも取りこぼさず正しく完了を検知できる(以前は`CompletableDeferred`+
-         * `invokeOnCompletion`方式だったが、`stopAndAwaitCompletion()`呼び出し前にJobが既に
-         * 終了していると、後から設定した`CompletableDeferred`はJobから二度と`invokeOnCompletion`
-         * が呼ばれず永久に完了しない不具合があった)。サービスが既に停止している場合は
-         * [Context.stopService]がfalseを返すため即座に戻る。呼び出し元
-         * ([LocationReminderManager.switchMode]、ひいては`TaskViewModel.viewModelScope`)が
-         * 待機中にキャンセルされても、この停止要求と待ち合わせ自体は[NonCancellable]で
-         * 保護しているため中断されない。ここで早期にキャンセルされてしまうと、コンシューマー
-         * コルーチンがまだ稼働中のまま`lifecycleMutex`が解放され、後続のライフサイクル操作
-         * (`register`等)と評価中の書き込みが重なって停止完了バリアの意味が失われるため。
-         * `context.stopService()`の戻り値(`wasRunning`)は「サービスが元々動作していたか」しか
-         * 示さず、そのタイミングでは判定しない。既に別経路(システムによる終了等)でサービスの
-         * 停止処理が始まっていると`stopService()`が`false`を返す一方、`consumerJob`自体は
-         * `handleLocation`の途中でまだ実行中のことがあり、ここで`join()`を省略すると
-         * `evaluateTask()`が`GeofenceStateDao.upsert()`する前に呼び出し元(`switchMode`)が
-         * `deleteAll()`してしまい、削除したはずの状態が復活する。そのため`wasRunning`の値に
-         * 関わらず、保持している`consumerJob`が非nullなら必ず`join()`する。
-         */
-        suspend fun stopAndAwaitCompletion(context: Context): Unit = withContext(NonCancellable) {
-            val job = consumerJob
-            context.stopService(Intent(context, LocationTrackingService::class.java))
-            job?.join()
-        }
 
         /** サービスが未起動なら起動し、既に起動済みなら位置情報の購読はそのまま維持する。 */
         fun start(context: Context) {

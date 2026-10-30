@@ -133,7 +133,6 @@ import com.toshi0907.oboetotte.data.VibrationPattern
 import com.toshi0907.oboetotte.data.OperationLog
 import com.toshi0907.oboetotte.data.attachmentGroupId
 import com.toshi0907.oboetotte.notification.LocationReminderManager
-import com.toshi0907.oboetotte.notification.LocationTrackingMode
 import com.toshi0907.oboetotte.notification.LocationTrackingSettings
 import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.notification.VibrationPatternPlayer
@@ -247,7 +246,6 @@ class MainActivity : ComponentActivity() {
                     val notificationLogs by taskViewModel.notificationLogs.collectAsState()
                     val locationUpdateLogs by taskViewModel.locationUpdateLogs.collectAsState()
                     val operationLogs by taskViewModel.operationLogs.collectAsState()
-                    val locationTrackingMode by taskViewModel.locationTrackingMode.collectAsState()
                     val completedTaskCleanupEnabled by taskViewModel.completedTaskCleanupEnabled.collectAsState()
                     val completedTaskCleanupRetentionDays by
                         taskViewModel.completedTaskCleanupRetentionDays.collectAsState()
@@ -319,7 +317,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     LaunchedEffect(Unit) {
-                        // アプリ起動のたびに、権限がある位置情報タスクのジオフェンス登録・
+                        // アプリ起動のたびに、権限がある位置情報タスクの連続追跡サービス・
                         // 定期取得ジョブが確実に動いているか確認する(WorkManager自体は再起動を
                         // 越えて永続化されるが、初回の登録が権限不足でスキップされたまま
                         // 取り残されているケースの保険)。
@@ -361,7 +359,7 @@ class MainActivity : ComponentActivity() {
                                     LocationReminderManager.hasLocationPermission(context)
                                 if (nowLocationPermissionGranted && !locationPermissionGranted) {
                                     // 権限が新たに許可された場合、権限不足でスキップされていた
-                                    // ジオフェンス登録・定期取得ジョブの起動をまとめてやり直す。
+                                    // 連続追跡サービス・定期取得ジョブの起動をまとめてやり直す。
                                     coroutineScope.launch { LocationReminderManager.reconcileAll(context) }
                                 }
                                 locationPermissionGranted = nowLocationPermissionGranted
@@ -429,8 +427,6 @@ class MainActivity : ComponentActivity() {
                             allTasks = allTasks,
                             notificationLogs = notificationLogs,
                             locationUpdateLogs = locationUpdateLogs,
-                            locationTrackingMode = locationTrackingMode,
-                            onSetLocationTrackingMode = taskViewModel::setLocationTrackingMode,
                             locationTrackingIntervalMinutes = locationTrackingIntervalMinutes,
                             onSetLocationTrackingIntervalMinutes = taskViewModel::setLocationTrackingIntervalMinutes,
                             onSendTestNotification = {
@@ -1514,8 +1510,6 @@ fun SettingsScreen(
     allTasks: List<Task>,
     notificationLogs: List<NotificationLog> = emptyList(),
     locationUpdateLogs: List<LocationUpdateLog> = emptyList(),
-    locationTrackingMode: LocationTrackingMode = LocationTrackingMode.GEOFENCING_API,
-    onSetLocationTrackingMode: (LocationTrackingMode) -> Unit = {},
     locationTrackingIntervalMinutes: Int = LocationTrackingSettings.DEFAULT_INTERVAL_MINUTES,
     onSetLocationTrackingIntervalMinutes: (Int) -> Unit = {},
     dueTimePresets: Map<DueTimeSlot, Int> = emptyMap(),
@@ -1652,46 +1646,32 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 8.dp)
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = locationTrackingMode == LocationTrackingMode.GEOFENCING_API,
-                    onClick = { onSetLocationTrackingMode(LocationTrackingMode.GEOFENCING_API) },
-                    label = { Text("Geofencing API") }
-                )
-                FilterChip(
-                    selected = locationTrackingMode == LocationTrackingMode.CONTINUOUS_TRACKING,
-                    onClick = { onSetLocationTrackingMode(LocationTrackingMode.CONTINUOUS_TRACKING) },
-                    label = { Text("連続追跡方式") }
-                )
+            var intervalInput by remember(locationTrackingIntervalMinutes) {
+                mutableStateOf(locationTrackingIntervalMinutes.toString())
             }
-            if (locationTrackingMode == LocationTrackingMode.CONTINUOUS_TRACKING) {
-                var intervalInput by remember(locationTrackingIntervalMinutes) {
-                    mutableStateOf(locationTrackingIntervalMinutes.toString())
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(top = 4.dp)
-                ) {
-                    OutlinedTextField(
-                        value = intervalInput,
-                        onValueChange = { intervalInput = it.filter { c -> c.isDigit() } },
-                        label = { Text("更新頻度(分)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.width(140.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 4.dp)
+            ) {
+                OutlinedTextField(
+                    value = intervalInput,
+                    onValueChange = { intervalInput = it.filter { c -> c.isDigit() } },
+                    label = { Text("更新頻度(分)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.width(140.dp)
+                )
+                TextButton(onClick = {
+                    val minutes = intervalInput.toIntOrNull()?.coerceIn(
+                        LocationTrackingSettings.MIN_INTERVAL_MINUTES,
+                        LocationTrackingSettings.MAX_INTERVAL_MINUTES
                     )
-                    TextButton(onClick = {
-                        val minutes = intervalInput.toIntOrNull()?.coerceIn(
-                            LocationTrackingSettings.MIN_INTERVAL_MINUTES,
-                            LocationTrackingSettings.MAX_INTERVAL_MINUTES
-                        )
-                        if (minutes != null) {
-                            onSetLocationTrackingIntervalMinutes(minutes)
-                        }
-                    }) {
-                        Text("保存")
+                    if (minutes != null) {
+                        onSetLocationTrackingIntervalMinutes(minutes)
                     }
+                }) {
+                    Text("保存")
                 }
             }
 
@@ -2041,7 +2021,7 @@ fun LocationDebugDialog(
                 )
                 if (!backgroundGranted) {
                     Text(
-                        text = "「常に許可」が無いと、アプリを閉じていてもジオフェンスが発火しません。",
+                        text = "「常に許可」が無いと、アプリを閉じている間は位置情報リマインダーが動作しません。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -2184,7 +2164,7 @@ private fun LocationUpdateLogRow(log: LocationUpdateLog) {
 /**
  * デバッグ用に、実際に発火した通知の履歴(発動時刻・対象タスク名・トリガ条件)を新しい順に
  * 一覧表示する。記録自体は[com.toshi0907.oboetotte.notification.ReminderReceiver]/
- * [com.toshi0907.oboetotte.notification.GeofenceReceiver]が通知表示時に行っている。
+ * [com.toshi0907.oboetotte.notification.LocationReminderNotifier]が通知表示時に行っている。
  */
 @Composable
 fun NotificationLogDialog(

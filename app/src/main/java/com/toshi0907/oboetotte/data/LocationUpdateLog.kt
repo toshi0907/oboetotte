@@ -11,7 +11,7 @@ object LocationUpdateType {
 }
 
 /**
- * 位置情報デバッグ用に、ジオフェンスのENTER/EXITイベント受信(通知の表示可否に関わらず記録)と、
+ * 位置情報デバッグ用に、圏内/圏外のENTER/EXIT遷移の検知(通知の表示可否に関わらず記録)と、
  * バックグラウンドでの定期的な現在地取得(5分間隔、
  * [com.toshi0907.oboetotte.notification.LocationUpdateWorker])の両方を記録する。
  * [taskTitle]はENTER/EXITの場合のみ設定され、PERIODICの場合はnull。
