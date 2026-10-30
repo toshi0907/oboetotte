@@ -102,6 +102,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -2871,6 +2872,16 @@ fun ManageVibrationPatternsDialog(
     )
 }
 
+/** タスク編集ダイアログの各項目の見出し。 */
+@Composable
+private fun EditTaskSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditTaskDialog(
@@ -2958,12 +2969,14 @@ fun EditTaskDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                EditTaskSectionTitle("タイトル")
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    singleLine = true
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
-                Text(text = "リスト", style = MaterialTheme.typography.titleSmall)
+                EditTaskSectionTitle("リスト")
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -2983,13 +2996,14 @@ fun EditTaskDialog(
                         )
                     }
                 }
+                EditTaskSectionTitle("URL")
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("URL(任意)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                EditTaskSectionTitle("期限")
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -3051,7 +3065,7 @@ fun EditTaskDialog(
                     }
                 }
 
-                Text(text = "繰り返し", style = MaterialTheme.typography.titleSmall)
+                EditTaskSectionTitle("繰り返し")
                 // 選択肢が画面幅に収まらないため横スクロールにする。
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
@@ -3125,14 +3139,7 @@ fun EditTaskDialog(
                     }
                 }
 
-                Text(text = "通知のみタスク", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    text = "通知されることが重要で完了確認が不要なタスク向け。有効にすると、期限日時通知を" +
-                        "表示できた時点で自動的に完了になり、通知に「完了」「スヌーズ」ボタンは出ません" +
-                        "(スヌーズ機能は併用できません)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                EditTaskSectionTitle("通知のみタスク")
                 FilterChip(
                     selected = notifyOnlyMode,
                     onClick = {
@@ -3143,12 +3150,7 @@ fun EditTaskDialog(
                 )
 
                 if (!notifyOnlyMode) {
-                    Text(text = "オートスヌーズ", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        text = "期限到達後、未完了のまま指定間隔が経過すると自動で再通知します",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    EditTaskSectionTitle("オートスヌーズ")
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -3170,13 +3172,7 @@ fun EditTaskDialog(
                     }
                 }
 
-                Text(text = "バイブレーションパターン", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    text = "有効にすると、このタスクの通知(期限日時・位置情報)で標準のバイブレーションの代わりに" +
-                        "選択したパターンで振動します(マナーモード中も振動します)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                EditTaskSectionTitle("バイブレーションパターン")
                 FilterChip(
                     selected = vibrationEnabled,
                     onClick = { vibrationEnabled = !vibrationEnabled },
@@ -3212,7 +3208,7 @@ fun EditTaskDialog(
                     }
                 }
 
-                Text(text = "位置", style = MaterialTheme.typography.titleSmall)
+                EditTaskSectionTitle("位置")
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -3371,7 +3367,7 @@ fun EditTaskDialog(
                     }
                 }
 
-                Text(text = "メモ", style = MaterialTheme.typography.titleSmall)
+                EditTaskSectionTitle("メモ")
                 OutlinedTextField(
                     value = memo,
                     onValueChange = { memo = it },
@@ -3379,7 +3375,7 @@ fun EditTaskDialog(
                     minLines = 3
                 )
 
-                Text(text = "添付ファイル", style = MaterialTheme.typography.titleSmall)
+                EditTaskSectionTitle("添付ファイル")
                 attachments.forEach { attachment ->
                     AttachmentRow(
                         attachment = attachment,
@@ -3397,7 +3393,7 @@ fun EditTaskDialog(
                     Text("ファイルを追加")
                 }
 
-                Text(text = "サブタスク", style = MaterialTheme.typography.titleSmall)
+                EditTaskSectionTitle("サブタスク")
                 subtasks.forEach { subtask ->
                     SubtaskTreeRow(
                         task = subtask,
