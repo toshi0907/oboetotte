@@ -10,6 +10,7 @@ data class ChecklistItem(val text: String, val checked: Boolean = false)
  * 詳細はdocs/architecture/task-checklist.md。
  */
 object Checklist {
+    private val LINE_BREAKS = Regex("[\\r\\n]+")
     private const val CHECKED_PREFIX = "[x] "
     private const val UNCHECKED_PREFIX = "[ ] "
 
@@ -42,5 +43,8 @@ object Checklist {
     fun resetChecks(value: String?): String? = format(parse(value).map { it.copy(checked = false) })
 
     /** 改行等を空白にまとめ、前後の空白を除く。 */
-    fun normalizeText(text: String): String = text.replace(Regex("[\\r\\n]+"), " ").trim()
+    fun normalizeText(text: String): String = toSingleLine(text).trim()
+
+    /** 改行等を空白にまとめる(入力途中の値に使うため前後の空白は残す)。 */
+    fun toSingleLine(text: String): String = text.replace(LINE_BREAKS, " ")
 }

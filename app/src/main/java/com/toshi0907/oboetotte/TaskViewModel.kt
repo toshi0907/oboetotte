@@ -408,20 +408,30 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     // 失われないよう直列化する。
     private val checklistMutex = Mutex()
 
-    /** タスクの詳細画面でチェックリストの[index]番目の項目のチェック状態を反転する。 */
-    fun toggleChecklistItem(task: Task, index: Int) {
+    /**
+     * タスクの詳細画面でチェックリストの[index]番目の項目のチェック状態を反転する。[expectedText]は
+     * タップした時点の項目のテキストで、表示後に並べ替え等で位置がずれていた場合は同じテキストの
+     * 項目を探して反転する(見つからなければ何もしない)。
+     */
+    fun toggleChecklistItem(task: Task, index: Int, expectedText: String) {
         viewModelScope.launch {
             checklistMutex.withLock {
                 // 古いスナップショットではなくDBの最新値を土台にする。
                 val current = taskDao.getById(task.id) ?: return@withLock
                 val items = Checklist.parse(current.checklist)
-                val item = items.getOrNull(index) ?: return@withLock
-                val toggled = items.toMutableList().apply { set(index, item.copy(checked = !item.checked)) }
+                val target = if (items.getOrNull(index)?.text == expectedText) {
+                    index
+                } else {
+                    items.indexOfFirst { it.text == expectedText }.takeIf { it >= 0 } ?: return@withLock
+                }
+                val item = items[target]
+                val toggled = items.toMutableList().apply { set(target, item.copy(checked = !item.checked)) }
                 // 他の項目(完了状態等)を古い値で上書きしないよう、checklistカラムだけを更新する。
                 taskDao.setChecklist(current.id, Checklist.format(toggled))
                 logOperation(
                     if (item.checked) "チェックリスト項目のチェックを外す" else "チェックリスト項目をチェック",
-                    "${current.logLabel()} ${item.text}",
+                    "${current.logLabel()} ${item.text.take(MAX_LOG_ITEM_TEXT_LENGTH)}" +
+                        if (item.text.length > MAX_LOG_ITEM_TEXT_LENGTH) "…" else "",
                     current.attachmentGroupId()
                 )
             }
@@ -741,6 +751,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val TAG = "TaskViewModel"
+
+        // 操作ログに記録するチェックリスト項目のテキストの最大文字数(TaskChangeDescriberと同じ)。
+        private const val MAX_LOG_ITEM_TEXT_LENGTH = 30
 
         /**
          * [selectedListId]に渡すと「リスト未登録」(`listId == null`のタスクのみ)を表す特別な値。
