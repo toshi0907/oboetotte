@@ -63,6 +63,8 @@ object TaskCompletion {
                 isDone = false,
                 completedAt = null,
                 dueAt = computedNextDueAt,
+                // チェックリストの項目は引き継ぎ、チェックはすべて外す。
+                checklist = Checklist.resetChecks(task.checklist),
                 seriesId = task.attachmentGroupId()
             )
             val newId = taskDao.insert(nextTask)

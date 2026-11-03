@@ -52,6 +52,9 @@ interface TaskDao {
     @Update
     suspend fun update(task: Task)
 
+    @Query("UPDATE tasks SET checklist = :checklist WHERE id = :taskId")
+    suspend fun setChecklist(taskId: Long, checklist: String?)
+
     @Query("UPDATE tasks SET listId = NULL WHERE listId = :listId")
     suspend fun clearListId(listId: Long)
 

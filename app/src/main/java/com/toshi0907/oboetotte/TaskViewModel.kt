@@ -46,6 +46,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
@@ -131,6 +133,7 @@ data class TaskEdits(
     val notifyOnDeparture: Boolean,
     val url: String?,
     val memo: String?,
+    val checklist: String?,
     val autoSnoozeMinutes: Long?,
     val notifyOnlyMode: Boolean,
     val vibrationPatternId: Long?
@@ -367,6 +370,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 notifyOnDeparture = edits.notifyOnDeparture,
                 url = edits.url,
                 memo = edits.memo,
+                checklist = edits.checklist,
                 // 通知のみタスクはスヌーズ機能(手動・オート)を併用しないため、有効な場合は
                 // オートスヌーズの間隔設定を強制的にクリアする(EditTaskDialog側で選択UIを
                 // 隠していても、ここで正規化することでデータの整合性を保証する)。
@@ -397,6 +401,30 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 logOperation("タスク編集", "${current.logLabel()} ${changes.joinToString("、")}", current.attachmentGroupId())
             }
             refreshTaskWidget(appContext)
+        }
+    }
+
+    // 詳細画面で項目を素早く連続タップした場合に、読み込み→書き込みが交錯して一方のトグルが
+    // 失われないよう直列化する。
+    private val checklistMutex = Mutex()
+
+    /** タスクの詳細画面でチェックリストの[index]番目の項目のチェック状態を反転する。 */
+    fun toggleChecklistItem(task: Task, index: Int) {
+        viewModelScope.launch {
+            checklistMutex.withLock {
+                // 古いスナップショットではなくDBの最新値を土台にする。
+                val current = taskDao.getById(task.id) ?: return@withLock
+                val items = Checklist.parse(current.checklist)
+                val item = items.getOrNull(index) ?: return@withLock
+                val toggled = items.toMutableList().apply { set(index, item.copy(checked = !item.checked)) }
+                // 他の項目(完了状態等)を古い値で上書きしないよう、checklistカラムだけを更新する。
+                taskDao.setChecklist(current.id, Checklist.format(toggled))
+                logOperation(
+                    if (item.checked) "チェックリスト項目のチェックを外す" else "チェックリスト項目をチェック",
+                    "${current.logLabel()} ${item.text}",
+                    current.attachmentGroupId()
+                )
+            }
         }
     }
 

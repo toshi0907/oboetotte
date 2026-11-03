@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.room.withTransaction
+import com.toshi0907.oboetotte.Checklist
 import com.toshi0907.oboetotte.RepeatRule
 import com.toshi0907.oboetotte.attachment.AttachmentStorage
 import com.toshi0907.oboetotte.attachment.DiscardOutputStream
@@ -105,6 +106,7 @@ object BackupManager {
                             put("notifyOnDeparture", task.notifyOnDeparture)
                             put("url", task.url ?: JSONObject.NULL)
                             put("memo", task.memo ?: JSONObject.NULL)
+                            put("checklist", task.checklist ?: JSONObject.NULL)
                             put("seriesId", task.seriesId ?: JSONObject.NULL)
                             put("autoSnoozeMinutes", task.autoSnoozeMinutes ?: JSONObject.NULL)
                             put("notifyOnlyMode", task.notifyOnlyMode)
@@ -320,6 +322,8 @@ object BackupManager {
                 notifyOnDeparture = obj.optBoolean("notifyOnDeparture", false),
                 url = if (obj.isNull("url")) null else obj.getString("url"),
                 memo = if (obj.isNull("memo")) null else obj.getString("memo"),
+                // キーの無い旧形式のバックアップはnull。想定外の形式も正規化して取り込む。
+                checklist = if (obj.isNull("checklist")) null else Checklist.format(Checklist.parse(obj.getString("checklist"))),
                 seriesId = if (obj.isNull("seriesId")) null else obj.getLong("seriesId"),
                 // UIが選択肢として提供する間隔(SNOOZE_OPTIONS)以外の値がバックアップファイルに
                 // 含まれていた場合、想定外の間隔で再通知が繰り返されてしまうため無視してnullにする。
