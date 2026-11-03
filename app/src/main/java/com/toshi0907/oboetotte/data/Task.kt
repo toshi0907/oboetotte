@@ -25,6 +25,9 @@ data class Task(
     val notifyOnDeparture: Boolean = false,
     val url: String? = null,
     val memo: String? = null,
+    // チェックリスト。1行1項目で行頭の`[x] `/`[ ] `がチェック状態を表す(Checklistで相互変換する)。
+    // 項目が無ければnull。詳細はdocs/architecture/task-checklist.md。
+    val checklist: String? = null,
     val seriesId: Long? = null,
     val autoSnoozeMinutes: Long? = null,
     // trueの場合、期限日時通知(ReminderReceiver)を実際に表示できた時点で自動的にタスクを完了扱いにする

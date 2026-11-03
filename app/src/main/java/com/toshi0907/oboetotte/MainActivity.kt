@@ -78,6 +78,8 @@ import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -384,6 +386,7 @@ class MainActivity : ComponentActivity() {
                             onUpdateTask = taskViewModel::updateTask,
                             onDeleteTask = taskViewModel::deleteTask,
                             onAddSubtask = taskViewModel::addSubtask,
+                            onToggleChecklistItem = taskViewModel::toggleChecklistItem,
                             savedLocations = savedLocations,
                             vibrationPatterns = vibrationPatterns,
                             allAttachments = attachments,
@@ -651,6 +654,7 @@ fun TaskScreen(
     onUpdateTask: (Task, TaskEdits) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
+    onToggleChecklistItem: (Task, Int, String) -> Unit = { _, _, _ -> },
     savedLocations: List<SavedLocation> = emptyList(),
     vibrationPatterns: List<VibrationPattern> = emptyList(),
     allAttachments: List<TaskAttachment> = emptyList(),
@@ -884,6 +888,7 @@ fun TaskScreen(
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
             onAddSubtask = onAddSubtask,
+            onToggleChecklistItem = onToggleChecklistItem,
             onAddAttachment = onAddAttachment,
             onDeleteAttachment = onDeleteAttachment,
             onDismiss = { viewingTask = null }
@@ -1211,6 +1216,7 @@ fun TaskTreeRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                ChecklistProgressText(task)
             }
         }
         children.forEach { child ->
@@ -1226,6 +1232,22 @@ fun TaskTreeRow(
         }
     }
 }
+
+/** チェックリストがあれば一覧の行に「☑ 完了数/全体数」を表示する([TaskTreeRow]・[SubtaskTreeRow]共通)。 */
+@Composable
+private fun ChecklistProgressText(task: Task) {
+    val items = remember(task.checklist) { Checklist.parse(task.checklist) }
+    if (items.isNotEmpty()) {
+        Text(
+            text = "☑ ${items.count { it.checked }}/${items.size}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** [EditTaskDialog]での編集中のチェックリスト項目。並べ替え・削除時に入力欄の状態が別の項目へ移らないよう、[key]で識別する。 */
+private data class EditingChecklistItem(val key: Int, val item: ChecklistItem)
 
 /**
  * [url]を`ACTION_VIEW`で開く。スキームは小文字に正規化する(`HTTPS://`等だとブラウザの
@@ -1297,6 +1319,7 @@ fun TaskDetailDialog(
     onToggleDone: (Task) -> Unit,
     onUpdateTask: (Task, TaskEdits) -> Unit,
     onAddSubtask: (Task, String) -> Unit,
+    onToggleChecklistItem: (Task, Int, String) -> Unit = { _, _, _ -> },
     onAddAttachment: (Task, Uri) -> Unit = { _, _ -> },
     onDeleteAttachment: (TaskAttachment) -> Unit = {},
     onDismiss: () -> Unit
@@ -1376,6 +1399,36 @@ fun TaskDetailDialog(
                 if (!current.memo.isNullOrBlank()) {
                     Text(text = "メモ", style = MaterialTheme.typography.titleSmall)
                     LinkifiedMemoText(memo = current.memo)
+                }
+                val checklistItems = remember(current.checklist) { Checklist.parse(current.checklist) }
+                if (checklistItems.isNotEmpty()) {
+                    Text(
+                        text = "チェックリスト(${checklistItems.count { it.checked }}/${checklistItems.size})",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    checklistItems.forEachIndexed { index, item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggleChecklistItem(current, index, item.text) },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = item.checked,
+                                onCheckedChange = { onToggleChecklistItem(current, index, item.text) }
+                            )
+                            Text(
+                                text = item.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                textDecoration = if (item.checked) TextDecoration.LineThrough else null,
+                                color = if (item.checked) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                        }
+                    }
                 }
                 if (attachments.isNotEmpty()) {
                     Text(text = "添付ファイル", style = MaterialTheme.typography.titleSmall)
@@ -1477,6 +1530,7 @@ fun TaskDetailDialog(
             onToggleDone = onToggleDone,
             onUpdateTask = onUpdateTask,
             onAddSubtask = onAddSubtask,
+            onToggleChecklistItem = onToggleChecklistItem,
             onAddAttachment = onAddAttachment,
             onDeleteAttachment = onDeleteAttachment,
             onDismiss = { nestedViewTask = null }
@@ -2320,6 +2374,7 @@ fun SubtaskTreeRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                ChecklistProgressText(task)
             }
         }
         children.forEach { child ->
@@ -2832,6 +2887,12 @@ fun EditTaskDialog(
     var listId by remember(task.id) { mutableStateOf(task.listId) }
     var url by remember(task.id) { mutableStateOf(task.url ?: "") }
     var memo by remember(task.id) { mutableStateOf(task.memo ?: "") }
+    // 項目ごとに一意なキーを振る(新規追加分はnextChecklistKeyから採番)。
+    var checklistItems by remember(task.id) {
+        mutableStateOf(Checklist.parse(task.checklist).mapIndexed { i, item -> EditingChecklistItem(i, item) })
+    }
+    var nextChecklistKey by remember(task.id) { mutableIntStateOf(checklistItems.size) }
+    var checklistInput by remember(task.id) { mutableStateOf("") }
     var dueAt by remember(task.id) { mutableStateOf(task.dueAt) }
     var repeatRule by remember(task.id) { mutableStateOf(task.repeatRule) }
     var selectedDays by remember(task.id) {
@@ -3296,6 +3357,85 @@ fun EditTaskDialog(
                     minLines = 3
                 )
 
+                EditTaskSectionTitle("チェックリスト")
+                checklistItems.forEachIndexed { index, editing ->
+                    key(editing.key) {
+                        val item = editing.item
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 編集画面ではチェック状態は変更できない(詳細画面でトグルする)ため、状態の表示のみ。
+                            Text(text = if (item.checked) "☑" else "☐")
+                            OutlinedTextField(
+                                value = item.text,
+                                onValueChange = { text ->
+                                    checklistItems = checklistItems.toMutableList().apply {
+                                        // 項目は1行のみ(改行は空白にする)。
+                                        set(index, editing.copy(item = item.copy(text = Checklist.toSingleLine(text))))
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 4.dp),
+                                singleLine = true
+                            )
+                            IconButton(
+                                onClick = {
+                                    checklistItems = checklistItems.toMutableList().apply {
+                                        add(index - 1, removeAt(index))
+                                    }
+                                },
+                                enabled = index > 0,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Text("↑")
+                            }
+                            IconButton(
+                                onClick = {
+                                    checklistItems = checklistItems.toMutableList().apply {
+                                        add(index + 1, removeAt(index))
+                                    }
+                                },
+                                enabled = index < checklistItems.lastIndex,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Text("↓")
+                            }
+                            IconButton(
+                                onClick = {
+                                    checklistItems = checklistItems.toMutableList().apply { removeAt(index) }
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Text("✕")
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // 複数行で入力すると各行が1項目として追加される。
+                    OutlinedTextField(
+                        value = checklistInput,
+                        onValueChange = { checklistInput = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("項目を追加(改行で複数)") }
+                    )
+                    TextButton(onClick = {
+                        val added = Checklist.itemsFromInput(checklistInput)
+                        checklistItems = checklistItems +
+                            added.mapIndexed { i, item -> EditingChecklistItem(nextChecklistKey + i, item) }
+                        nextChecklistKey += added.size
+                        checklistInput = ""
+                    }) {
+                        Text("追加")
+                    }
+                }
+
                 EditTaskSectionTitle("添付ファイル")
                 attachments.forEach { attachment ->
                     AttachmentRow(
@@ -3384,6 +3524,10 @@ fun EditTaskDialog(
                             notifyOnDeparture = location != null && notifyOnDeparture,
                             url = normalizeUrl(url),
                             memo = memo.trim().ifBlank { null },
+                            // 「追加」を押さずに保存した入力欄の内容も項目として取り込む。
+                            checklist = Checklist.format(
+                                checklistItems.map { it.item } + Checklist.itemsFromInput(checklistInput)
+                            ),
                             autoSnoozeMinutes = if (notifyOnlyMode) null else autoSnoozeMinutes,
                             notifyOnlyMode = notifyOnlyMode,
                             vibrationPatternId = if (vibrationEnabled) vibrationPatternId else null

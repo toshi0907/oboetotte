@@ -1,5 +1,6 @@
 package com.toshi0907.oboetotte.oplog
 
+import com.toshi0907.oboetotte.Checklist
 import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.formatDueAt
 import com.toshi0907.oboetotte.locationLabel
@@ -64,6 +65,8 @@ fun describeTaskChanges(
     }
     addText("URL", before.url, after.url)
     addText("メモ", before.memo, after.memo)
+    // 編集画面ではチェック状態は変更しないため、項目のテキスト・順序のみを比較する。
+    addText("チェックリスト", checklistText(before), checklistText(after))
     add("オートスヌーズ", autoSnoozeText(before), autoSnoozeText(after))
     add("通知のみ", onOffText(before.notifyOnlyMode), onOffText(after.notifyOnlyMode))
     addRef("バイブレーション", before.vibrationPatternId, after.vibrationPatternId, patternNames)
@@ -74,6 +77,9 @@ private fun autoSnoozeText(task: Task): String? {
     val minutes = task.autoSnoozeMinutes ?: return null
     return ReminderScheduler.SNOOZE_OPTIONS.find { it.minutes == minutes }?.label ?: "${minutes}分後"
 }
+
+private fun checklistText(task: Task): String? =
+    Checklist.parse(task.checklist).takeIf { it.isNotEmpty() }?.joinToString("、") { it.text }
 
 private fun onOffText(value: Boolean): String = if (value) "オン" else "オフ"
 
