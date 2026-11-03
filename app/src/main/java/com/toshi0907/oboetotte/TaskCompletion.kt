@@ -40,6 +40,9 @@ object TaskCompletion {
         val completedAt = System.currentTimeMillis()
         val updatedRows = taskDao.setDone(task.id, true, completedAt)
         if (updatedRows == 0) return
+        // チェックリストは詳細画面から別のコルーチンで更新されるため、渡されたスナップショットではなく
+        // DBの最新値を次回分へ引き継ぐ(他の項目は従来どおりスナップショットを使う)。
+        val latestChecklist = (taskDao.getById(task.id) ?: task).checklist
         ReminderScheduler.cancel(context, task.id)
         LocationReminderManager.unregister(context, task.id)
 
@@ -64,7 +67,7 @@ object TaskCompletion {
                 completedAt = null,
                 dueAt = computedNextDueAt,
                 // チェックリストの項目は引き継ぎ、チェックはすべて外す。
-                checklist = Checklist.resetChecks(task.checklist),
+                checklist = Checklist.resetChecks(latestChecklist),
                 seriesId = task.attachmentGroupId()
             )
             val newId = taskDao.insert(nextTask)

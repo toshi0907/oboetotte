@@ -422,7 +422,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 val target = if (items.getOrNull(index)?.text == expectedText) {
                     index
                 } else {
-                    items.indexOfFirst { it.text == expectedText }.takeIf { it >= 0 } ?: return@withLock
+                    // 同じテキストの項目が複数ある場合はどれをタップしたか判別できないため何もしない。
+                    items.indices.singleOrNull { items[it].text == expectedText } ?: return@withLock
                 }
                 val item = items[target]
                 val toggled = items.toMutableList().apply { set(target, item.copy(checked = !item.checked)) }
