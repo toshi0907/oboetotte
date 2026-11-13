@@ -126,8 +126,14 @@ class ReminderReceiver : BroadcastReceiver() {
             }
         }
 
-        val openIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        // タスクの通知はタップでそのタスクの詳細ダイアログを開く。テスト通知はタスクに紐づかないため
+        // アプリを開くだけにする。
+        val openIntent = if (notificationId == TEST_NOTIFICATION_ID) {
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        } else {
+            MainActivity.openTaskIntent(context, notificationId)
         }
         val contentIntent = PendingIntent.getActivity(
             context,

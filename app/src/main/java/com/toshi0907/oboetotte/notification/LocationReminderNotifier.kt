@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.ActivityCompat
@@ -57,9 +56,8 @@ object LocationReminderNotifier {
             }
         }
 
-        val openIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
+        // タップでそのタスクの詳細ダイアログを開く。
+        val openIntent = MainActivity.openTaskIntent(context, taskId)
         val contentIntent = PendingIntent.getActivity(
             context,
             taskId.toInt(),

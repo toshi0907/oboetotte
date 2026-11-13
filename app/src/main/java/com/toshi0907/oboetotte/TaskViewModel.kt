@@ -265,6 +265,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         AppUpdateCheckSettings.removeLastCheckedAtChangeListener(appContext, updateCheckPrefsListener)
     }
 
+    /** タスク[id]をDBから直接読み直す(通知・ウィジェットからタスク詳細を開く際、削除済みかの判定に使う)。 */
+    suspend fun getTask(id: Long): Task? = taskDao.getById(id)
+
     val allTasks: StateFlow<List<Task>> = taskDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

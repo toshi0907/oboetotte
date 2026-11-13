@@ -16,12 +16,12 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
-import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
@@ -68,7 +68,8 @@ import kotlinx.coroutines.withContext
  * にならいリンク色+下線のテキストとして表示し(背景・枠線・角丸は持たない)、期限がある場合は
  * 期限日時と同じ行に、無い場合は単独の行に表示する。リンクラベルはタップ領域確保のため上下に
  * パディングを持つため、同じ行に並ぶ期限日時にも同じ縦パディングを付けて表示位置を揃えている。
- * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開き、リンクラベルをタップすると
+ * 行(タイトル・期限部分)をタップするとアプリ(MainActivity)を開いてそのタスクの詳細ダイアログを表示し
+ * ([com.toshi0907.oboetotte.MainActivity.openTaskIntent])、リンクラベルをタップすると
  * ブラウザ等でURLを直接開く。
  * ウィジェット上での完了操作は行わない。表示内容はDB更新のたびに
  * 各所から呼ばれる[refreshTaskWidget]で再描画される。上部には最終更新日時
@@ -153,7 +154,8 @@ class TaskWidget : GlanceAppWidget() {
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                                    .clickable(actionStartActivity<MainActivity>())
+                                    // タップでアプリを開き、そのタスクの詳細ダイアログを表示する。
+                                    .clickable(actionStartActivity(MainActivity.openTaskIntent(context, task.id)))
                             ) {
                                 Text(text = task.title, style = textStyle, modifier = GlanceModifier.fillMaxWidth())
                                 val url = task.url?.takeIf { it.isNotBlank() }

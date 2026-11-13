@@ -163,8 +163,21 @@ import kotlinx.coroutines.withContext
 /** [MainActivity]がナビゲーションライブラリ無しで切り替える画面。 */
 private enum class MainScreen { Tasks, Settings, OperationLog }
 
+/**
+ * 通知・ウィジェットのタップ等、アプリ外から特定タスクの詳細ダイアログを開く要求。
+ * `equals`をあえて実装しない(参照で比較する)ことで、同じタスクを続けて開く要求も別の要求として扱い、
+ * [TaskScreen]側で表示中のダイアログを作り直す`key`にも使う。
+ */
+class OpenTaskRequest(val task: Task)
+
 class MainActivity : ComponentActivity() {
     private val taskViewModel: TaskViewModel by viewModels()
+
+    /**
+     * アプリ外([openTaskIntent])から渡された、詳細ダイアログを開くタスクのID。`setContent`内で
+     * DBから読み直して[OpenTaskRequest]に変換した後`null`に戻す。
+     */
+    private var pendingOpenTaskId by mutableStateOf<Long?>(null)
 
     private val requestNotificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -228,6 +241,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 画面回転等による再生成(savedInstanceState != null)では、起動時のIntentを再処理すると
+        // 既に閉じた詳細ダイアログが再び開いてしまうため処理しない。
+        // 処理待ちの要求(DB読み直し中に再生成された場合)はsavedInstanceStateから引き継ぐ。
+        if (savedInstanceState == null) {
+            consumeOpenTaskIntent(intent)
+        } else if (savedInstanceState.containsKey(STATE_PENDING_OPEN_TASK_ID)) {
+            pendingOpenTaskId = savedInstanceState.getLong(STATE_PENDING_OPEN_TASK_ID)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
                 this,
@@ -270,6 +291,21 @@ class MainActivity : ComponentActivity() {
                     val context = LocalContext.current
                     val lifecycleOwner = LocalLifecycleOwner.current
                     var currentScreen by remember { mutableStateOf(MainScreen.Tasks) }
+                    var openTaskRequest by remember { mutableStateOf<OpenTaskRequest?>(null) }
+                    val openTaskId = pendingOpenTaskId
+                    LaunchedEffect(openTaskId) {
+                        if (openTaskId == null) return@LaunchedEffect
+                        // 削除済み等を判定するため、allTasks(初期値が空リスト)ではなくDBから直接読み直す。
+                        val task = taskViewModel.getTask(openTaskId)
+                        if (task == null) {
+                            Toast.makeText(context, "タスクが見つかりません", Toast.LENGTH_SHORT).show()
+                        } else {
+                            currentScreen = MainScreen.Tasks
+                            openTaskRequest = OpenTaskRequest(task)
+                        }
+                        // 最後に戻す(先に戻すとこのLaunchedEffect自体がキャンセルされるため)。
+                        pendingOpenTaskId = null
+                    }
                     var exactAlarmPermissionGranted by remember {
                         mutableStateOf(ReminderScheduler.canScheduleExactAlarms(context))
                     }
@@ -411,6 +447,8 @@ class MainActivity : ComponentActivity() {
                             isDownloadingUpdate = isDownloadingUpdate,
                             onDownloadUpdate = ::downloadAndInstallUpdate,
                             onOpenSettings = { currentScreen = MainScreen.Settings },
+                            openTaskRequest = openTaskRequest,
+                            onOpenTaskRequestHandled = { openTaskRequest = null },
                             modifier = Modifier.padding(innerPadding)
                         )
                         MainScreen.Settings -> SettingsScreen(
@@ -507,6 +545,57 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingOpenTaskId?.let { outState.putLong(STATE_PENDING_OPEN_TASK_ID, it) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeOpenTaskIntent(intent)
+    }
+
+    /**
+     * [ACTION_OPEN_TASK]+[EXTRA_OPEN_TASK_ID]のIntentであれば[pendingOpenTaskId]に積み、Intentからは
+     * 取り除く(以降の再処理で同じ詳細ダイアログが再び開かないようにするため)。履歴(最近使ったアプリ)
+     * からの起動では、当時のIntentがそのまま再配送されるため処理しない。[MainActivity]はランチャー用に
+     * exportedのため、他アプリから偶然・意図的に送られたextraだけのIntentで動作しないようactionも確認する。
+     */
+    private fun consumeOpenTaskIntent(intent: Intent?) {
+        if (intent == null || intent.action != ACTION_OPEN_TASK || !intent.hasExtra(EXTRA_OPEN_TASK_ID)) return
+        val taskId = intent.getLongExtra(EXTRA_OPEN_TASK_ID, -1L)
+        intent.removeExtra(EXTRA_OPEN_TASK_ID)
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        if (taskId <= 0L) return
+        pendingOpenTaskId = taskId
+    }
+
+    companion object {
+        const val EXTRA_OPEN_TASK_ID = "open_task_id"
+        private const val STATE_PENDING_OPEN_TASK_ID = "pending_open_task_id"
+
+        /**
+         * 他の`MainActivity`宛の`PendingIntent`(位置情報追跡・アップデート通知等。actionなし)と
+         * リクエストコードが偶然一致しても同一の`PendingIntent`として`FLAG_UPDATE_CURRENT`で
+         * extrasを上書きし合わないよう、専用のactionを付ける。
+         */
+        const val ACTION_OPEN_TASK = "com.toshi0907.oboetotte.action.OPEN_TASK"
+
+        /**
+         * タスク[taskId]の詳細ダイアログを開いた状態で[MainActivity]を起動するIntent。
+         * `SINGLE_TOP`により、既に[MainActivity]が前面にある場合は作り直さず[onNewIntent]で受け取る。
+         */
+        fun openTaskIntent(context: Context, taskId: Long): Intent =
+            Intent(context, MainActivity::class.java).apply {
+                action = ACTION_OPEN_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(EXTRA_OPEN_TASK_ID, taskId)
+            }
     }
 }
 
@@ -669,10 +758,15 @@ fun TaskScreen(
     isDownloadingUpdate: Boolean = false,
     onDownloadUpdate: (String) -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    openTaskRequest: OpenTaskRequest? = null,
+    onOpenTaskRequestHandled: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
     var viewingTask by remember { mutableStateOf<Task?>(null) }
+    // 詳細ダイアログ(内部の編集ダイアログ・入れ子の詳細ダイアログを含む)を作り直すためのキー。
+    // アプリ外からの要求([openTaskRequest])のたびに差し替え、表示中のダイアログを置き換える。
+    var viewingTaskKey by remember { mutableStateOf<Any>(Unit) }
     // 追加ボタン(またはキーボードの確定キー)で登録した直後のタスク。登録完了後にその編集ダイアログを開く。
     var addedTask by remember { mutableStateOf<Task?>(null) }
     val addTaskAndEdit: () -> Unit = {
@@ -876,23 +970,42 @@ fun TaskScreen(
         }
     }
 
+    // 通知・ウィジェットのタップ等、アプリ外からの要求でタスクの詳細ダイアログを開く。
+    // 表示中の他のダイアログ(編集中の内容を含む)は破棄して置き換える。
+    LaunchedEffect(openTaskRequest) {
+        val request = openTaskRequest ?: return@LaunchedEffect
+        addedTask = null
+        deletingTask = null
+        viewingTask = request.task
+        viewingTaskKey = request
+        // snapToの途中でキャンセルされても要求が消費されず残り続ける(画面復帰時に再度開く)ことがないよう、
+        // 消費の通知はfinallyで必ず行う。
+        try {
+            drawerState.snapTo(DrawerValue.Closed)
+        } finally {
+            onOpenTaskRequestHandled()
+        }
+    }
+
     viewingTask?.let { task ->
-        TaskDetailDialog(
-            task = task,
-            allTasks = allTasks,
-            lists = lists,
-            savedLocations = savedLocations,
-            vibrationPatterns = vibrationPatterns,
-            allAttachments = allAttachments,
-            operationLogsForTaskGroup = operationLogsForTaskGroup,
-            onToggleDone = onToggleDone,
-            onUpdateTask = onUpdateTask,
-            onAddSubtask = onAddSubtask,
-            onToggleChecklistItem = onToggleChecklistItem,
-            onAddAttachment = onAddAttachment,
-            onDeleteAttachment = onDeleteAttachment,
-            onDismiss = { viewingTask = null }
-        )
+        key(viewingTaskKey) {
+            TaskDetailDialog(
+                task = task,
+                allTasks = allTasks,
+                lists = lists,
+                savedLocations = savedLocations,
+                vibrationPatterns = vibrationPatterns,
+                allAttachments = allAttachments,
+                operationLogsForTaskGroup = operationLogsForTaskGroup,
+                onToggleDone = onToggleDone,
+                onUpdateTask = onUpdateTask,
+                onAddSubtask = onAddSubtask,
+                onToggleChecklistItem = onToggleChecklistItem,
+                onAddAttachment = onAddAttachment,
+                onDeleteAttachment = onDeleteAttachment,
+                onDismiss = { viewingTask = null }
+            )
+        }
     }
 
     // 追加直後の編集ダイアログ。キャンセルしてもタスク自体は登録済みのまま残る。
