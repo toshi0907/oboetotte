@@ -1,6 +1,8 @@
 package com.toshi0907.oboetotte.widget
 
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.text.KeyboardActions
@@ -30,7 +32,10 @@ import com.toshi0907.oboetotte.oplog.OperationLogSource
 import com.toshi0907.oboetotte.oplog.OperationLogger
 import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.ui.theme.OboetotteTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * ホーム画面ウィジェット上部の「＋ 追加」から起動する、タスクのタイトル入力専用の透明な画面
@@ -90,23 +95,42 @@ class QuickAddTaskActivity : ComponentActivity() {
         if (title.isEmpty() || saving) return
         saving = true
         lifecycleScope.launch {
-            val task = Task(
-                title = title,
-                dueAt = System.currentTimeMillis() + TaskViewModel.DEFAULT_DUE_DELAY_MILLIS
-            )
-            val id = AppDatabase.getInstance(applicationContext).taskDao().insert(task)
-            val inserted = task.copy(id = id)
-            ReminderScheduler.schedule(applicationContext, inserted)
-            OperationLogger.logAsync(
-                applicationContext,
-                OperationLogSource.WIDGET,
-                "タスク追加",
-                inserted.logLabel(),
-                inserted.attachmentGroupId()
-            )
-            refreshTaskWidget(applicationContext)
+            val id = try {
+                // 保存中にダイアログ外タップ等でfinishされても、DB登録後のリマインダー登録・ログ・
+                // ウィジェット更新まで必ず完了させる(途中でキャンセルされると通知の無いタスクが残るため)。
+                withContext(NonCancellable) {
+                    val task = Task(
+                        title = title,
+                        dueAt = System.currentTimeMillis() + TaskViewModel.DEFAULT_DUE_DELAY_MILLIS
+                    )
+                    val newId = AppDatabase.getInstance(applicationContext).taskDao().insert(task)
+                    val inserted = task.copy(id = newId)
+                    ReminderScheduler.schedule(applicationContext, inserted)
+                    OperationLogger.logAsync(
+                        applicationContext,
+                        OperationLogSource.WIDGET,
+                        "タスク追加",
+                        inserted.logLabel(),
+                        inserted.attachmentGroupId()
+                    )
+                    refreshTaskWidget(applicationContext)
+                    newId
+                }
+            } catch (e: CancellationException) {
+                // 保存完了後にダイアログが閉じられていた場合。タスクは保存済みのため詳細画面は開かずに終える。
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "ウィジェットからのタスク追加に失敗しました", e)
+                Toast.makeText(applicationContext, "タスクを追加できませんでした", Toast.LENGTH_LONG).show()
+                finish()
+                return@launch
+            }
             startActivity(MainActivity.openTaskIntent(applicationContext, id))
             finish()
         }
+    }
+
+    companion object {
+        private const val TAG = "QuickAddTaskActivity"
     }
 }

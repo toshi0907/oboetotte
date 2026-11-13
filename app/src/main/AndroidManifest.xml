@@ -55,12 +55,15 @@
         </activity>
 
         <!-- ウィジェットの「＋ 追加」から起動するタイトル入力ダイアログ。taskAffinityを空にして
-             アプリ本体のタスクと分離し、アプリがバックグラウンドにあってもホーム画面の上に表示する。 -->
+             アプリ本体のタスクと分離し、アプリがバックグラウンドにあってもホーム画面の上に表示する。
+             連打で複数のダイアログが重ならないようsingleTask、保存処理中に再生成されないようconfigChangesを指定。 -->
         <activity
             android:name=".widget.QuickAddTaskActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:taskAffinity=""
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode|density|fontScale|locale|layoutDirection"
             android:windowSoftInputMode="stateAlwaysVisible|adjustResize"
             android:theme="@style/Theme.Oboetotte.SnoozeDialog" />
 
