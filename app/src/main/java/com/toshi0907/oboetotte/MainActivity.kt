@@ -124,7 +124,6 @@ import com.toshi0907.oboetotte.backup.CloudBackupSettings
 import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanup
 import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanupScheduler
 import com.toshi0907.oboetotte.cleanup.CompletedTaskCleanupSettings
-import com.toshi0907.oboetotte.data.AppDatabase
 import com.toshi0907.oboetotte.data.LocationUpdateLog
 import com.toshi0907.oboetotte.data.LocationUpdateType
 import com.toshi0907.oboetotte.data.NotificationLog
@@ -244,7 +243,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // 画面回転等による再生成(savedInstanceState != null)では、起動時のIntentを再処理すると
         // 既に閉じた詳細ダイアログが再び開いてしまうため処理しない。
-        if (savedInstanceState == null) consumeOpenTaskIntent(intent)
+        // 処理待ちの要求(DB読み直し中に再生成された場合)はsavedInstanceStateから引き継ぐ。
+        if (savedInstanceState == null) {
+            consumeOpenTaskIntent(intent)
+        } else if (savedInstanceState.containsKey(STATE_PENDING_OPEN_TASK_ID)) {
+            pendingOpenTaskId = savedInstanceState.getLong(STATE_PENDING_OPEN_TASK_ID)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
                 this,
@@ -292,7 +296,7 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(openTaskId) {
                         if (openTaskId == null) return@LaunchedEffect
                         // 削除済み等を判定するため、allTasks(初期値が空リスト)ではなくDBから直接読み直す。
-                        val task = AppDatabase.getInstance(context).taskDao().getById(openTaskId)
+                        val task = taskViewModel.getTask(openTaskId)
                         if (task == null) {
                             Toast.makeText(context, "タスクが見つかりません", Toast.LENGTH_SHORT).show()
                         } else {
@@ -543,6 +547,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingOpenTaskId?.let { outState.putLong(STATE_PENDING_OPEN_TASK_ID, it) }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -550,12 +559,13 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * [EXTRA_OPEN_TASK_ID]付きのIntentであれば[pendingOpenTaskId]に積み、Intentからは取り除く
-     * (以降の再処理で同じ詳細ダイアログが再び開かないようにするため)。履歴(最近使ったアプリ)からの
-     * 起動では、当時のIntentがそのまま再配送されるため処理しない。
+     * [ACTION_OPEN_TASK]+[EXTRA_OPEN_TASK_ID]のIntentであれば[pendingOpenTaskId]に積み、Intentからは
+     * 取り除く(以降の再処理で同じ詳細ダイアログが再び開かないようにするため)。履歴(最近使ったアプリ)
+     * からの起動では、当時のIntentがそのまま再配送されるため処理しない。[MainActivity]はランチャー用に
+     * exportedのため、他アプリから偶然・意図的に送られたextraだけのIntentで動作しないようactionも確認する。
      */
     private fun consumeOpenTaskIntent(intent: Intent?) {
-        if (intent == null || !intent.hasExtra(EXTRA_OPEN_TASK_ID)) return
+        if (intent == null || intent.action != ACTION_OPEN_TASK || !intent.hasExtra(EXTRA_OPEN_TASK_ID)) return
         val taskId = intent.getLongExtra(EXTRA_OPEN_TASK_ID, -1L)
         intent.removeExtra(EXTRA_OPEN_TASK_ID)
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
@@ -565,6 +575,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_TASK_ID = "open_task_id"
+        private const val STATE_PENDING_OPEN_TASK_ID = "pending_open_task_id"
 
         /**
          * 他の`MainActivity`宛の`PendingIntent`(位置情報追跡・アップデート通知等。actionなし)と
@@ -967,8 +978,13 @@ fun TaskScreen(
         deletingTask = null
         viewingTask = request.task
         viewingTaskKey = request
-        drawerState.snapTo(DrawerValue.Closed)
-        onOpenTaskRequestHandled()
+        // snapToの途中でキャンセルされても要求が消費されず残り続ける(画面復帰時に再度開く)ことがないよう、
+        // 消費の通知はfinallyで必ず行う。
+        try {
+            drawerState.snapTo(DrawerValue.Closed)
+        } finally {
+            onOpenTaskRequestHandled()
+        }
     }
 
     viewingTask?.let { task ->
