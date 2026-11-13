@@ -16,12 +16,12 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
-import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
@@ -153,7 +153,8 @@ class TaskWidget : GlanceAppWidget() {
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                                    .clickable(actionStartActivity<MainActivity>())
+                                    // タップでアプリを開き、そのタスクの詳細ダイアログを表示する。
+                                    .clickable(actionStartActivity(MainActivity.openTaskIntent(context, task.id)))
                             ) {
                                 Text(text = task.title, style = textStyle, modifier = GlanceModifier.fillMaxWidth())
                                 val url = task.url?.takeIf { it.isNotBlank() }
