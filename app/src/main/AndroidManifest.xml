@@ -54,6 +54,16 @@
             </intent-filter>
         </activity>
 
+        <!-- ウィジェットの「＋ 追加」から起動するタイトル入力ダイアログ。taskAffinityを空にして
+             アプリ本体のタスクと分離し、アプリがバックグラウンドにあってもホーム画面の上に表示する。 -->
+        <activity
+            android:name=".widget.QuickAddTaskActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:windowSoftInputMode="stateAlwaysVisible|adjustResize"
+            android:theme="@style/Theme.Oboetotte.SnoozeDialog" />
+
         <activity
             android:name=".widget.TaskWidgetConfigureActivity"
             android:exported="true"
