@@ -16,14 +16,12 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
-import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
-import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
@@ -32,12 +30,10 @@ import androidx.glance.currentState
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
-import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.padding
 import androidx.glance.state.PreferencesGlanceStateDefinition
-import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextDecoration
 import androidx.glance.text.TextStyle
@@ -151,18 +147,6 @@ class TaskWidget : GlanceAppWidget() {
                         modifier = GlanceModifier
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                             .clickable(actionRunCallback<RefreshTaskWidgetAction>())
-                    )
-                    // 右端に寄せるための伸縮スペーサー。
-                    Spacer(modifier = GlanceModifier.defaultWeight())
-                    Text(
-                        text = ADD_TASK_LABEL,
-                        style = TextStyle(color = ColorProvider(Color.White), fontWeight = FontWeight.Bold),
-                        modifier = GlanceModifier
-                            // 白文字を載せるため、背景色設定・ダークテーマに関わらず濃い方の固定色を使う。
-                            .background(Purple40)
-                            .cornerRadius(12.dp)
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                            .clickable(actionStartActivity<QuickAddTaskActivity>())
                     )
                 }
                 if (filteredTasks.isEmpty()) {
@@ -298,9 +282,6 @@ private fun formatLastUpdatedAt(millis: Long): String {
 
 /** [OpenTaskUrlAction]に開くURLを渡すための[ActionParameters.Key]。 */
 private val URL_PARAM_KEY = ActionParameters.Key<String>("task_url")
-
-/** ウィジェット上部の、タスク追加ダイアログ([QuickAddTaskActivity])を開くボタンのラベル。 */
-private const val ADD_TASK_LABEL = "＋ 追加"
 
 /** タスクにURLがある場合、URL文字列の代わりに表示するラベル。 */
 private const val LINK_LABEL = "リンク"
