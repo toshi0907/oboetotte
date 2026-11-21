@@ -98,6 +98,7 @@ object BackupManager {
                             put("repeatRule", task.repeatRule ?: JSONObject.NULL)
                             put("repeatDaysOfWeek", task.repeatDaysOfWeek ?: JSONObject.NULL)
                             put("repeatIntervalDays", task.repeatIntervalDays ?: JSONObject.NULL)
+                            put("repeatDates", task.repeatDates ?: JSONObject.NULL)
                             put("locationName", task.locationName ?: JSONObject.NULL)
                             put("latitude", task.latitude ?: JSONObject.NULL)
                             put("longitude", task.longitude ?: JSONObject.NULL)
@@ -314,6 +315,15 @@ object BackupManager {
                 repeatIntervalDays = (if (obj.isNull("repeatIntervalDays")) null else obj.getLong("repeatIntervalDays"))
                     ?.takeIf { it in RepeatRule.INTERVAL_DAYS_RANGE }
                     ?.toInt(),
+                // キーの無い旧形式・不定期以外のルールはnull。解釈できない日付は捨て、上限件数までに正規化する
+                // (有効な日付が無ければnull)。
+                repeatDates = if (obj.isNull("repeatDates") || obj.optString("repeatRule") != RepeatRule.CUSTOM_DATES) {
+                    null
+                } else {
+                    RepeatRule.formatDates(
+                        RepeatRule.parseDates(obj.getString("repeatDates")).take(RepeatRule.MAX_CUSTOM_DATES)
+                    )
+                },
                 locationName = if (obj.isNull("locationName")) null else obj.getString("locationName"),
                 latitude = if (obj.isNull("latitude")) null else obj.getDouble("latitude"),
                 longitude = if (obj.isNull("longitude")) null else obj.getDouble("longitude"),

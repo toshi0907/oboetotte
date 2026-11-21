@@ -75,7 +75,8 @@ private val SUPPORTED_REPEAT_RULES = setOf(
     RepeatRule.DAILY,
     RepeatRule.WEEKLY,
     RepeatRule.WEEKLY_DAYS,
-    RepeatRule.MONTHLY
+    RepeatRule.MONTHLY,
+    RepeatRule.CUSTOM_DATES
 )
 
 /**
@@ -106,11 +107,12 @@ fun buildCalendarEntries(
         if (rule !in SUPPORTED_REPEAT_RULES) continue
         val daysOfWeek = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek)
         if (rule == RepeatRule.WEEKLY_DAYS && daysOfWeek.isEmpty()) continue
+        val customDates = RepeatRule.parseDates(task.repeatDates)
 
         var current = dueAt
         var steps = 0
         while (steps++ < MAX_PROJECTION_STEPS) {
-            val next = RepeatRule.nextDueAt(current, rule, daysOfWeek)
+            val next = RepeatRule.nextDueAt(current, rule, daysOfWeek, customDates)
             if (next <= current || next >= limit) break
             current = next
             // 期限切れのまま残っている繰り返しタスクの場合、過去の日付にも次回以降の分が並んでしまうため、

@@ -50,6 +50,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 
 object RepeatRule {
@@ -60,9 +61,62 @@ object RepeatRule {
     // 期限ではなく完了日を起点に、Task.repeatIntervalDays日後を次回の期限にする。次回の期限は
     // 完了するまで決まらないため、カレンダー表示での将来の予定の計算(nextDueAt)には含めない。
     const val AFTER_COMPLETION = "AFTER_COMPLETION"
+    // 不定期: Task.repeatDatesに保存した日付(複数)を順に期限にする。時刻は期限(dueAt)の時刻を共通で使う。
+    // 最後の日付を完了したら次回分は作らずシリーズを終える。
+    const val CUSTOM_DATES = "CUSTOM_DATES"
 
     /** [AFTER_COMPLETION]の間隔として受け付ける日数の範囲。 */
     val INTERVAL_DAYS_RANGE = 1..999
+
+    /** [CUSTOM_DATES]で選択できる日付の最大件数。 */
+    const val MAX_CUSTOM_DATES = 100
+
+    /**
+     * [CUSTOM_DATES]の日付(ISO-8601の`yyyy-MM-dd`をカンマ区切り)を、昇順・重複なしのリストにする。
+     * バックアップの破損等で解釈できない値は捨てる。
+     */
+    fun parseDates(value: String?): List<LocalDate> {
+        if (value.isNullOrBlank()) return emptyList()
+        return value.split(",")
+            .mapNotNull { runCatching { LocalDate.parse(it.trim()) }.getOrNull() }
+            .distinct()
+            .sorted()
+    }
+
+    /** [parseDates]の逆変換。空ならnull。 */
+    fun formatDates(dates: Collection<LocalDate>): String? =
+        dates.distinct().sorted().joinToString(",").ifEmpty { null }
+
+    /**
+     * [CUSTOM_DATES]の次回の期限。[dates]のうち[current]の日付(ローカルタイムゾーン)より後で最も近い日に、
+     * [current]の時刻を組み合わせる。該当する日付が無ければ(最後の日付だった場合)null。
+     */
+    fun nextDueAtCustomDates(
+        current: Long,
+        dates: List<LocalDate>,
+        zone: ZoneId = ZoneId.systemDefault()
+    ): Long? {
+        val zoned = Instant.ofEpochMilli(current).atZone(zone)
+        val currentDate = zoned.toLocalDate()
+        val nextDate = dates.filter { it > currentDate }.minOrNull() ?: return null
+        return nextDate.atTime(zoned.toLocalTime()).atZone(zone).toInstant().toEpochMilli()
+    }
+
+    /**
+     * [CUSTOM_DATES]を保存する際の正規化。[dates]から[today]より前の日付を除き(上限[MAX_CUSTOM_DATES]件)、
+     * 期限を残った最も早い日付+[dueAt]の時刻に合わせる。有効な日付が残らない場合はnull。
+     */
+    fun alignCustomDates(
+        dueAt: Long,
+        dates: Collection<LocalDate>,
+        today: LocalDate,
+        zone: ZoneId = ZoneId.systemDefault()
+    ): Pair<Long, List<LocalDate>>? {
+        val valid = dates.filter { it >= today }.distinct().sorted().take(MAX_CUSTOM_DATES)
+        val first = valid.firstOrNull() ?: return null
+        val time = Instant.ofEpochMilli(dueAt).atZone(zone).toLocalTime()
+        return first.atTime(time).atZone(zone).toInstant().toEpochMilli() to valid
+    }
 
     // 曜日はISO-8601に合わせて月曜=1〜日曜=7の数値をカンマ区切りで保存する。
     // バックアップの破損等で範囲外の値が混ざっていても、呼び出し側の`isNotEmpty()`チェックが
@@ -78,9 +132,16 @@ object RepeatRule {
      * [current]の次回の期限(ローカルタイムゾーン基準)。繰り返しタスクを完了した際の次回分生成
      * ([TaskCompletion.complete])と、カレンダー表示での将来の予定の計算の両方から使い、
      * 両者の日付が必ず一致するようにしている。[WEEKLY_DAYS]は[daysOfWeek]が空でないこと、
+     * [CUSTOM_DATES]は[customDates]の次の日付(残っていなければ[current]をそのまま返す)、
      * それ以外の未知のルールは呼び出し側で除外しておくこと(いずれも[current]をそのまま返す)。
      */
-    fun nextDueAt(current: Long, rule: String, daysOfWeek: Set<Int>): Long {
+    fun nextDueAt(
+        current: Long,
+        rule: String,
+        daysOfWeek: Set<Int>,
+        customDates: List<LocalDate> = emptyList()
+    ): Long {
+        if (rule == CUSTOM_DATES) return nextDueAtCustomDates(current, customDates) ?: current
         val zoned = Instant.ofEpochMilli(current).atZone(ZoneId.systemDefault())
         val next = when (rule) {
             DAILY -> zoned.plusDays(1)
@@ -125,6 +186,7 @@ data class TaskEdits(
     val repeatRule: String?,
     val repeatDaysOfWeek: String?,
     val repeatIntervalDays: Int?,
+    val repeatDates: String?,
     val locationName: String?,
     val latitude: Double?,
     val longitude: Double?,
@@ -365,6 +427,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 // 間隔は「完了後に繰り返す」の場合のみ保持し、他のルールへ切り替えたら破棄する。
                 repeatIntervalDays = edits.repeatIntervalDays
                     .takeIf { edits.repeatRule == RepeatRule.AFTER_COMPLETION },
+                // 不定期の日付も同様に、不定期以外へ切り替えたら破棄する。
+                repeatDates = edits.repeatDates.takeIf { edits.repeatRule == RepeatRule.CUSTOM_DATES },
                 locationName = edits.locationName,
                 latitude = edits.latitude,
                 longitude = edits.longitude,
