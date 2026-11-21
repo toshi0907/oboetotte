@@ -3026,9 +3026,17 @@ fun EditTaskDialog(
     var repeatIntervalInput by remember(task.id) {
         mutableStateOf(task.repeatIntervalDays?.toString() ?: "")
     }
-    // 不定期の日付。過去の日付は保存時に削除する仕様のため、開いた時点で既に過ぎた分は表示しない。
+    // 不定期: 開いた時点の期限の日付。期限切れでも未完了の今回分が黙って消えないよう、過去でもこの日付は残す。
+    val originalDueDate = remember(task.id) {
+        task.dueAt?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() }
+    }
+    // 不定期の日付。過去の日付は保存時に削除する仕様のため、開いた時点で既に過ぎた分は表示しない
+    // (今の期限の日付を除く)。
     var customDates by remember(task.id) {
-        mutableStateOf(RepeatRule.parseDates(task.repeatDates).filter { it >= LocalDate.now() }.toSet())
+        val today = LocalDate.now()
+        mutableStateOf(
+            RepeatRule.parseDates(task.repeatDates).filter { it >= today || it == originalDueDate }.toSet()
+        )
     }
     var autoSnoozeMinutes by remember(task.id) { mutableStateOf(task.autoSnoozeMinutes) }
     var notifyOnlyMode by remember(task.id) { mutableStateOf(task.notifyOnlyMode) }
@@ -3224,7 +3232,8 @@ fun EditTaskDialog(
                     CustomDatesPicker(
                         selected = customDates,
                         today = LocalDate.now(),
-                        onSelectedChange = { customDates = it }
+                        onSelectedChange = { customDates = it },
+                        keptPastDate = originalDueDate
                     )
                     if (customDates.isEmpty()) {
                         Text(
@@ -3663,7 +3672,10 @@ fun EditTaskDialog(
                     // 日付が変わって有効な日付が無くなった場合は保存しない。
                     val customAligned = if (repeatRule == RepeatRule.CUSTOM_DATES) {
                         val currentDueAt = dueAt ?: return@TextButton
-                        RepeatRule.alignCustomDates(currentDueAt, customDates, LocalDate.now())
+                        val today = LocalDate.now()
+                        // 今の期限の日付は過去でも残す(それより前の過去日は削除)。
+                        val keepFrom = originalDueDate?.takeIf { it < today && it in customDates } ?: today
+                        RepeatRule.alignCustomDates(currentDueAt, customDates, keepFrom)
                             ?: return@TextButton
                     } else {
                         null

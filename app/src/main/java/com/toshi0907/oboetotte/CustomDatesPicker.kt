@@ -40,16 +40,19 @@ internal fun formatShortDateWithDay(date: LocalDate): String =
  * 繰り返し「不定期」([RepeatRule.CUSTOM_DATES])の日付を複数選択する月カレンダー。Material3の
  * DatePickerは単一日・期間の選択にしか対応しないため自作している。[today]より前の日付は選択できず、
  * [RepeatRule.MAX_CUSTOM_DATES]件に達したら未選択の日付は追加できない(選択済みの解除は可能)。
+ * [keptPastDate](編集前の期限の日付)だけは過去でも選択・解除できる(期限切れの今回分を残すため)。
  */
 @Composable
 fun CustomDatesPicker(
     selected: Set<LocalDate>,
     today: LocalDate,
     onSelectedChange: (Set<LocalDate>) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    keptPastDate: LocalDate? = null
 ) {
+    val earliestMonth = YearMonth.from(keptPastDate?.takeIf { it < today } ?: today)
     var displayedMonth by remember {
-        mutableStateOf(YearMonth.from(selected.filter { it >= today }.minOrNull() ?: today))
+        mutableStateOf(YearMonth.from(selected.minOrNull() ?: today).coerceAtLeast(earliestMonth))
     }
     val limitReached = selected.size >= RepeatRule.MAX_CUSTOM_DATES
 
@@ -60,8 +63,8 @@ fun CustomDatesPicker(
         ) {
             TextButton(
                 onClick = { displayedMonth = displayedMonth.minusMonths(1) },
-                // 過去の日付は選択できないため、今月より前には戻らない。
-                enabled = displayedMonth > YearMonth.from(today)
+                // 過去の日付は選択できないため、今月(期限切れの今回分があればその月)より前には戻らない。
+                enabled = displayedMonth > earliestMonth
             ) { Text("‹") }
             Text(
                 text = "${displayedMonth.year}年${displayedMonth.monthValue}月",
@@ -100,7 +103,7 @@ fun CustomDatesPicker(
                         if (dayOfMonth in 1..displayedMonth.lengthOfMonth()) {
                             val date = displayedMonth.atDay(dayOfMonth)
                             val isSelected = date in selected
-                            val enabled = date >= today && (isSelected || !limitReached)
+                            val enabled = (date >= today || date == keptPastDate) && (isSelected || !limitReached)
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
