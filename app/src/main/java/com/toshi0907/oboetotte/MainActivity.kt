@@ -3674,8 +3674,10 @@ fun EditTaskDialog(
                         val currentDueAt = dueAt ?: return@TextButton
                         val today = LocalDate.now()
                         // 今の期限の日付は過去でも残す(それより前の過去日は削除)。
-                        val keepFrom = originalDueDate?.takeIf { it < today && it in customDates } ?: today
-                        RepeatRule.alignCustomDates(currentDueAt, customDates, keepFrom)
+                        // ダイアログを開いたまま日付が変わった場合に、編集前の期限の日付以外の過去日が残らないよう先に絞り込む。
+                        val keptDates = customDates.filter { it >= today || it == originalDueDate }
+                        val keepFrom = originalDueDate?.takeIf { it < today && it in keptDates } ?: today
+                        RepeatRule.alignCustomDates(currentDueAt, keptDates, keepFrom)
                             ?: return@TextButton
                     } else {
                         null
