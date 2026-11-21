@@ -681,6 +681,17 @@ internal fun repeatRuleLabel(task: Task): String? {
         }
         RepeatRule.MONTHLY -> "毎月"
         RepeatRule.AFTER_COMPLETION -> "完了から${task.repeatIntervalDays ?: "?"}日後"
+        RepeatRule.CUSTOM_DATES -> {
+            // 現在の期限より後に残っている日付(今回分を除く)を表示する。
+            val dueDate = task.dueAt?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() }
+            val rest = RepeatRule.parseDates(task.repeatDates).filter { dueDate == null || it > dueDate }
+            val next = rest.firstOrNull()
+            when {
+                next == null -> "不定期(最終回)"
+                rest.size == 1 -> "不定期(次: ${formatShortDateWithDay(next)})"
+                else -> "不定期(次: ${formatShortDateWithDay(next)} ほか${rest.size - 1}件)"
+            }
+        }
         else -> rule
     }
 }
@@ -691,7 +702,8 @@ private val REPEAT_RULE_OPTIONS = listOf(
     RepeatRule.WEEKLY to "毎週",
     RepeatRule.WEEKLY_DAYS to "毎週(曜日)",
     RepeatRule.MONTHLY to "毎月",
-    RepeatRule.AFTER_COMPLETION to "完了後"
+    RepeatRule.AFTER_COMPLETION to "完了後",
+    RepeatRule.CUSTOM_DATES to "不定期"
 )
 
 /** 「完了後に繰り返す」の日数入力を解釈する。範囲外・未入力ならnull。 */
@@ -3014,6 +3026,10 @@ fun EditTaskDialog(
     var repeatIntervalInput by remember(task.id) {
         mutableStateOf(task.repeatIntervalDays?.toString() ?: "")
     }
+    // 不定期の日付。過去の日付は保存時に削除する仕様のため、開いた時点で既に過ぎた分は表示しない。
+    var customDates by remember(task.id) {
+        mutableStateOf(RepeatRule.parseDates(task.repeatDates).filter { it >= LocalDate.now() }.toSet())
+    }
     var autoSnoozeMinutes by remember(task.id) { mutableStateOf(task.autoSnoozeMinutes) }
     var notifyOnlyMode by remember(task.id) { mutableStateOf(task.notifyOnlyMode) }
     var vibrationPatternId by remember(task.id) { mutableStateOf(task.vibrationPatternId) }
@@ -3199,6 +3215,33 @@ fun EditTaskDialog(
                     if (dueAt == null) {
                         Text(
                             text = "期限が未設定の場合、完了しても次回分は作成されません",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (repeatRule == RepeatRule.CUSTOM_DATES) {
+                    CustomDatesPicker(
+                        selected = customDates,
+                        today = LocalDate.now(),
+                        onSelectedChange = { customDates = it }
+                    )
+                    if (customDates.isEmpty()) {
+                        Text(
+                            text = "日付を1つ以上選択してください",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    if (dueAt == null) {
+                        Text(
+                            text = "不定期では期限の時刻を使うため、期限を設定してください",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        Text(
+                            text = "期限の日付は選択した最も早い日に合わせて保存され、時刻は期限の時刻を使います",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -3602,6 +3645,7 @@ fun EditTaskDialog(
             val repeatValid = when (repeatRule) {
                 RepeatRule.WEEKLY_DAYS -> selectedDays.isNotEmpty()
                 RepeatRule.AFTER_COMPLETION -> parseRepeatIntervalDays(repeatIntervalInput) != null
+                RepeatRule.CUSTOM_DATES -> dueAt != null && customDates.isNotEmpty()
                 else -> true
             }
             val locationValid = resolvedLocation == null || notifyOnArrival || notifyOnDeparture
@@ -3615,13 +3659,22 @@ fun EditTaskDialog(
                     } else {
                         null
                     }
+                    // 不定期は過去の日付を除き、期限を最も早い日付+期限の時刻に合わせる。保存ボタンを押すまでに
+                    // 日付が変わって有効な日付が無くなった場合は保存しない。
+                    val customAligned = if (repeatRule == RepeatRule.CUSTOM_DATES) {
+                        val currentDueAt = dueAt ?: return@TextButton
+                        RepeatRule.alignCustomDates(currentDueAt, customDates, LocalDate.now())
+                            ?: return@TextButton
+                    } else {
+                        null
+                    }
                     val location = resolvedLocation
                     onConfirm(
                         task,
                         TaskEdits(
                             title = title,
                             listId = listId,
-                            dueAt = dueAt,
+                            dueAt = customAligned?.first ?: dueAt,
                             repeatRule = repeatRule,
                             repeatDaysOfWeek = daysOfWeek,
                             repeatIntervalDays = if (repeatRule == RepeatRule.AFTER_COMPLETION) {
@@ -3629,6 +3682,7 @@ fun EditTaskDialog(
                             } else {
                                 null
                             },
+                            repeatDates = customAligned?.let { RepeatRule.formatDates(it.second) },
                             locationName = location?.name,
                             latitude = location?.latitude,
                             longitude = location?.longitude,

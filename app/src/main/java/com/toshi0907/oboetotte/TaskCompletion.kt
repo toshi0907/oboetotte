@@ -10,6 +10,8 @@ import com.toshi0907.oboetotte.notification.ReminderScheduler
 import com.toshi0907.oboetotte.oplog.OperationLogger
 import com.toshi0907.oboetotte.oplog.logLabel
 import com.toshi0907.oboetotte.widget.refreshTaskWidget
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * タスクを完了にする処理の実体。アプリ内(TaskViewModel)と通知の「完了」アクション
@@ -50,8 +52,11 @@ object TaskCompletion {
         val dueAt = task.dueAt
         val daysOfWeek = RepeatRule.parseDaysOfWeek(task.repeatDaysOfWeek)
         val intervalDays = task.repeatIntervalDays?.takeIf { it in RepeatRule.INTERVAL_DAYS_RANGE }
+        val customDates = RepeatRule.parseDates(task.repeatDates)
         val computedNextDueAt = when {
             rule == null || dueAt == null -> null
+            // 最後の日付だった場合はnullになり、次回分は作らずシリーズを終える。
+            rule == RepeatRule.CUSTOM_DATES -> RepeatRule.nextDueAtCustomDates(dueAt, customDates)
             rule == RepeatRule.AFTER_COMPLETION ->
                 intervalDays?.let { RepeatRule.nextDueAtAfterCompletion(dueAt, completedAt, it) }
             rule == RepeatRule.WEEKLY_DAYS && daysOfWeek.isEmpty() -> null
@@ -68,6 +73,13 @@ object TaskCompletion {
                 dueAt = computedNextDueAt,
                 // チェックリストの項目は引き継ぎ、チェックはすべて外す。
                 checklist = Checklist.resetChecks(latestChecklist),
+                // 不定期の日付は、次回の期限より前(消化済み)の分を除いて引き継ぐ。
+                repeatDates = if (rule == RepeatRule.CUSTOM_DATES) {
+                    val nextDate = Instant.ofEpochMilli(computedNextDueAt).atZone(ZoneId.systemDefault()).toLocalDate()
+                    RepeatRule.formatDates(customDates.filter { it >= nextDate })
+                } else {
+                    task.repeatDates
+                },
                 seriesId = task.attachmentGroupId()
             )
             val newId = taskDao.insert(nextTask)

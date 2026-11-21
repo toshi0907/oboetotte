@@ -17,6 +17,9 @@ data class Task(
     // repeatRuleがRepeatRule.AFTER_COMPLETIONの場合の間隔(日数、1以上)。完了日からこの日数後を
     // 次回の期限にする。それ以外のルールではnull(詳細はdocs/architecture/repeat-tasks.md)。
     val repeatIntervalDays: Int? = null,
+    // repeatRuleがRepeatRule.CUSTOM_DATES(不定期)の場合の日付(ISO-8601の`yyyy-MM-dd`をカンマ区切り)。
+    // それ以外のルールではnull(詳細はdocs/architecture/repeat-tasks.md)。
+    val repeatDates: String? = null,
     val locationName: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
