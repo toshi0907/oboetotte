@@ -6,6 +6,7 @@ import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
 import com.toshi0907.oboetotte.TaskCompletion
 import com.toshi0907.oboetotte.data.AppDatabase
+import com.toshi0907.oboetotte.data.Task
 import com.toshi0907.oboetotte.oplog.OperationLogSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,12 +42,22 @@ class CompleteReceiver : BroadcastReceiver() {
                 // (次回分は別IDのタスクのため通常は影響しないが、念のため)期限が変わっていれば
                 // 完了処理を行わない。位置情報通知([ReminderScheduler.EXTRA_DUE_AT]無し)は従来通り
                 // タスクが存在すれば完了扱いとする。
-                if (task != null && (!hasNotifiedDueAt || task.dueAt == notifiedDueAt)) {
+                if (task != null && isCompletableFromNotification(task, hasNotifiedDueAt, notifiedDueAt)) {
                     TaskCompletion.complete(context, task, OperationLogSource.NOTIFICATION)
                 }
             } finally {
                 pendingResult.finish()
             }
         }
+    }
+
+    companion object {
+        /**
+         * 通知の「完了」ボタンからタスクを完了させてよいか。期限日時通知([hasNotifiedDueAt]=true)は
+         * 通知表示時点の期限とタスクの現在の期限が一致する場合のみ、位置情報通知はタスクが存在すれば可。
+         * [CompleteConfirmActivity](期日が翌日以降のタスクの確認ダイアログ)とも共通で使う。
+         */
+        fun isCompletableFromNotification(task: Task?, hasNotifiedDueAt: Boolean, notifiedDueAt: Long): Boolean =
+            task != null && (!hasNotifiedDueAt || task.dueAt == notifiedDueAt)
     }
 }

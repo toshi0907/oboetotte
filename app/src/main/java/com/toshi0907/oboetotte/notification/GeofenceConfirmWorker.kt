@@ -48,6 +48,7 @@ class GeofenceConfirmWorker(
             taskId,
             task.title,
             task.url,
+            task.dueAt,
             vibrationPattern
         )
         if (posted) {

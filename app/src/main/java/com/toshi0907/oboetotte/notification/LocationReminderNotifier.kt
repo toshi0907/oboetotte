@@ -23,6 +23,7 @@ object LocationReminderNotifier {
     private const val CHANNEL_NAME = "位置リマインダー"
 
     /**
+     * @param dueAt タスクの期日。翌日以降なら「完了」ボタンを確認ダイアログ([CompleteConfirmActivity])経由にする。
      * @param vibrationPattern タスクに設定されたバイブレーションパターン。非nullならバイブ無効の
      * 専用チャンネルに投稿し、[VibrationPatternPlayer]でパターンどおりに振動させる。
      * @return 実際に[NotificationManagerCompat.notify]を呼んだかどうか(権限が無い、通知が無効化されている、
@@ -33,6 +34,7 @@ object LocationReminderNotifier {
         taskId: Long,
         title: String,
         url: String?,
+        dueAt: Long?,
         vibrationPattern: VibrationPattern? = null
     ): Boolean {
         val notificationManager =
@@ -75,7 +77,7 @@ object LocationReminderNotifier {
             .addAction(
                 R.drawable.ic_notification,
                 "完了",
-                ReminderScheduler.locationCompletePendingIntent(context, taskId)
+                ReminderScheduler.locationCompletePendingIntent(context, taskId, dueAt)
             )
         if (!url.isNullOrBlank()) {
             builder.addAction(

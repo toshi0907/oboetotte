@@ -786,6 +786,16 @@ fun TaskScreen(
         input = ""
     }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
+    // 期日が翌日以降のタスクを完了しようとした際の確認ダイアログの対象。一覧・カレンダー・詳細・編集
+    // ダイアログ(サブタスク表示を含む)のチェックボックスはすべてtoggleDoneWithConfirmationを経由する。
+    var confirmingCompleteTask by remember { mutableStateOf<Task?>(null) }
+    val toggleDoneWithConfirmation: (Task) -> Unit = { task ->
+        if (!task.isDone && isDueAfterToday(task.dueAt)) {
+            confirmingCompleteTask = task
+        } else {
+            onToggleDone(task)
+        }
+    }
     // 一覧表示とカレンダー表示の切り替え(ドロワーの「表示」セクションで切り替える)。
     var showCalendar by rememberSaveable { mutableStateOf(false) }
     // リスト選択・表示フィルタ・表示切り替え・設定への遷移は、左上の☰ボタンで開くドロワーにまとめる。
@@ -972,7 +982,7 @@ fun TaskScreen(
                             allTasks = allTasks,
                             depth = 0,
                             nowMillis = nowMillis,
-                            onToggleDone = onToggleDone,
+                            onToggleDone = toggleDoneWithConfirmation,
                             onViewTask = { viewingTask = it },
                             onDeleteTask = { deletingTask = it }
                         )
@@ -988,6 +998,7 @@ fun TaskScreen(
         val request = openTaskRequest ?: return@LaunchedEffect
         addedTask = null
         deletingTask = null
+        confirmingCompleteTask = null
         viewingTask = request.task
         viewingTaskKey = request
         // snapToの途中でキャンセルされても要求が消費されず残り続ける(画面復帰時に再度開く)ことがないよう、
@@ -1009,7 +1020,7 @@ fun TaskScreen(
                 vibrationPatterns = vibrationPatterns,
                 allAttachments = allAttachments,
                 operationLogsForTaskGroup = operationLogsForTaskGroup,
-                onToggleDone = onToggleDone,
+                onToggleDone = toggleDoneWithConfirmation,
                 onUpdateTask = onUpdateTask,
                 onAddSubtask = onAddSubtask,
                 onToggleChecklistItem = onToggleChecklistItem,
@@ -1034,7 +1045,7 @@ fun TaskScreen(
                 addedTask = null
             },
             onAddSubtask = onAddSubtask,
-            onToggleDone = onToggleDone,
+            onToggleDone = toggleDoneWithConfirmation,
             onAddAttachment = onAddAttachment,
             onDeleteAttachment = onDeleteAttachment,
             onDismiss = { addedTask = null }
@@ -1049,6 +1060,29 @@ fun TaskScreen(
                 deletingTask = null
             },
             onDismiss = { deletingTask = null }
+        )
+    }
+
+    confirmingCompleteTask?.let { task ->
+        AlertDialog(
+            onDismissRequest = { confirmingCompleteTask = null },
+            title = { Text("タスクを完了") },
+            text = {
+                Text("「${task.title}」\n" + futureDueConfirmationMessage(task.dueAt ?: 0L))
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onToggleDone(task)
+                    confirmingCompleteTask = null
+                }) {
+                    Text("完了にする")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingCompleteTask = null }) {
+                    Text("キャンセル")
+                }
+            }
         )
     }
 }

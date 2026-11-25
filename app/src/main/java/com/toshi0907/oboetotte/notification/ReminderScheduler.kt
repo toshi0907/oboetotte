@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import com.toshi0907.oboetotte.data.Task
+import com.toshi0907.oboetotte.isDueAfterToday
 
 object ReminderScheduler {
     const val EXTRA_TASK_ID = "task_id"
@@ -207,6 +208,9 @@ object ReminderScheduler {
      * 通知に埋め込まれたPendingIntentの中身まで上書きしてしまう)。
      */
     fun completePendingIntent(context: Context, taskId: Long, dueAt: Long): PendingIntent {
+        if (isDueAfterToday(dueAt)) {
+            return confirmCompletePendingIntent(context, taskId, ACTION_COMPLETE_DUE, dueAt)
+        }
         val intent = Intent(context, CompleteReceiver::class.java).apply {
             action = ACTION_COMPLETE_DUE
             putExtra(EXTRA_TASK_ID, taskId)
@@ -230,12 +234,44 @@ object ReminderScheduler {
      * 採らない。この方式は同じ`taskId`同士の衝突は避けられても、`taskIdA == taskIdB * 10 + N`と
      * なる別タスク同士のリクエストコードが偶然一致するケースを防げないため)。
      */
-    fun locationCompletePendingIntent(context: Context, taskId: Long): PendingIntent {
+    fun locationCompletePendingIntent(context: Context, taskId: Long, taskDueAt: Long?): PendingIntent {
+        if (isDueAfterToday(taskDueAt)) {
+            return confirmCompletePendingIntent(context, taskId, ACTION_COMPLETE_LOCATION, null)
+        }
         val intent = Intent(context, CompleteReceiver::class.java).apply {
             action = ACTION_COMPLETE_LOCATION
             putExtra(EXTRA_TASK_ID, taskId)
         }
         return PendingIntent.getBroadcast(
+            context,
+            taskId.toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * 期日が翌日以降のタスクの通知の「完了」ボタン用。[CompleteReceiver]で即完了させる代わりに
+     * [CompleteConfirmActivity]で確認ダイアログを出す。通知を組み立てた時点で判定するが、日付は
+     * 進む一方のため「組み立て時点で翌日以降でない」ものが後から翌日以降になることは無い(逆に
+     * 組み立て時点で翌日以降でも、押された時点で今日以前になっていれば[CompleteConfirmActivity]が
+     * 確認せずに完了させる)。[dueAt]は期限日時通知の場合のみ渡す([EXTRA_DUE_AT]の扱いは
+     * [CompleteReceiver]と同じ)。`getActivity`の`PendingIntent`は`getBroadcast`のものとは区別され、
+     * さらに[intentAction]で期限日時通知側・位置情報通知側を分けるため、リクエストコードは`taskId.toInt()`のままでよい。
+     */
+    private fun confirmCompletePendingIntent(
+        context: Context,
+        taskId: Long,
+        intentAction: String,
+        dueAt: Long?
+    ): PendingIntent {
+        val intent = Intent(context, CompleteConfirmActivity::class.java).apply {
+            action = intentAction
+            putExtra(EXTRA_TASK_ID, taskId)
+            if (dueAt != null) putExtra(EXTRA_DUE_AT, dueAt)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        return PendingIntent.getActivity(
             context,
             taskId.toInt(),
             intent,
