@@ -22,7 +22,7 @@ internal fun isDueAfterToday(
 }
 
 /** 確認ダイアログの本文。アプリ内・通知経由で文言を揃える。 */
-internal fun futureDueConfirmationMessage(dueAt: Long): String {
-    val dueDate: LocalDate = Instant.ofEpochMilli(dueAt).atZone(ZoneId.systemDefault()).toLocalDate()
+internal fun futureDueConfirmationMessage(dueAt: Long, zone: ZoneId = ZoneId.systemDefault()): String {
+    val dueDate: LocalDate = Instant.ofEpochMilli(dueAt).atZone(zone).toLocalDate()
     return "期日が翌日以降(${dueDate.monthValue}月${dueDate.dayOfMonth}日)のタスクです。完了にしてよろしいですか？"
 }

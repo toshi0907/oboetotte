@@ -35,4 +35,10 @@ class FutureDueConfirmationTest {
     fun nextYear_isTrue() {
         assertTrue(isDueAfterToday(millis(LocalDateTime.of(2027, 1, 1, 9, 0)), now, zone))
     }
+
+    @Test
+    fun message_containsDueDate() {
+        val message = futureDueConfirmationMessage(millis(LocalDateTime.of(2026, 12, 3, 0, 30)), zone)
+        assertTrue(message.contains("12月3日"))
+    }
 }

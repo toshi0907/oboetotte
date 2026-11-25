@@ -788,10 +788,11 @@ fun TaskScreen(
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     // 期日が翌日以降のタスクを完了しようとした際の確認ダイアログの対象。一覧・カレンダー・詳細・編集
     // ダイアログ(サブタスク表示を含む)のチェックボックスはすべてtoggleDoneWithConfirmationを経由する。
-    var confirmingCompleteTask by remember { mutableStateOf<Task?>(null) }
+    // 画面回転等の再生成でダイアログが消えないよう、IDをrememberSaveableで保持してallTasksから引き当てる。
+    var confirmingCompleteTaskId by rememberSaveable { mutableStateOf<Long?>(null) }
     val toggleDoneWithConfirmation: (Task) -> Unit = { task ->
         if (!task.isDone && isDueAfterToday(task.dueAt)) {
-            confirmingCompleteTask = task
+            confirmingCompleteTaskId = task.id
         } else {
             onToggleDone(task)
         }
@@ -998,7 +999,7 @@ fun TaskScreen(
         val request = openTaskRequest ?: return@LaunchedEffect
         addedTask = null
         deletingTask = null
-        confirmingCompleteTask = null
+        confirmingCompleteTaskId = null
         viewingTask = request.task
         viewingTaskKey = request
         // snapToの途中でキャンセルされても要求が消費されず残り続ける(画面復帰時に再度開く)ことがないよう、
@@ -1063,9 +1064,10 @@ fun TaskScreen(
         )
     }
 
-    confirmingCompleteTask?.let { task ->
+    // 削除済み・完了済み(別経路で完了された)になった場合は確認ダイアログ自体を出さない。
+    confirmingCompleteTaskId?.let { id -> allTasks.find { it.id == id && !it.isDone } }?.let { task ->
         AlertDialog(
-            onDismissRequest = { confirmingCompleteTask = null },
+            onDismissRequest = { confirmingCompleteTaskId = null },
             title = { Text("タスクを完了") },
             text = {
                 Text("「${task.title}」\n" + futureDueConfirmationMessage(task.dueAt ?: 0L))
@@ -1073,13 +1075,13 @@ fun TaskScreen(
             confirmButton = {
                 TextButton(onClick = {
                     onToggleDone(task)
-                    confirmingCompleteTask = null
+                    confirmingCompleteTaskId = null
                 }) {
                     Text("完了にする")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmingCompleteTask = null }) {
+                TextButton(onClick = { confirmingCompleteTaskId = null }) {
                     Text("キャンセル")
                 }
             }

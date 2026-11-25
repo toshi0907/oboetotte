@@ -34,6 +34,9 @@ import kotlinx.coroutines.withContext
  */
 class CompleteConfirmActivity : ComponentActivity() {
     private var confirmingTask by mutableStateOf<Task?>(null)
+    private var hasNotifiedDueAt = false
+    private var notifiedDueAt = -1L
+    private var tappedTag = ReminderScheduler.NOTIFICATION_TAG_LOCATION
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,9 +46,9 @@ class CompleteConfirmActivity : ComponentActivity() {
             finish()
             return
         }
-        val hasNotifiedDueAt = intent.hasExtra(ReminderScheduler.EXTRA_DUE_AT)
-        val notifiedDueAt = intent.getLongExtra(ReminderScheduler.EXTRA_DUE_AT, -1L)
-        val tappedTag = if (hasNotifiedDueAt) {
+        hasNotifiedDueAt = intent.hasExtra(ReminderScheduler.EXTRA_DUE_AT)
+        notifiedDueAt = intent.getLongExtra(ReminderScheduler.EXTRA_DUE_AT, -1L)
+        tappedTag = if (hasNotifiedDueAt) {
             ReminderScheduler.NOTIFICATION_TAG_DUE
         } else {
             ReminderScheduler.NOTIFICATION_TAG_LOCATION
@@ -98,7 +101,16 @@ class CompleteConfirmActivity : ComponentActivity() {
             // 完了処理の途中で画面が破棄(回転等)されても、完了状態への遷移と繰り返しタスクの次回分生成が
             // 中途半端に終わらないようNonCancellableで最後まで実行してからfinishする。
             withContext(NonCancellable + Dispatchers.IO) {
-                TaskCompletion.complete(applicationContext, task, OperationLogSource.NOTIFICATION)
+                // ダイアログ表示中にアプリ側で編集された可能性があるため、完了直前にDBから読み直し、
+                // 期限の突き合わせもやり直す(繰り返しの次回分を古い期限・設定から作らないため)。
+                val latest = AppDatabase.getInstance(applicationContext).taskDao().getById(task.id)
+                if (latest != null &&
+                    CompleteReceiver.isCompletableFromNotification(latest, hasNotifiedDueAt, notifiedDueAt)
+                ) {
+                    TaskCompletion.complete(applicationContext, latest, OperationLogSource.NOTIFICATION)
+                } else {
+                    NotificationManagerCompat.from(applicationContext).cancel(tappedTag, task.id.toInt())
+                }
             }
             finish()
         }
