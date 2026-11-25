@@ -38,6 +38,13 @@
             android:theme="@style/Theme.Oboetotte.SnoozeDialog" />
 
         <activity
+            android:name=".notification.CompleteConfirmActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Oboetotte.SnoozeDialog" />
+
+        <activity
             android:name=".share.ShareReceiverActivity"
             android:exported="true"
             android:excludeFromRecents="true"
